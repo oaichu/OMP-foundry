@@ -1,6 +1,13 @@
 ---
+id: three-stage-plan
 name: three-stage-plan
-description: "Company /plan3: GLM drafts docs/planning/MASTER_PLAN_DRAFT.md, Grok writes PLAN_REVIEW.md, Sol locks docs/MASTER_PLAN.md via plan_commit. Use for /plan3, 3-stage-plan, or PLAN_CONFLICT."
+version: 1
+layer: L1
+domain: planning
+phases: planning
+roles: planner
+priority: 96
+description: "Foundry /plan3: draft → critique → human lock."
 ---
 
 # three-stage-plan

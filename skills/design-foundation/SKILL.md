@@ -1,6 +1,15 @@
 ---
+id: design-foundation
 name: design-foundation
-description: "Company /design after PLAN lock. Tokens, primitives, representative screens, real preview. Not a web-code audit and not Android/WinUI platform authority."
+version: 1
+layer: L1
+domain: design
+phases: design
+roles: designer
+priority: 88
+activate_when:
+  stacks: web, android, windows
+description: "Foundry /design after plan lock."
 ---
 
 # design-foundation

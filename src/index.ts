@@ -8,7 +8,7 @@ import { CONTEXT_POLICY, phasePrompt } from "./context-policy";
 import { requireDesignIfUi, requirePlan, requireProduct } from "./gates";
 import { denyToolCall, forceIsolatedTaskInput, type ToolInput } from "./permissions";
 import { deriveRelease, invalidateQa, refreshArtifactHashes } from "./release";
-import { resolveSkills, skillPackPrompt } from "./skills/resolver";
+import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
 import { consumeCap, grantCap, loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
 import { type CompanyState, defaultState } from "./types";
@@ -58,18 +58,19 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", async (_e, ctx) => {
 		const { state, broken } = safeState(ctx.cwd);
-		const skills = broken ? [] : resolveSkills(ctx.cwd, state);
+		const pack = broken ? [] : resolveSkillManifests(ctx.cwd, state);
 		return {
 			message: {
 				customType: CUSTOM,
 				content: broken
 					? `Foundry state corrupt: ${broken}`
-					: `${phasePrompt(state.phase)} ${statusOf(state)}. ${skillPackPrompt(skills, state.phase)}`,
+					: `${phasePrompt(state.phase)} ${statusOf(state)}.\n${skillPackPrompt(pack, state.phase)}`,
 				display: true,
-				details: { ...state, unlock_token: undefined, skills },
+				details: { ...state, unlock_token: undefined, skills: pack.map((s) => s.id) },
 			},
 		};
 	});
+
 
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "task") {

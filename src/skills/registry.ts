@@ -1,0 +1,92 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { LAYERS, PHASES, ROLES, type SkillLayer, type SkillManifest, type SkillPhase, type SkillRole } from "./manifest-schema";
+
+function csv(value: string | undefined): string[] {
+	if (!value) return [];
+	return value
+		.replace(/[\[\]]/g, "")
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+}
+
+function parseFrontmatter(text: string): { fields: Record<string, string>; body: string } {
+	const norm = text.replace(/\r\n/g, "\n");
+	const match = norm.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+	if (!match) return { fields: {}, body: norm };
+	const fields: Record<string, string> = {};
+	let key = "";
+	for (const line of match[1].split("\n")) {
+		const kv = line.match(/^([A-Za-z0-9_]+):\s*(.*)$/);
+		if (kv) {
+			key = kv[1];
+			fields[key] = kv[2];
+			continue;
+		}
+		const nested = line.match(/^\s+([A-Za-z0-9_]+):\s*(.*)$/);
+		if (nested && key) fields[`${key}.${nested[1]}`] = nested[2];
+	}
+	return { fields, body: match[2].trim() };
+}
+
+function walk(dir: string, acc: string[]): void {
+	let entries: string[] = [];
+	try {
+		entries = readdirSync(dir);
+	} catch {
+		return;
+	}
+	for (const name of entries) {
+		const full = join(dir, name);
+		let stat;
+		try {
+			stat = statSync(full);
+		} catch {
+			continue;
+		}
+		if (stat.isDirectory()) walk(full, acc);
+		else if (name === "SKILL.md") acc.push(full);
+	}
+}
+
+export function parseManifest(path: string, text: string): SkillManifest | null {
+	const { fields, body } = parseFrontmatter(text);
+	const id = fields.id || fields.name;
+	if (!id) return null;
+	const layer = (fields.layer || "L2") as SkillLayer;
+	if (!LAYERS.includes(layer)) return null;
+	const phases = csv(fields.phases).filter((p): p is SkillPhase => PHASES.includes(p as SkillPhase));
+	const roles = csv(fields.roles).filter((r): r is SkillRole => ROLES.includes(r as SkillRole));
+	return {
+		id,
+		version: Number(fields.version || 1) || 1,
+		description: (fields.description || "").replace(/^["']|["']$/g, ""),
+		layer,
+		domain: csv(fields.domain),
+		requires: csv(fields.requires),
+		conflicts: csv(fields.conflicts),
+		activate_when: {
+			dependencies: csv(fields["activate_when.dependencies"] || fields.dependencies),
+			files: csv(fields["activate_when.files"] || fields.files),
+			stacks: csv(fields["activate_when.stacks"] || fields.stacks),
+			languages: csv(fields["activate_when.languages"] || fields.languages),
+		},
+		roles: roles.length ? roles : [...ROLES],
+		phases: phases.length ? phases : [...PHASES],
+		priority: Number(fields.priority || 50) || 50,
+		body,
+		path,
+	};
+}
+
+export function loadRegistry(root: string): SkillManifest[] {
+	const files: string[] = [];
+	walk(root, files);
+	const out: SkillManifest[] = [];
+	for (const file of files) {
+		const parsed = parseManifest(file, readFileSync(file, "utf8"));
+		if (parsed) out.push(parsed);
+	}
+	return out;
+}

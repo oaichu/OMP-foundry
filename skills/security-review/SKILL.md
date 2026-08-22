@@ -1,6 +1,13 @@
 ---
+id: security-review
 name: security-review
-description: "Company security review layer: differential-review (diff/blast radius) + insecure-defaults (fail-open config) + semgrep (deterministic patterns). Not generic code review."
+version: 1
+layer: L1
+domain: security
+phases: planning, review
+roles: planner, reviewer
+priority: 85
+description: "Diff review + insecure defaults + semgrep."
 ---
 
 # security-review

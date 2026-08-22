@@ -1,58 +1,68 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { detectStack } from "../stack-detector";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { CompanyState } from "../types";
-import { CATALOG, type FoundryPhase, type SkillNode } from "./catalog";
+import { missingRequires, respectsConflicts, withRequires } from "./compatibility";
+import { detectRepo, type RepoFacts } from "./detector";
+import type { SkillManifest, SkillRole } from "./manifest-schema";
+import { filterPhaseRole, phaseOf } from "./phase-filter";
+import { loadRegistry } from "./registry";
 
-function phaseOf(state: CompanyState): FoundryPhase {
-	if (state.phase === "design") return "design";
-	if (state.phase === "review") return "review";
-	if (state.phase === "qa" || state.phase === "release") return "qa";
-	if (state.phase === "implementation" || state.phase === "aatp") return "implementation";
-	return "planning";
+const DEFAULT_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
+
+
+const MAX_SKILLS = 12;
+
+export interface ResolveOptions {
+	role?: SkillRole;
+	skillsRoot?: string;
+	registry?: SkillManifest[];
 }
 
-function depNames(cwd: string): string[] {
-	try {
-		const pkg = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as {
-			dependencies?: Record<string, string>;
-			devDependencies?: Record<string, string>;
-		};
-		return [...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})];
-	} catch {
-		return [];
-	}
-}
-
-function matches(node: SkillNode, cwd: string, stacks: string[], deps: string[]): boolean {
-	const when = node.activate_when;
-	if (!when.files && !when.dependencies && !when.stacks) return true;
-	if (when.stacks?.some((s) => stacks.includes(s))) return true;
-	if (when.dependencies?.some((d) => deps.includes(d))) return true;
-	if (when.files?.some((f) => existsSync(join(cwd, f)))) return true;
+function activated(item: SkillManifest, facts: RepoFacts): boolean {
+	const when = item.activate_when;
+	const empty = !when.dependencies?.length && !when.files?.length && !when.stacks?.length && !when.languages?.length;
+	if (empty) return item.layer === "L1";
+	if (when.stacks?.some((s) => facts.stacks.includes(s))) return true;
+	if (when.languages?.some((s) => facts.languages.includes(s))) return true;
+	if (when.dependencies?.some((d) => facts.dependencies.includes(d) || facts.frameworks.includes(d))) return true;
+	if (when.files?.some((f) => facts.files.includes(f))) return true;
 	return false;
 }
 
-export function resolveSkills(cwd: string, state: CompanyState): string[] {
-	const stacks = detectStack(cwd).ids;
-	const deps = depNames(cwd);
+export function resolveSkillManifests(
+	cwd: string,
+	state: CompanyState,
+	options: ResolveOptions = {},
+): SkillManifest[] {
+	const registry = options.registry ?? loadRegistry(options.skillsRoot ?? DEFAULT_ROOT);
+	const facts = detectRepo(cwd);
 	const phase = phaseOf(state);
-	const chosen: SkillNode[] = [];
-	for (const node of [...CATALOG].sort((a, b) => b.priority - a.priority)) {
-		if (!node.phases.includes(phase)) continue;
-		if (!matches(node, cwd, stacks, deps)) continue;
-		if (node.conflicts.some((c) => chosen.some((x) => x.id === c))) continue;
-		if (node.requires.some((r) => !chosen.some((x) => x.id === r) && !CATALOG.some((x) => x.id === r))) continue;
-		chosen.push(node);
-		if (chosen.length >= 12) break;
+	const eligible = filterPhaseRole(registry, phase, options.role)
+		.filter((item) => activated(item, facts))
+		.sort((a, b) => b.priority - a.priority);
+
+	const chosen: SkillManifest[] = [];
+	for (const item of eligible) {
+		if (!respectsConflicts(item, chosen)) continue;
+		if (missingRequires(item, chosen, registry).length && item.layer !== "L1") {
+			/* still try; withRequires fills after */
+		}
+		chosen.push(item);
+		if (chosen.length >= MAX_SKILLS) break;
 	}
-	return chosen.map((n) => n.id);
+	return withRequires(chosen, registry).slice(0, MAX_SKILLS);
 }
 
-export function skillPackPrompt(skills: string[], phase: string): string {
+export function resolveSkills(cwd: string, state: CompanyState, options: ResolveOptions = {}): string[] {
+	return resolveSkillManifests(cwd, state, options).map((s) => s.id);
+}
+
+export function skillPackPrompt(skills: SkillManifest[] | string[], phase: string): string {
+	const names = skills.map((s) => (typeof s === "string" ? s : `${s.id}: ${s.description}`));
 	return [
-		`Foundry skill pack (${phase}): ${skills.join(", ") || "(core only)"}.`,
-		"Skills inform, implement, verify, or challenge the locked plan.",
-		"Skills never change architecture. If a skill contradicts MASTER_PLAN → report_conflict.",
-	].join(" ");
+		`Foundry skill pack (${phase}):`,
+		...names.map((n) => `- ${n}`),
+		"Governance > locked plan > AATP scope > role > skills > tools.",
+		"Skills never change architecture. Contradiction → report_conflict.",
+	].join("\n");
 }
