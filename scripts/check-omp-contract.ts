@@ -13,11 +13,11 @@ const checks: Array<{ file: string; needles: string[] }> = [
 	},
 	{
 		file: "docs/tools/task.md",
-		needles: ["isolated", "apply=false", "patchPath"],
+		needles: ["`isolated`", "`patchPath?`", "task.isolation.mode"],
 	},
 	{
-		file: "packages/coding-agent/src/lsp/index.ts",
-		needles: ["rename_file", "code_actions", "request"],
+		file: "docs/tools/lsp.md",
+		needles: ["`rename_file`", "`code_actions`", "`request`", "apply `WorkspaceEdit`"],
 	},
 ];
 
@@ -29,7 +29,9 @@ for (const check of checks) {
 		continue;
 	}
 	const text = readFileSync(file, "utf8");
-	for (const needle of check.needles) if (!text.includes(needle)) failures.push(`${check.file}: missing contract token ${JSON.stringify(needle)}`);
+	for (const needle of check.needles) {
+		if (!text.includes(needle)) failures.push(`${check.file}: missing contract token ${JSON.stringify(needle)}`);
+	}
 }
 if (failures.length) {
 	console.error(`OMP contract drift detected:\n${failures.map((x) => `- ${x}`).join("\n")}`);
