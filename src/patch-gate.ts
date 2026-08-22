@@ -1,254 +1,134 @@
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { canonicalRepoPath, underPrefix } from "./paths";
-import { looksLikeImpl, pathAllowed } from "./permissions";
-import { LOCKED_DESIGN_PATHS, LOCKED_PLAN_PATHS, LOCKED_PRODUCT_PATHS, type AatpTicket } from "./types";
+import { pathAllowed } from "./permissions";
+import { LOCKED_AATP_PATHS, LOCKED_DESIGN_PATHS, LOCKED_PLAN_PATHS, LOCKED_PRODUCT_PATHS, type AatpTicket } from "./types";
+
+export const IMPLEMENTER_AGENTS = new Set(["implementer", "hard-implementer", "smol-implementer"]);
+export const REVIEW_AGENTS = new Set(["reviewer", "security-reviewer"]);
+export interface TaskItem { index: number; agent: string; task: string; isolated?: boolean; }
+export interface TaskBinding extends TaskItem { ticketId: string; kind: "implementation" | "review"; }
+export interface TaskResultLike { index?: number; id?: string; agent?: string; task?: string; output?: string; patchPath?: string; exitCode?: number; error?: string; aborted?: boolean; }
+
+const LAST_APPLIED_PATCH = new Map<string, string>();
+const gitIdentity = { ...process.env, GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME ?? "OMP Foundry", GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL ?? "omp-foundry@local", GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME ?? "OMP Foundry", GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL ?? "omp-foundry@local" };
 
 export function parsePatchPaths(text: string): string[] {
 	const out = new Set<string>();
-	for (const match of text.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)) {
-		if (match[2]) out.add(match[2]);
-	}
-	for (const match of text.matchAll(/^\+\+\+ b\/(.+)$/gm)) {
-		if (match[1] && match[1] !== "/dev/null") out.add(match[1]);
-	}
-	for (const match of text.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) {
-		if (match[1]) out.add(match[1].trim());
-	}
+	for (const match of text.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)) { if (match[1] && match[1] !== "/dev/null") out.add(match[1]); if (match[2] && match[2] !== "/dev/null") out.add(match[2]); }
+	for (const match of text.matchAll(/^(?:---|\+\+\+) [ab]\/(.+)$/gm)) if (match[1] && match[1] !== "/dev/null") out.add(match[1]);
+	for (const match of text.matchAll(/^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm)) if (match[1]) out.add(match[1].trim());
 	return [...out];
 }
-
 export function gitChangedPaths(cwd: string): string[] {
-	const names = new Set<string>();
-	const run = (args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8" });
-	const porcelain = run(["status", "--porcelain", "-uall"]);
-	if (porcelain.status === 0) {
-		for (const line of porcelain.stdout.split("\n")) {
-			if (line.length < 4) continue;
-			const rest = line.slice(3).replace(/^"|"$/g, "");
-			const renamed = rest.split(" -> ");
-			names.add((renamed[1] ?? renamed[0]).trim());
-		}
-	}
-	for (const args of [
-		["diff", "--name-only", "HEAD"],
-		["diff", "--cached", "--name-only"],
-		["ls-files", "--others", "--exclude-standard"],
-	]) {
-		const result = run(args);
-		if (result.status !== 0) continue;
-		for (const line of result.stdout.split("\n")) {
-			if (line.trim()) names.add(line.trim());
-		}
-	}
-	return [...names];
-}
-
-// A baseline captures the pre-task dirty state so a rejected worker write can
-// be reverted to what the user had, not blindly to HEAD. In the files map,
-// string = previous content, null = file was untracked before the task.
-export interface TreeBaseline {
-	paths: Set<string>;
-	files: Map<string, string | null>;
-}
-
-const BASELINE_MAX_BYTES = 1_000_000;
-
-function readBaselineContent(abs: string): string | undefined {
-	let text: string;
-	try {
-		text = readFileSync(abs, "utf8");
-	} catch {
-		return undefined;
-	}
-	if (text.length > BASELINE_MAX_BYTES || text.includes("\0")) return undefined;
-	return text;
-}
-
-export function snapshotBaseline(cwd: string): TreeBaseline {
-	const paths = new Set<string>();
-	const files = new Map<string, string | null>();
-	const porcelain = spawnSync("git", ["status", "--porcelain", "-uall"], { cwd, encoding: "utf8" });
-	if (porcelain.status === 0) {
-		for (const line of porcelain.stdout.split("\n")) {
-			if (line.length < 4) continue;
-			const untracked = line.slice(0, 2).includes("?");
-			const rest = line.slice(3).replace(/^"|"$/g, "");
-			const rel = (rest.split(" -> ").pop() ?? rest).trim();
-			if (!rel) continue;
-			paths.add(rel);
-			if (untracked) {
-				files.set(rel, null);
-			} else {
-				const content = readBaselineContent(join(cwd, rel));
-				if (content !== undefined) files.set(rel, content);
-			}
-		}
-		return { paths, files };
-	}
-	for (const rel of gitChangedPaths(cwd)) paths.add(rel);
-	return { paths, files };
-}
-
-export function deltaPaths(before: Set<string>, after: Iterable<string>): string[] {
+	const result = spawnSync("git", ["status", "--porcelain", "-uall"], { cwd, encoding: "utf8" });
+	if (result.status !== 0) return ["<git-status-failed>"];
 	const out: string[] = [];
-	for (const path of after) {
-		if (!before.has(path)) out.push(path);
+	for (const line of result.stdout.split("\n")) {
+		if (line.length < 4) continue;
+		const rest = line.slice(3).replace(/^"|"$/g, "");
+		const rel = (rest.split(" -> ").pop() ?? rest).trim().replace(/\\/g, "/");
+		if (rel) out.push(rel);
 	}
 	return out;
 }
-
-export function ticketIdsFromText(text: string): string[] {
-	return [...new Set((text.match(/\bAATP-[A-Za-z0-9_-]+/g) ?? []).map((id) => id.toUpperCase()))];
+export function prepareImplementationBaseline(cwd: string): { ok: boolean; reason?: string; committed?: boolean } {
+	const dirty = gitChangedPaths(cwd);
+	if (dirty.length === 0) return { ok: true, committed: false };
+	const safe = dirty.every((rel) => {
+		const lower = rel.toLowerCase();
+		return lower.startsWith("docs/") || lower.startsWith("src/design-system/") || lower.startsWith("src/designsystem/") || lower === ".gitignore" || lower === ".omp/config.yml" || lower === ".omp/config.yaml";
+	});
+	if (!safe) return { ok: false, reason: `WORKTREE_GATE: commit or stash non-governance changes before /build: ${dirty.join(", ")}` };
+	let result = spawnSync("git", ["add", "-A"], { cwd, encoding: "utf8" });
+	if (result.status !== 0) return { ok: false, reason: `BASELINE_COMMIT_FAILED: ${result.stderr.trim()}` };
+	result = spawnSync("git", ["commit", "-m", "foundry: lock approved implementation baseline"], { cwd, encoding: "utf8", env: gitIdentity });
+	if (result.status !== 0) return { ok: false, reason: `BASELINE_COMMIT_FAILED: ${result.stderr.trim() || result.stdout.trim()}` };
+	return { ok: true, committed: true };
 }
-
-const ALWAYS_LOCKED = [...LOCKED_PLAN_PATHS, ...LOCKED_PRODUCT_PATHS, ...LOCKED_DESIGN_PATHS];
-
-// Escaped paths (canonicalization failed) are reported but never touched:
-// the reverter must not act on raw, untrusted paths.
-export function rejectChangedPaths(
-	cwd: string,
-	rawPaths: string[],
-	tickets: AatpTicket[],
-): { escaped: string[]; rejected: string[]; kept: string[] } {
-	const escaped: string[] = [];
-	const rejected: string[] = [];
-	const kept: string[] = [];
+export function ticketIdsFromText(text: string): string[] { return [...new Set((text.match(/\bAATP-[A-Za-z0-9_-]+/gi) ?? []).map((id) => id.toUpperCase()))]; }
+export function taskItems(input: Record<string, unknown>): TaskItem[] {
+	if (Array.isArray(input.tasks)) return input.tasks.flatMap((raw, index) => { if (!raw || typeof raw !== "object") return []; const item = raw as Record<string, unknown>; return [{ index, agent: String(item.agent ?? ""), task: String(item.task ?? ""), isolated: item.isolated === true }]; });
+	if (typeof input.agent === "string" || typeof input.task === "string") return [{ index: 0, agent: String(input.agent ?? ""), task: String(input.task ?? ""), isolated: input.isolated === true }];
+	return [];
+}
+export function taskBindings(input: Record<string, unknown>): { bindings: TaskBinding[]; errors: string[] } {
+	const bindings: TaskBinding[] = [], errors: string[] = [], seen = new Set<string>();
+	for (const item of taskItems(input)) {
+		const isImpl = IMPLEMENTER_AGENTS.has(item.agent), isReview = REVIEW_AGENTS.has(item.agent);
+		if (!isImpl && !isReview) continue;
+		const ids = ticketIdsFromText(item.task);
+		if (ids.length !== 1) { errors.push(`task[${item.index}] ${item.agent} must name exactly one AATP id; found ${ids.length}`); continue; }
+		const key = `${isImpl ? "impl" : "review"}:${ids[0]}`;
+		if (seen.has(key)) { errors.push(`duplicate governed assignment for ${ids[0]}`); continue; }
+		seen.add(key); bindings.push({ ...item, ticketId: ids[0], kind: isImpl ? "implementation" : "review" });
+	}
+	return { bindings, errors };
+}
+export function governedTask(input: Record<string, unknown>): boolean { return taskItems(input).some((item) => IMPLEMENTER_AGENTS.has(item.agent) || REVIEW_AGENTS.has(item.agent)); }
+const ALWAYS_LOCKED = [...LOCKED_PLAN_PATHS, ...LOCKED_PRODUCT_PATHS, ...LOCKED_DESIGN_PATHS, ...LOCKED_AATP_PATHS];
+export function validatePatchPaths(cwd: string, rawPaths: string[], ticket: AatpTicket, kind: "implementation" | "review"): { escaped: string[]; rejected: string[]; kept: string[] } {
+	const escaped: string[] = [], rejected: string[] = [], kept: string[] = [];
 	for (const path of [...new Set(rawPaths)]) {
 		const rel = canonicalRepoPath(cwd, path);
-		if (rel === null) {
-			escaped.push(path);
+		if (rel === null) { escaped.push(path); continue; }
+		if (kind === "review") {
+			const expected = `docs/reports/review-${ticket.id.toLowerCase()}`;
+			if (rel === `${expected}.md` || rel === `${expected}-sec.md`) kept.push(path); else rejected.push(path);
 			continue;
 		}
-		if (ALWAYS_LOCKED.some((n) => underPrefix(rel, n))) {
-			rejected.push(path);
-			continue;
-		}
-		if (!looksLikeImpl(rel)) {
-			kept.push(path);
-			continue;
-		}
-		if (tickets.length === 0 || !tickets.some((t) => pathAllowed(rel, t))) {
-			rejected.push(path);
-			continue;
-		}
-		kept.push(path);
+		if (ALWAYS_LOCKED.some((n) => underPrefix(rel, n)) || !pathAllowed(rel, ticket)) rejected.push(path); else kept.push(path);
 	}
 	return { escaped, rejected, kept };
 }
-
-export function revertPaths(cwd: string, rels: string[], baseline?: Map<string, string | null>): string[] {
-	const reverted: string[] = [];
-	for (const rel of rels) {
-		if (baseline?.has(rel)) {
-			const content = baseline.get(rel);
-			const abs = join(cwd, rel);
-			spawnSync("git", ["reset", "--", rel], { cwd, encoding: "utf8" });
-			if (content == null) {
-				if (existsSync(abs)) {
-					try {
-						unlinkSync(abs);
-						reverted.push(rel);
-					} catch {
-						/* leave in place; still reported */
-					}
-				} else {
-					reverted.push(rel);
-				}
-			} else {
-				try {
-					writeFileSync(abs, content, "utf8");
-					reverted.push(rel);
-				} catch {
-					/* leave in place; still reported */
-				}
-			}
-			continue;
-		}
-		const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "--", rel], { cwd, encoding: "utf8" });
-		if (tracked.status === 0) {
-			const restore = spawnSync("git", ["restore", "--source=HEAD", "--worktree", "--staged", "--", rel], {
-				cwd,
-				encoding: "utf8",
-			});
-			if (restore.status !== 0) {
-				spawnSync("git", ["checkout", "HEAD", "--", rel], { cwd, encoding: "utf8" });
-			}
-			reverted.push(rel);
-			continue;
-		}
-		const abs = join(cwd, rel);
-		if (existsSync(abs)) {
-			try {
-				unlinkSync(abs);
-				reverted.push(rel);
-			} catch {
-				/* leave in place; still reported */
-			}
-		}
-	}
-	return reverted;
+export function readPatchArtifact(path: string | undefined): string { return !path || !existsSync(path) ? "" : readFileSync(path, "utf8"); }
+export function validatePatchArtifact(cwd: string, patchPath: string | undefined, ticket: AatpTicket, kind: "implementation" | "review"): { ok: true; patch: string; paths: string[] } | { ok: false; reason: string; paths: string[] } {
+	const patch = readPatchArtifact(patchPath);
+	if (!patch.trim()) return { ok: false, reason: `PATCH_GATE: ${kind} produced no patch artifact`, paths: [] };
+	const paths = parsePatchPaths(patch);
+	if (paths.length === 0) return { ok: false, reason: `PATCH_GATE: unable to extract paths from ${basename(patchPath ?? "patch")}`, paths: [] };
+	const checked = validatePatchPaths(cwd, paths, ticket, kind);
+	if (checked.escaped.length) return { ok: false, reason: `PATH_GATE: escaped patch paths: ${checked.escaped.join(", ")}`, paths };
+	if (checked.rejected.length) return { ok: false, reason: `AATP_SCOPE: patch rejected: ${checked.rejected.join(", ")}`, paths };
+	return { ok: true, patch, paths };
 }
-
-export function extractResultPaths(details: unknown, contentText: string): string[] {
-	const out = new Set<string>(parsePatchPaths(contentText));
-	if (!details || typeof details !== "object") return [...out];
-	const rec = details as { results?: Array<{ patchPath?: string }>; patchPath?: string };
-	const patches = [
-		...(typeof rec.patchPath === "string" ? [rec.patchPath] : []),
-		...((rec.results ?? []).map((r) => r.patchPath).filter((p): p is string => Boolean(p))),
-	];
-	for (const file of patches) {
-		if (!existsSync(file)) continue;
-		for (const path of parsePatchPaths(readFileSync(file, "utf8"))) out.add(path);
-	}
-	return [...out];
+export function applyPatchArtifact(cwd: string, patchPath: string | undefined): { ok: boolean; reason?: string } {
+	if (!patchPath || !existsSync(patchPath) || !readPatchArtifact(patchPath).trim()) return { ok: true };
+	const check = spawnSync("git", ["apply", "--check", "--", patchPath], { cwd, encoding: "utf8" });
+	if (check.status !== 0) return { ok: false, reason: `PATCH_APPLY_FAILED: ${check.stderr.trim() || check.stdout.trim()}` };
+	const result = spawnSync("git", ["apply", "--whitespace=nowarn", "--", patchPath], { cwd, encoding: "utf8" });
+	if (result.status !== 0) return { ok: false, reason: `PATCH_APPLY_FAILED: ${result.stderr.trim() || result.stdout.trim()}` };
+	LAST_APPLIED_PATCH.set(cwd, patchPath);
+	return { ok: true };
 }
-
-export function governedTask(input: Record<string, unknown>): boolean {
-	const names = new Set<string>();
-	if (typeof input.agent === "string") names.add(input.agent);
-	if (Array.isArray(input.tasks)) {
-		for (const item of input.tasks) {
-			if (item && typeof item === "object" && typeof (item as { agent?: string }).agent === "string") {
-				names.add((item as { agent: string }).agent);
-			}
-		}
-	}
-	return [...names].some((n) => n === "implementer" || n === "hard-implementer" || n === "smol-implementer");
+export function commitAppliedPatch(cwd: string, ticketId: string, kind: "implementation" | "review"): { ok: boolean; reason?: string } {
+	let result = spawnSync("git", ["add", "-A"], { cwd, encoding: "utf8" });
+	if (result.status !== 0) return { ok: false, reason: `git add failed: ${result.stderr.trim()}` };
+	result = spawnSync("git", ["diff", "--cached", "--quiet"], { cwd, encoding: "utf8" });
+	if (result.status === 0) { LAST_APPLIED_PATCH.delete(cwd); return { ok: true }; }
+	const message = kind === "review" ? `foundry: review ${ticketId}` : `foundry: complete ${ticketId}`;
+	result = spawnSync("git", ["commit", "-m", message], { cwd, encoding: "utf8", env: gitIdentity });
+	if (result.status === 0) { LAST_APPLIED_PATCH.delete(cwd); return { ok: true }; }
+	return { ok: false, reason: `git commit failed: ${result.stderr.trim() || result.stdout.trim()}` };
 }
-
-export function reviewTaskDelta(
-	cwd: string,
-	baseline: TreeBaseline,
-	tickets: AatpTicket[],
-	details: unknown,
-	contentText: string,
-): { escaped: string[]; rejected: string[]; kept: string[]; reverted: string[] } {
-	const raw = [
-		...deltaPaths(baseline.paths, gitChangedPaths(cwd)),
-		...extractResultPaths(details, contentText),
-	];
-	// Files the user had already edited stay out of the path delta, so catch
-	// worker edits to them by comparing against the captured baseline content.
-	for (const [rel, content] of baseline.files) {
-		if (content === null || raw.includes(rel)) continue;
-		const current = readBaselineContent(join(cwd, rel));
-		if (current !== undefined && current !== content) raw.push(rel);
-	}
-	const { escaped, rejected, kept } = rejectChangedPaths(cwd, raw, tickets);
-	const reverted = rejected.length ? revertPaths(cwd, rejected, baseline.files) : [];
-	return { escaped, rejected, kept, reverted };
+/** Reverse only the last Foundry-applied patch. Never reset/clean unrelated parent work. */
+export function restoreCleanHead(cwd: string): void {
+	const patchPath = LAST_APPLIED_PATCH.get(cwd);
+	if (!patchPath || !existsSync(patchPath)) return;
+	spawnSync("git", ["reset"], { cwd, encoding: "utf8" });
+	const reversed = spawnSync("git", ["apply", "-R", "--whitespace=nowarn", "--", patchPath], { cwd, encoding: "utf8" });
+	if (reversed.status === 0) LAST_APPLIED_PATCH.delete(cwd);
 }
-
-export function contentTextOf(content: unknown): string {
-	if (typeof content === "string") return content;
-	if (!Array.isArray(content)) return "";
-	return content
-		.map((chunk) => {
-			if (chunk && typeof chunk === "object" && "text" in chunk) return String((chunk as { text: unknown }).text ?? "");
-			return "";
-		})
-		.join("\n");
+export function hashEvidence(...parts: Array<string | undefined>): string { const hash = createHash("sha256"); for (const part of parts) { hash.update(part ?? ""); hash.update("\0"); } return hash.digest("hex"); }
+export function extractTaskResults(details: unknown): TaskResultLike[] { if (!details || typeof details !== "object") return []; const rec = details as { results?: TaskResultLike[] }; return Array.isArray(rec.results) ? rec.results : []; }
+export function parseReviewVerdict(output: string, ticketId: string): "APPROVE" | "REQUEST_CHANGES" | "BLOCK" | undefined {
+	const escaped = ticketId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const match = output.match(new RegExp(`FOUNDRY_REVIEW\\s+${escaped}\\s+(APPROVE|REQUEST_CHANGES|BLOCK)`, "i"));
+	return match?.[1]?.toUpperCase() as "APPROVE" | "REQUEST_CHANGES" | "BLOCK" | undefined;
+}
+export function parseConflict(output: string): { kind: string; reason: string } | undefined {
+	const match = output.match(/FOUNDRY_CONFLICT\s+(PLAN_CONFLICT|DESIGN_CONFLICT|DEPENDENCY_CONFLICT|SCOPE_INSUFFICIENT)\s+(.+)/i);
+	return match ? { kind: match[1].toUpperCase(), reason: match[2].trim() } : undefined;
 }
