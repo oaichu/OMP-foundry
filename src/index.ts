@@ -21,8 +21,10 @@ import { deriveRelease, invalidateQa, refreshArtifactHashes } from "./release";
 import { loadRegistry } from "./skills/registry";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
+import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
 import { type CompanyState, defaultState } from "./types";
 import { applyQa, runVerify } from "./verify-runner";
+
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CUSTOM = "com.omp.company-workflow.state";
