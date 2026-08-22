@@ -19,7 +19,7 @@ export type ConflictKind =
 	| "SCOPE_INSUFFICIENT";
 
 export const CURRENT_STATE_SCHEMA = 1;
-export const FOUNDRY_VERSION = "0.2.2";
+export const FOUNDRY_VERSION = "0.3.0";
 export class StateError extends Error {
 	constructor(message: string) {
 		super(message);

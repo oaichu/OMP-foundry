@@ -21,7 +21,8 @@
 
 You assign models to roles. Foundry runs the mill.
 
-> **v0.2.2.** Tool-execution boundary inside Oh My Pi, not an OS sandbox. State files carry `schema_version`. Missing version is legacy v0 and migrates deterministically; newer schemas fail closed. `eval` is denied for the whole Foundry session. Paths are canonicalized under the repo root. QA only PASSes on a **clean** working tree bound to `HEAD`. Release also requires every ticket `review=APPROVE`. Isolated implementers (including `smol-implementer`) are forced on `/build`.
+> **v0.3.0.** Tool-execution boundary inside Oh My Pi, not an OS sandbox. State files carry `schema_version`. Missing version is legacy v0 and migrates deterministically; newer schemas fail closed. `/foundry-version` checks the latest GitHub release tag (24h cache). `eval` is denied for the whole Foundry session. Paths are canonicalized under the repo root. Isolated-task leaks are reverted against AATP after apply.
+
 
 
 ```text
@@ -128,8 +129,10 @@ flowchart LR
 | `/review` | Review a finished ticket |
 | `/verify` | Deterministic QA |
 | `/release-check` | Final gate |
+| `/foundry-version` | Installed Foundry/OMP + latest stable tag |
 
 `/company` remains an alias of `/foundry`.
+
 
 Built-in Oh My Pi Plan (Shift+Tab) is untouched: one `@plan` model. `/plan3` is the three-heat lock.
 
@@ -152,7 +155,12 @@ docs/reports/
 omp plugin uninstall omp-foundry
 ```
 
-Not an OMP fork. Update Oh My Pi independently; `git pull` this plugin independently.
+Not an OMP fork. Update Oh My Pi independently.
+
+**Stable:** `git fetch --tags && git checkout v0.3.0` then restart OMP. Do not `git pull` — that tracks `main`.
+
+**Developer checkout:** `git switch main && git pull`.
+
 
 ---
 

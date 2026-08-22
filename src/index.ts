@@ -23,7 +23,9 @@ import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
 import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
 import { type CompanyState, defaultState } from "./types";
+import { checkForUpdate, versionReport } from "./update-check";
 import { applyQa, runVerify } from "./verify-runner";
+
 
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -128,7 +130,13 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_e, ctx) => {
 		const { state, broken } = safeState(ctx.cwd);
 		ctx.ui.setStatus("foundry", broken ? "STATE_CORRUPT" : statusOf(state));
+		ctx.setTimeout(() => {
+			void checkForUpdate().then((result) => {
+				if (result.notify) ctx.ui.notify(result.notify, "info");
+			});
+		}, 0);
 	});
+
 
 	pi.on("before_agent_start", async (_e, ctx) => {
 		const { state, broken } = safeState(ctx.cwd);
@@ -425,6 +433,16 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		description: "Bootstrap PRODUCT/docs + foundry state",
 		handler: initHandler,
 	});
+
+	pi.registerCommand("foundry-version", {
+		description: "Show Foundry/OMP versions and latest stable tag",
+		handler: async (_args, ctx) => {
+			const result = await checkForUpdate({ force: true });
+			if (result.notify) ctx.ui.notify(result.notify, "info");
+			orchestrate(pi, "Foundry version", versionReport(result));
+		},
+	});
+
 
 	pi.registerCommand("company-init", {
 		description: "Alias of /foundry-init",
