@@ -63,6 +63,11 @@ export function detectStack(cwd: string): DetectedStack {
 			verify.push({ id: "build", command: `${gradlew} assembleDebug` });
 		}
 	}
+	if (existsSync(join(cwd, "go.mod"))) verify.push({ id: "unit", command: "go test ./..." });
+	if (existsSync(join(cwd, "pyproject.toml")) || existsSync(join(cwd, "requirements.txt"))) {
+		verify.push({ id: "unit", command: "python -m pytest -q" });
+	}
+	if (existsSync(join(cwd, "Cargo.toml"))) verify.push({ id: "unit", command: "cargo test" });
 	if (ids.has("windows")) {
 		verify.push({ id: "test", command: "dotnet test --nologo" });
 		verify.push({ id: "build", command: "dotnet build --nologo" });

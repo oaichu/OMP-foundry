@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: "Company /review. Verdict APPROVE|REQUEST_CHANGES|BLOCK. Writes docs/reports/REVIEW-*.md. Does not implement."
-tools: read, grep, glob, bash, write
+tools: read, grep, glob, bash, write, aatp_review
 model: "@default"
 thinking-level: high
 blocking: true

@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { CompanyState, TicketStatus } from "./types";
 
-export interface AatpTask {
+export interface AatpSpec {
 	id: string;
 	objective: string;
 	dependencies: string[];
@@ -9,8 +10,12 @@ export interface AatpTask {
 	forbidden_files: string[];
 	risk: string;
 	recommended_agent: string;
-	status: string;
 	path: string;
+}
+
+export interface AatpTask extends AatpSpec {
+	status: TicketStatus;
+	review: "none" | "APPROVE" | "REQUEST_CHANGES" | "BLOCK";
 }
 
 function parseList(block: string, key: string): string[] {
@@ -31,10 +36,10 @@ export function aatpDir(cwd: string): string {
 	return join(cwd, "docs", "AATP");
 }
 
-export function listAatp(cwd: string): AatpTask[] {
+export function listAatpSpecs(cwd: string): AatpSpec[] {
 	const dir = aatpDir(cwd);
 	if (!existsSync(dir)) return [];
-	const tasks: AatpTask[] = [];
+	const tasks: AatpSpec[] = [];
 	for (const file of readdirSync(dir)) {
 		if (!/^AATP-.*\.md$/i.test(file) || file.toUpperCase() === "INDEX.MD") continue;
 		const path = join(dir, file);
@@ -50,17 +55,27 @@ export function listAatp(cwd: string): AatpTask[] {
 			forbidden_files: parseList(body, "forbidden_files"),
 			risk: parseField(body, "risk") || "normal",
 			recommended_agent: parseField(body, "recommended_agent") || parseField(body, "recommended_worker") || "implementer",
-			status: parseField(body, "status") || "ready",
 			path,
 		});
 	}
 	return tasks;
 }
 
+export function hydrateAatp(cwd: string, state: CompanyState): AatpTask[] {
+	return listAatpSpecs(cwd).map((spec) => {
+		const ticket = state.tickets[spec.id];
+		return {
+			...spec,
+			status: ticket?.status ?? "ready",
+			review: ticket?.review ?? "none",
+		};
+	});
+}
+
 export function readyIndependent(tasks: AatpTask[]): AatpTask[] {
-	const done = new Set(tasks.filter((t) => t.status === "completed" || t.status === "done").map((t) => t.id));
+	const done = new Set(tasks.filter((t) => t.status === "completed").map((t) => t.id));
 	return tasks.filter((task) => {
-		if (task.status !== "ready" && task.status !== "todo" && task.status !== "") return false;
+		if (task.status !== "ready") return false;
 		return task.dependencies.every((dep) => done.has(dep) || dep === "none" || dep === "");
 	});
 }
@@ -74,9 +89,9 @@ export function summarizeAatp(tasks: AatpTask[]): {
 } {
 	return {
 		total: tasks.length,
-		ready: tasks.filter((t) => t.status === "ready" || t.status === "todo" || t.status === "").length,
-		active: tasks.filter((t) => t.status === "active" || t.status === "in_progress").length,
-		completed: tasks.filter((t) => t.status === "completed" || t.status === "done").length,
+		ready: tasks.filter((t) => t.status === "ready").length,
+		active: tasks.filter((t) => t.status === "active").length,
+		completed: tasks.filter((t) => t.status === "completed").length,
 		blocked: tasks.filter((t) => t.status === "blocked").length,
 	};
 }
@@ -87,11 +102,11 @@ export function writeAatpIndex(cwd: string, tasks: AatpTask[]): void {
 	const lines = [
 		"# AATP index",
 		"",
-		"| id | status | risk | agent | deps | objective |",
-		"| --- | --- | --- | --- | --- | --- |",
+		"| id | status | review | risk | agent | deps | objective |",
+		"| --- | --- | --- | --- | --- | --- | --- |",
 		...tasks.map(
 			(t) =>
-				`| ${t.id} | ${t.status} | ${t.risk} | ${t.recommended_agent} | ${t.dependencies.join(", ") || "none"} | ${t.objective.replace(/\|/g, "/")} |`,
+				`| ${t.id} | ${t.status} | ${t.review} | ${t.risk} | ${t.recommended_agent} | ${t.dependencies.join(", ") || "none"} | ${t.objective.replace(/\|/g, "/")} |`,
 		),
 		"",
 	];
@@ -100,7 +115,21 @@ export function writeAatpIndex(cwd: string, tasks: AatpTask[]): void {
 
 export function routeAgent(risk: string): string {
 	const r = risk.toLowerCase();
-	if (r === "trivial" || r === "low") return "sonic";
+	if (r === "trivial" || r === "low") return "smol-implementer";
 	if (r === "difficult" || r === "hard") return "hard-implementer";
 	return "implementer";
+}
+
+export function seedTickets(state: CompanyState, specs: AatpSpec[]): void {
+	for (const spec of specs) {
+		if (state.tickets[spec.id]) continue;
+		state.tickets[spec.id] = {
+			id: spec.id,
+			status: "ready",
+			allowed_files: spec.allowed_files,
+			forbidden_files: spec.forbidden_files,
+			risk: spec.risk,
+			review: "none",
+		};
+	}
 }

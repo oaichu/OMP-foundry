@@ -2,7 +2,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { detectStack } from "./stack-detector";
-import { gitTreeSha } from "./release";
+import { gitHead, workingTreeClean } from "./release";
 import type { CompanyState } from "./types";
 
 export interface VerifyRow {
@@ -33,17 +33,20 @@ export function runVerify(cwd: string): VerifyRow[] {
 }
 
 export function applyQa(cwd: string, state: CompanyState, rows: VerifyRow[]): void {
-	const pass = rows.length > 0 && rows.every((row) => row.exitCode === 0);
-	state.qa.status = pass ? "pass" : rows.length === 0 ? "pending" : "fail";
-	state.qa.tree_sha = pass ? gitTreeSha(cwd) : "";
-	state.phase = pass ? "qa" : state.phase;
+	const clean = workingTreeClean(cwd);
+	const commandsOk = rows.length > 0 && rows.every((row) => row.exitCode === 0);
+	const pass = clean && commandsOk;
+	state.qa.status = !clean ? "pending" : commandsOk ? "pass" : rows.length === 0 ? "pending" : "fail";
+	state.qa.tree_sha = pass ? gitHead(cwd) : "";
+	if (pass) state.phase = "qa";
 	mkdirSync(join(cwd, "docs", "reports"), { recursive: true });
 	const body = [
 		"# QA",
 		"",
+		`- working_tree_clean: ${clean}`,
 		...rows.map((row) => `- ${row.id}: exit ${row.exitCode} \`${row.command}\``),
 		"",
-		pass ? "RESULT: PASS" : "RESULT: FAIL",
+		pass ? "RESULT: PASS" : "RESULT: FAIL (dirty tree or failing command)",
 		"",
 	].join("\n");
 	writeFileSync(join(cwd, "docs", "reports", "QA.md"), body, "utf8");

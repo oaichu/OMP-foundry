@@ -3,19 +3,31 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { listAatp, readyIndependent, routeAgent, summarizeAatp, writeAatpIndex } from "./aatp";
+import {
+	hydrateAatp,
+	listAatpSpecs,
+	readyIndependent,
+	routeAgent,
+	seedTickets,
+	summarizeAatp,
+	writeAatpIndex,
+} from "./aatp";
 import { CONTEXT_POLICY, phasePrompt } from "./context-policy";
 import { requireDesignIfUi, requirePlan, requireProduct } from "./gates";
 import { denyToolCall, forceIsolatedTaskInput, type ToolInput } from "./permissions";
+import { canonicalRepoPath } from "./paths";
 import { deriveRelease, invalidateQa, refreshArtifactHashes } from "./release";
+import { loadRegistry } from "./skills/registry";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
-import { consumeCap, grantCap, loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
+import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
 import { type CompanyState, defaultState } from "./types";
 import { applyQa, runVerify } from "./verify-runner";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CUSTOM = "com.omp.company-workflow.state";
+const PLAN3 =
+	"Spawn blocking, sequential: plan-drafter → plan-critic → plan-finalizer. Artifacts: docs/planning/MASTER_PLAN_DRAFT.md, docs/planning/PLAN_REVIEW.md, docs/MASTER_PLAN.md. Finalizer writes MASTER_PLAN only. Human locks with /foundry-approve plan. Do not implement.";
 
 function token(): string {
 	return randomBytes(16).toString("hex");
@@ -36,6 +48,63 @@ function persist(cwd: string, state: CompanyState): CompanyState {
 
 function orchestrate(pi: ExtensionAPI, title: string, body: string): void {
 	pi.sendUserMessage([title, "", body, "", CONTEXT_POLICY].join("\n"));
+}
+
+function productOk(state: CompanyState): boolean {
+	return state.product.status === "approved" || state.product.status === "locked";
+}
+
+function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
+	const state = loadState(cwd);
+	const idea = args.trim();
+	if (!stateFileExists(cwd)) {
+		orchestrate(
+			pi,
+			"Start the foundry.",
+			[
+				"Call company_init.",
+				idea ? `User idea: ${idea}` : "If the user has not described the product, ask in one short question then spawn product-analyst.",
+				"Spawn blocking product-analyst. Then wait for the user to run /foundry-approve product.",
+			].join("\n"),
+		);
+		return;
+	}
+	if (!productOk(state)) {
+		orchestrate(pi, "Finish the product.", "Spawn blocking product-analyst. Wait for /foundry-approve product. Do not plan or code.");
+		return;
+	}
+	if (state.master_plan.status !== "locked") {
+		orchestrate(pi, "Run /plan3 automatically.", PLAN3);
+		return;
+	}
+	if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") {
+		orchestrate(
+			pi,
+			"Design is required.",
+			"Spawn blocking design-foundation and show a real preview. Wait for the user to run /design approve or /design skip. Do not implement features.",
+		);
+		return;
+	}
+	const tasks = hydrateAatp(cwd, state);
+	if (tasks.length === 0) {
+		orchestrate(pi, "Generate AATP.", "Write docs/AATP/AATP-*.md + INDEX.md from MASTER_PLAN. Do not implement.");
+		return;
+	}
+	const ready = readyIndependent(tasks);
+	const counts = summarizeAatp(tasks);
+	if (ready.length > 0) {
+		orchestrate(
+			pi,
+			"Build the next independent AATP layer.",
+			ready.map((t) => `${t.id} → ${routeAgent(t.risk)} :: ${t.objective}`).join("\n"),
+		);
+		return;
+	}
+	if (counts.completed === counts.total && counts.total > 0 && state.qa.status !== "pass") {
+		orchestrate(pi, "All AATP done. Run /verify.", "Foundry runs real test/build commands. Write docs/reports/QA.md.");
+		return;
+	}
+	orchestrate(pi, "Run /release-check.", "Compare gates and report what is still red.");
 }
 
 export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
@@ -71,7 +140,6 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		};
 	});
 
-
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "task") {
 			const raw = event.input && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
@@ -80,17 +148,18 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		}
 		if (
 			String(event.toolName).startsWith("company_") ||
-			event.toolName.startsWith("plan_") ||
 			event.toolName.startsWith("aatp_") ||
+			event.toolName === "foundry_skill_read" ||
 			event.toolName === "report_conflict"
 		) {
 			return;
 		}
 		const { state, broken } = safeState(ctx.cwd);
-		const active = Object.values(state.tickets).filter((t) => t.status === "active");
+		const activeTickets = Object.values(state.tickets).filter((t) => t.status === "active");
 		return denyToolCall(event.toolName, (event.input ?? {}) as ToolInput, state, {
 			stateBroken: broken,
-			activeTicket: active.length === 1 ? active[0] : undefined,
+			activeTickets,
+			canonicalize: (raw) => canonicalRepoPath(ctx.cwd, raw),
 		});
 	});
 
@@ -104,7 +173,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		async execute(_id, _p, _s, _u, ctx) {
 			const { state, broken } = safeState(ctx.cwd);
 			if (broken) return { content: [{ type: "text", text: broken }], isError: true };
-			const tasks = listAatp(ctx.cwd);
+			const tasks = hydrateAatp(ctx.cwd, state);
 			const stack = detectStack(ctx.cwd);
 			const publicState = { ...state, aatp: summarizeAatp(tasks), unlock_token: undefined, stack };
 			return {
@@ -120,9 +189,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		description: "Create docs templates and .omp/foundry-state.yml if missing. Never clobber existing foundry state.",
 		loadMode: "essential",
 		approval: "write",
-		parameters: z.object({
-			name: z.string().optional(),
-		}),
+		parameters: z.object({ name: z.string().optional() }),
 		async execute(_id, params, _s, _u, ctx) {
 			mkdirSync(join(ctx.cwd, "docs", "planning"), { recursive: true });
 			mkdirSync(join(ctx.cwd, "docs", "AATP"), { recursive: true });
@@ -152,110 +219,9 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
-		name: "product_approve",
-		label: "Product Approve",
-		description: "Mark PRODUCT approved. Requires a live human capability from /foundry approve-product.",
-		loadMode: "discoverable",
-		approval: "write",
-		parameters: z.object({}),
-		async execute(_id, _p, _s, _u, ctx) {
-			if (!existsSync(join(ctx.cwd, "docs", "PRODUCT.md"))) {
-				return { content: [{ type: "text", text: "docs/PRODUCT.md missing." }], isError: true };
-			}
-			const state = loadState(ctx.cwd);
-			if (!consumeCap(state, "product_approve")) {
-				return { content: [{ type: "text", text: "HUMAN_GATE: run /foundry approve-product." }], isError: true };
-			}
-			state.product.status = "approved";
-			state.phase = "planning";
-			refreshArtifactHashes(ctx.cwd, state);
-			invalidateQa(state);
-			persist(ctx.cwd, state);
-			return { content: [{ type: "text", text: "PRODUCT approved." }], details: state };
-		},
-	});
-
-	pi.registerTool({
-		name: "plan_commit",
-		label: "Plan Commit",
-		description: "Lock MASTER_PLAN. Requires /foundry approve-plan human capability.",
-		loadMode: "discoverable",
-		approval: "write",
-		parameters: z.object({
-			unlockToken: z.string().optional(),
-			version: z.string().optional(),
-		}),
-		async execute(_id, params, _s, _u, ctx) {
-			if (!existsSync(join(ctx.cwd, "docs", "MASTER_PLAN.md"))) {
-				return { content: [{ type: "text", text: "docs/MASTER_PLAN.md missing." }], isError: true };
-			}
-			const state = loadState(ctx.cwd);
-			if (!consumeCap(state, "plan_lock")) {
-				return { content: [{ type: "text", text: "HUMAN_GATE: run /foundry approve-plan after reading the draft." }], isError: true };
-			}
-			if (state.unlock_token && params.unlockToken !== state.unlock_token) {
-				return { content: [{ type: "text", text: "unlockToken mismatch." }], isError: true };
-			}
-			state.master_plan.status = "locked";
-			state.master_plan.version = params.version || (state.master_plan.version === "0" ? "1.0" : state.master_plan.version);
-			state.unlock_token = "";
-			state.conflict = { kind: "none", reason: "" };
-			state.phase = state.design.required ? "design" : "aatp";
-			refreshArtifactHashes(ctx.cwd, state);
-			invalidateQa(state);
-			persist(ctx.cwd, state);
-			return { content: [{ type: "text", text: `PLAN LOCKED v${state.master_plan.version}` }], details: state };
-		},
-	});
-	pi.registerTool({
-		name: "design_skip",
-		label: "Design Skip",
-		description: "Mark design not required. Requires /design skip human capability.",
-		loadMode: "discoverable",
-		approval: "write",
-		parameters: z.object({}),
-		async execute(_id, _p, _s, _u, ctx) {
-			const state = loadState(ctx.cwd);
-			if (!consumeCap(state, "design_skip")) {
-				return { content: [{ type: "text", text: "HUMAN_GATE: run /design skip." }], isError: true };
-			}
-			state.design.required = false;
-			state.design.status = "not_required";
-			state.phase = "aatp";
-			persist(ctx.cwd, state);
-			return { content: [{ type: "text", text: "DESIGN not required." }], details: state };
-		},
-	});
-
-	pi.registerTool({
-		name: "design_lock",
-		label: "Design Lock",
-		description: "Lock design. Requires /design approve human capability.",
-		loadMode: "discoverable",
-		approval: "write",
-		parameters: z.object({ version: z.string().optional() }),
-		async execute(_id, params, _s, _u, ctx) {
-			const state = loadState(ctx.cwd);
-			const gate = requirePlan(state);
-			if (gate) return { content: [{ type: "text", text: gate }], isError: true };
-			if (!consumeCap(state, "design_lock")) {
-				return { content: [{ type: "text", text: "HUMAN_GATE: run /design approve." }], isError: true };
-			}
-			state.design.status = "locked";
-			state.design.required = true;
-			state.design.version = params.version || "1.0";
-			state.phase = "aatp";
-			refreshArtifactHashes(ctx.cwd, state);
-			invalidateQa(state);
-			persist(ctx.cwd, state);
-			return { content: [{ type: "text", text: `DESIGN LOCKED v${state.design.version}` }], details: state };
-		},
-	});
-
-	pi.registerTool({
 		name: "report_conflict",
 		label: "Report Conflict",
-		description: "Worker escape hatch. Does not unlock. PLAN_CONFLICT | DESIGN_CONFLICT | DEPENDENCY_CONFLICT | SCOPE_INSUFFICIENT.",
+		description: "Worker escape hatch. Does not unlock locked artifacts.",
 		loadMode: "essential",
 		approval: "write",
 		parameters: z.object({
@@ -272,7 +238,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 				content: [
 					{
 						type: "text",
-						text: `BLOCKED: ${params.kind}\n${params.reason}\n${params.evidence}\nDo not edit locked artifacts. Orchestrator revises via /plan3 or /design.`,
+						text: `BLOCKED: ${params.kind}\n${params.reason}\n${params.evidence}\nDo not edit locked artifacts. User revises via /plan-revise or /design.`,
 					},
 				],
 				details: state,
@@ -283,13 +249,13 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "aatp_begin",
 		label: "AATP Begin",
-		description: "Mark a ticket active and bind allowed_files from docs/AATP.",
+		description: "Mark a ticket active. Status lives in foundry-state, not the markdown spec.",
 		loadMode: "essential",
 		approval: "write",
 		parameters: z.object({ id: z.string() }),
 		async execute(_id, params, _s, _u, ctx) {
 			const state = loadState(ctx.cwd);
-			const listed = listAatp(ctx.cwd).find((t) => t.id === params.id);
+			const listed = listAatpSpecs(ctx.cwd).find((t) => t.id === params.id);
 			const ticket = state.tickets[params.id] ?? {
 				id: params.id,
 				status: "ready" as const,
@@ -312,7 +278,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "aatp_complete",
 		label: "AATP Complete",
-		description: "Mark a ticket completed with evidence. Extension-owned status.",
+		description: "Mark a ticket completed in foundry-state. Does not rewrite the spec markdown.",
 		loadMode: "essential",
 		approval: "write",
 		parameters: z.object({ id: z.string(), evidence: z.string() }),
@@ -332,7 +298,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "aatp_block",
 		label: "AATP Block",
-		description: "Mark a ticket blocked.",
+		description: "Mark a ticket blocked in foundry-state.",
 		loadMode: "essential",
 		approval: "write",
 		parameters: z.object({ id: z.string(), kind: z.string(), evidence: z.string() }),
@@ -355,190 +321,96 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		},
 	});
 
-
 	pi.registerTool({
-		name: "plan_revise",
-		label: "Plan Revise",
-		description: "Open a locked plan for a new GLM→Grok→Sol version. Returns unlockToken for plan_commit.",
+		name: "aatp_review",
+		label: "AATP Review",
+		description: "Record independent review verdict on a completed ticket.",
 		loadMode: "essential",
 		approval: "write",
-		parameters: z.object({ reason: z.string().optional() }),
+		parameters: z.object({
+			id: z.string(),
+			verdict: z.enum(["APPROVE", "REQUEST_CHANGES", "BLOCK"]),
+		}),
 		async execute(_id, params, _s, _u, ctx) {
 			const state = loadState(ctx.cwd);
-			const t = token();
-			state.master_plan.status = "draft";
-			state.unlock_token = t;
-			state.phase = "planning";
+			const ticket = state.tickets[params.id];
+			if (!ticket) return { content: [{ type: "text", text: "Unknown ticket." }], isError: true };
+			ticket.review = params.verdict;
+			if (params.verdict === "REQUEST_CHANGES") ticket.status = "ready";
+			if (params.verdict === "BLOCK") ticket.status = "blocked";
+			state.tickets[params.id] = ticket;
+			recountTickets(state);
+			invalidateQa(state);
 			persist(ctx.cwd, state);
-			return {
-				content: [{ type: "text", text: `REVISING plan. unlockToken=${t}\n${params.reason ?? ""}` }],
-				details: { unlockToken: t },
-			};
+			return { content: [{ type: "text", text: `${params.id} review=${params.verdict}` }], details: ticket };
+		},
+	});
+
+	pi.registerTool({
+		name: "foundry_skill_read",
+		label: "Foundry Skill Read",
+		description: "Load 1–3 Foundry skill bodies on demand.",
+		loadMode: "essential",
+		approval: "read",
+		parameters: z.object({ ids: z.array(z.string()) }),
+		async execute(_id, params) {
+			const registry = loadRegistry(join(ROOT, "skills"));
+			const wanted = params.ids.slice(0, 3);
+			const bodies = wanted.map((id) => {
+				const hit = registry.find((s) => s.id === id);
+				return hit ? `# ${hit.id}\n${hit.description}\n\n${hit.body}` : `# ${id}\n(not found)`;
+			});
+			return { content: [{ type: "text", text: bodies.join("\n\n") }], details: { ids: wanted } };
 		},
 	});
 
 	pi.registerCommand("foundry", {
 		description: "Next foundry step — the only command a non-coder needs",
-		handler: async (args, ctx) => {
-			const state = loadState(ctx.cwd);
-			const idea = args.trim();
-			if (!existsSync(join(ctx.cwd, ".omp", "foundry-state.yml")) && !existsSync(join(ctx.cwd, ".omp", "company-state.yml"))) {
-				orchestrate(
-					pi,
-					"Start the foundry.",
-					[
-						"Call company_init.",
-						idea ? `User idea: ${idea}` : "If the user has not described the product, ask in one short question then spawn product-analyst.",
-						"Spawn blocking product-analyst. Then product_approve.",
-					].join("\n"),
-				);
-				return;
-			}
-			if (!productOk(state)) {
-				orchestrate(pi, "Finish the product.", "Spawn blocking product-analyst, then product_approve. Do not plan or code.");
-				return;
-			}
-			if (state.master_plan.status !== "locked") {
-				orchestrate(
-					pi,
-					"Run /plan3 automatically.",
-					"Spawn blocking plan-drafter, then plan-critic, then plan-finalizer. Finalizer calls plan_commit. Do not implement.",
-				);
-				return;
-			}
-			if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") {
-				orchestrate(
-					pi,
-					"Design is required.",
-					"Spawn blocking design-foundation and show a real preview. Wait for the user to say approve or skip. Do not implement features.",
-				);
-				return;
-			}
-			const tasks = listAatp(ctx.cwd);
-			if (tasks.length === 0) {
-				orchestrate(pi, "Generate AATP.", "Write docs/AATP/AATP-*.md + INDEX.md from MASTER_PLAN. Do not implement.");
-				return;
-			}
-			const ready = readyIndependent(tasks);
-			const counts = summarizeAatp(tasks);
-			if (ready.length > 0) {
-				orchestrate(
-					pi,
-					"Build the next independent AATP layer.",
-					ready.map((t) => `${t.id} → ${routeAgent(t.risk)} :: ${t.objective}`).join("\n"),
-				);
-				return;
-			}
-			if (counts.completed === counts.total && counts.total > 0 && state.qa.status !== "pass") {
-				orchestrate(pi, "All AATP done. Run /verify.", "Execute real test/build commands. Write docs/reports/QA.md.");
-				return;
-			}
-			orchestrate(pi, "Run /release-check.", "Compare gates and report what is still red.");
-		},
+		handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args),
 	});
 
 	pi.registerCommand("company", {
 		description: "Alias of /foundry",
-		handler: async (args, ctx) => {
-			const state = loadState(ctx.cwd);
-			const idea = args.trim();
-			if (!existsSync(join(ctx.cwd, ".omp", "company-state.yml"))) {
-				orchestrate(
-					pi,
-					"Start the company workflow.",
-					[
-						"Call company_init.",
-						idea ? `User idea: ${idea}` : "If the user has not described the product, ask in one short question then spawn product-analyst.",
-						"Spawn blocking product-analyst. Then product_approve.",
-					].join("\n"),
-				);
-				return;
-			}
-			if (!productOk(state)) {
-				orchestrate(pi, "Finish the product.", "Spawn blocking product-analyst, then product_approve. Do not plan or code.");
-				return;
-			}
-			if (state.master_plan.status !== "locked") {
-				orchestrate(
-					pi,
-					"Run /plan3 automatically.",
-					"Spawn blocking plan-drafter, then plan-critic, then plan-finalizer. Finalizer calls plan_commit. Do not implement.",
-				);
-				return;
-			}
-			if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") {
-				orchestrate(
-					pi,
-					"Design is required.",
-					"Spawn blocking design-foundation and show a real preview. Wait for the user to say approve or skip. Do not implement features.",
-				);
-				return;
-			}
-			const tasks = listAatp(ctx.cwd);
-			if (tasks.length === 0) {
-				orchestrate(pi, "Generate AATP.", "Write docs/AATP/AATP-*.md + INDEX.md from MASTER_PLAN. Do not implement.");
-				return;
-			}
-			const ready = readyIndependent(tasks);
-			const counts = summarizeAatp(tasks);
-			if (ready.length > 0) {
-				orchestrate(
-					pi,
-					"Build the next independent AATP layer.",
-					ready.map((t) => `${t.id} → ${routeAgent(t.risk)} :: ${t.objective}`).join("\n"),
-				);
-				return;
-			}
-			if (counts.completed === counts.total && counts.total > 0 && state.qa.status !== "pass") {
-				orchestrate(pi, "All AATP done. Run /verify.", "Execute real test/build commands. Write docs/reports/QA.md.");
-				return;
-			}
-			orchestrate(pi, "Run /release-check.", "Compare gates and report what is still red.");
-		},
+		handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args),
+	});
+
+	const initHandler = async (args: string, ctx: { cwd: string; waitForIdle: () => Promise<void> }) => {
+		await ctx.waitForIdle();
+		orchestrate(
+			pi,
+			"Bootstrap Foundry.",
+			[
+				"Call company_init.",
+				"If docs/PRODUCT.md is still a stub, spawn blocking product-analyst.",
+				"Then wait for /foundry-approve product.",
+				args.trim() ? `Project: ${args.trim()}` : "",
+			]
+				.filter(Boolean)
+				.join("\n"),
+		);
+	};
+
+	pi.registerCommand("foundry-init", {
+		description: "Bootstrap PRODUCT/docs + foundry state",
+		handler: initHandler,
 	});
 
 	pi.registerCommand("company-init", {
-		description: "Bootstrap PRODUCT/docs + company state",
-		handler: async (args, ctx) => {
-			await ctx.waitForIdle();
-			orchestrate(
-				pi,
-				"Read skill://three-stage-plan and run company init.",
-				[
-					"Call company_init.",
-					"If docs/PRODUCT.md is still a stub, spawn blocking product-analyst.",
-					"Then product_approve when PRODUCT is decision-complete.",
-					args.trim() ? `Project: ${args.trim()}` : "",
-				]
-					.filter(Boolean)
-					.join("\n"),
-			);
-		},
+		description: "Alias of /foundry-init",
+		handler: initHandler,
 	});
 
 	pi.registerCommand("plan3", {
-		description: "GLM draft → Grok critique → Sol lock",
+		description: "GLM draft → Grok critique → Sol write; human locks",
 		handler: async (args, ctx) => {
 			const state = loadState(ctx.cwd);
 			const missing = requireProduct(state);
 			if (missing) {
 				ctx.ui.notify(missing, "warning");
-				orchestrate(pi, "Product first.", "Spawn product-analyst, then product_approve, then /plan3 again.");
+				orchestrate(pi, "Product first.", "Spawn product-analyst, then wait for /foundry-approve product, then /plan3 again.");
 				return;
 			}
-			orchestrate(
-				pi,
-				"Run /plan3. Read skill://three-stage-plan.",
-				[
-					"Spawn blocking, sequential: plan-drafter → plan-critic → plan-finalizer.",
-					"Artifacts: docs/planning/MASTER_PLAN_DRAFT.md, docs/planning/PLAN_REVIEW.md, docs/MASTER_PLAN.md.",
-					"Finalizer must call plan_commit.",
-					"Do not implement.",
-					args.trim(),
-				]
-					.filter(Boolean)
-					.join("\n"),
-			);
+			orchestrate(pi, "Run /plan3. Read skill://three-stage-plan.", [PLAN3, args.trim()].filter(Boolean).join("\n"));
 		},
 	});
 
@@ -550,7 +422,21 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 				orchestrate(pi, "Product first.", "Approve PRODUCT.md then /plan3.");
 				return;
 			}
-			orchestrate(pi, "Alias /plan3", `Run the /plan3 pipeline.\n${args}`);
+			orchestrate(pi, "Alias /plan3", `${PLAN3}\n${args}`);
+		},
+	});
+
+	pi.registerCommand("plan-revise", {
+		description: "Human-only: reopen a locked plan for a new PLAN3 cycle",
+		handler: async (args, ctx) => {
+			const state = loadState(ctx.cwd);
+			state.master_plan.status = "draft";
+			state.unlock_token = token();
+			state.phase = "planning";
+			state.conflict = { kind: "PLAN_CONFLICT", reason: args.trim() || "user revise" };
+			invalidateQa(state);
+			persist(ctx.cwd, state);
+			orchestrate(pi, "PLAN reopened by user.", "Run /plan3. Then /foundry-approve plan.");
 		},
 	});
 
@@ -563,8 +449,8 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 				ctx.ui.notify(gate, "warning");
 				return;
 			}
+			const sub = args.trim().toLowerCase();
 			if (sub === "approve") {
-				grantCap(state, "design_lock");
 				state.design.status = "locked";
 				state.design.required = true;
 				state.design.version = state.design.version === "0" ? "1.0" : state.design.version;
@@ -572,14 +458,14 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 				refreshArtifactHashes(ctx.cwd, state);
 				invalidateQa(state);
 				persist(ctx.cwd, state);
-				orchestrate(pi, "DESIGN LOCKED by user.", "Continue with /aatp. Do not call design_lock.");
+				orchestrate(pi, "DESIGN LOCKED by user.", "Continue with /aatp.");
 				return;
 			}
 			if (sub === "skip") {
-				grantCap(state, "design_skip");
 				state.design.required = false;
 				state.design.status = "not_required";
 				state.phase = "aatp";
+				invalidateQa(state);
 				persist(ctx.cwd, state);
 				orchestrate(pi, "DESIGN skipped by user.", "Continue with /aatp.");
 				return;
@@ -598,23 +484,24 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("foundry-approve", {
-		description: "Human gate: product | plan",
+		description: "Human gate: product | plan — performs the transition directly",
 		handler: async (args, ctx) => {
 			const which = args.trim().toLowerCase();
 			const state = loadState(ctx.cwd);
 			if (which === "product" || which === "approve-product") {
-				grantCap(state, "product_approve");
 				state.product.status = "approved";
 				state.phase = "planning";
 				refreshArtifactHashes(ctx.cwd, state);
+				invalidateQa(state);
 				persist(ctx.cwd, state);
 				orchestrate(pi, "PRODUCT approved by user.", "Run /plan3.");
 				return;
 			}
 			if (which === "plan" || which === "approve-plan") {
-				grantCap(state, "plan_lock");
 				state.master_plan.status = "locked";
 				state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version;
+				state.unlock_token = "";
+				state.conflict = { kind: "none", reason: "" };
 				state.phase = state.design.required ? "design" : "aatp";
 				refreshArtifactHashes(ctx.cwd, state);
 				invalidateQa(state);
@@ -640,10 +527,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 			orchestrate(
 				pi,
 				"Generate AATP. Read docs/AATP.md template.",
-				[
-					"Write docs/AATP/AATP-*.md then call aatp_begin only when implementing.",
-					"Do not implement in this turn.",
-				].join("\n"),
+				"Write docs/AATP/AATP-*.md then call aatp_begin only when implementing. Do not implement in this turn.",
 			);
 		},
 	});
@@ -657,7 +541,8 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 				ctx.ui.notify(gate, "warning");
 				return;
 			}
-			const tasks = listAatp(ctx.cwd);
+			seedTickets(state, listAatpSpecs(ctx.cwd));
+			const tasks = hydrateAatp(ctx.cwd, state);
 			writeAatpIndex(ctx.cwd, tasks);
 			const ready = readyIndependent(tasks);
 			state.phase = "implementation";
@@ -669,7 +554,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 				[
 					`Ready (${ready.length}):`,
 					lines.join("\n") || "(none)",
-					"Spawn implementer/hard-implementer with isolated:true.",
+					"Spawn implementer / hard-implementer / smol-implementer with isolated:true.",
 					"Each worker: aatp_begin → implement → aatp_complete. Conflicts → report_conflict.",
 				].join("\n"),
 			);
@@ -685,7 +570,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 			orchestrate(
 				pi,
 				"Review AATP. Reviewer must not implement.",
-				`Spawn blocking reviewer. Target: ${args.trim() || "(latest completed)"}`,
+				`Spawn blocking reviewer. Call aatp_review. Target: ${args.trim() || "(latest completed)"}`,
 			);
 		},
 	});
@@ -716,14 +601,10 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 				`${state.master_plan.status === "locked" ? "✓" : "✗"} PLAN locked`,
 				`${!state.design.required || state.design.status === "locked" || state.design.status === "not_required" ? "✓" : "✗"} DESIGN`,
 				`${state.aatp.total > 0 && state.aatp.completed === state.aatp.total && state.aatp.blocked === 0 ? "✓" : "✗"} AATP complete`,
-				`${state.qa.status === "pass" ? "✓" : "✗"} QA pass @ ${state.qa.tree_sha || "no-sha"}`,
+				`${Object.values(state.tickets).every((t) => t.review === "APPROVE") && Object.keys(state.tickets).length > 0 ? "✓" : "✗"} reviews APPROVE`,
+				`${state.qa.status === "pass" ? "✓" : "✗"} QA pass @ ${state.qa.tree_sha || "no-sha"} (clean tree)`,
 			].join("\n");
 			orchestrate(pi, ready ? "RELEASE_READY=true (derived)." : "Release blocked (derived, not sticky).", report);
 		},
 	});
-
-}
-
-function productOk(state: CompanyState): boolean {
-	return state.product.status === "approved" || state.product.status === "locked";
 }

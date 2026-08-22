@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { resolveSkills } from "../src/skills/resolver";
 import { defaultState } from "../src/types";
 
-const skillsRoot = "C:/Users/HOME/.omp/pack/omp-company-workflow/skills";
+const skillsRoot = join(import.meta.dir, "..", "skills");
 
 function nextApp(): string {
 	const dir = mkdtempSync(join(tmpdir(), "foundry-"));

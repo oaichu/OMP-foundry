@@ -112,13 +112,13 @@ export const STATE_PATHS = [
 
 export const PRIVILEGED_TOOLS = new Set([
 	"company_init",
-	"foundry_init",
-	"product_approve",
-	"plan_commit",
-	"design_lock",
-	"design_skip",
-	"plan_revise",
-	"qa_record",
+	"company_status",
+	"aatp_begin",
+	"aatp_complete",
+	"aatp_block",
+	"aatp_review",
+	"report_conflict",
+	"foundry_skill_read",
 ]);
 
 export const CAP_TTL_MS = 10 * 60 * 1000;
