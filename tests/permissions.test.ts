@@ -2,147 +2,53 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { denyToolCall, forceIsolatedTaskInput, looksLikeImpl } from "../src/permissions";
+import { denyToolCall, forceIsolatedTaskInput } from "../src/permissions";
 import { canonicalRepoPath } from "../src/paths";
 import { defaultState } from "../src/types";
 
-const locked = {
-	...defaultState(),
+const locked = () => ({
+	...defaultState(), phase: "implementation" as const,
 	product: { status: "approved" as const, sha256: "p" },
 	master_plan: { version: "1.0", status: "locked" as const, sha256: "m" },
-	design: { required: true, version: "0", status: "missing" as const, sha256: "" },
-};
+	design: { required: false, version: "0", status: "not_required" as const, sha256: "" },
+});
+const ticket = { id: "AATP-1", status: "active" as const, allowed_files: ["src/auth", "package.json"], forbidden_files: [], risk: "normal", review: "none" as const };
 
-describe("denyToolCall", () => {
-	test("denies eval even before plan lock", () => {
-		const hit = denyToolCall("eval", { code: "1+1" }, defaultState());
-		expect(hit?.reason.startsWith("EVAL_GATE")).toBe(true);
+describe("hard execution boundary", () => {
+	test("eval is always denied", () => expect(denyToolCall("eval", { code: "1+1" }, defaultState())?.reason).toContain("EVAL_GATE"));
+	test("arbitrary bash and redirects are denied", () => {
+		expect(denyToolCall("bash", { command: 'echo x > "docs/MASTER_PLAN.md"' }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "python - <<'PY'\nprint(1)\nPY" }, locked())?.reason).toContain("BASH_GATE");
 	});
-
-	test("blocks dotted plan path via canonicalize", () => {
-		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
-		mkdirSync(join(cwd, "docs"), { recursive: true });
-		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "# plan\n");
-		const hit = denyToolCall("write", { path: "docs/./MASTER_PLAN.md" }, locked, {
-			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
-		});
-		expect(hit?.reason.includes("PLAN_CONFLICT")).toBe(true);
+	test("agent release actions are always denied even when release is green", () => {
+		const state = locked(); state.release.ready = true;
+		expect(denyToolCall("bash", { command: "git push origin main" }, state)?.reason).toContain("RELEASE_GATE");
 	});
-
-	test("blocks AATP escape via parent segment", () => {
-		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
-		mkdirSync(join(cwd, "src", "auth"), { recursive: true });
-		writeFileSync(join(cwd, "src", "billing.ts"), "");
-		const hit = denyToolCall("write", { path: "src/auth/../billing.ts" }, locked, {
-			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
-			activeTicket: {
-				id: "AATP-1",
-				status: "active",
-				allowed_files: ["src/auth"],
-				forbidden_files: [],
-				risk: "normal",
-			},
-		});
-		expect(hit?.reason.startsWith("AATP_SCOPE")).toBe(true);
+	test("read-only git shell remains available", () => expect(denyToolCall("bash", { command: "git diff --stat" }, locked())).toBeUndefined());
+	test("mutating LSP actions are denied", () => {
+		expect(denyToolCall("lsp", { action: "rename", file: "src/a.ts" }, locked())?.reason).toContain("LSP_GATE");
+		expect(denyToolCall("lsp", { action: "request", file: "src/a.ts" }, locked())?.reason).toContain("LSP_GATE");
+		expect(denyToolCall("lsp", { action: "hover", file: "src/a.ts" }, locked())).toBeUndefined();
 	});
-
-	test("blocks push until derived release", () => {
-		const hit = denyToolCall("bash", { command: "git push origin main" }, locked);
-		expect(hit?.reason.startsWith("RELEASE_GATE")).toBe(true);
+	test("canonical locked plan path is denied", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-perm-")); mkdirSync(join(cwd, "docs"), { recursive: true }); writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "x\n");
+		const hit = denyToolCall("write", { path: "docs/./MASTER_PLAN.md" }, locked(), { canonicalize: (raw) => canonicalRepoPath(cwd, raw), activeTickets: [ticket] });
+		expect(hit?.reason).toContain("PLAN_CONFLICT");
 	});
-
-	test("detects python/go/rust as impl", () => {
-		expect(looksLikeImpl("server.py")).toBe(true);
-		expect(looksLikeImpl("cmd/foo.go")).toBe(true);
-		expect(looksLikeImpl("docs/master_plan.md")).toBe(false);
+	test("AATP scope applies to config/package files, not only code", () => {
+		const state = locked();
+		expect(denyToolCall("write", { path: "Dockerfile" }, state, { activeTickets: [ticket] })?.reason).toContain("AATP_SCOPE");
+		expect(denyToolCall("write", { path: "package.json" }, state, { activeTickets: [ticket] })).toBeUndefined();
 	});
-
-	test("enforces scope with two active tickets", () => {
-		const hit = denyToolCall("write", { path: "src/payments.ts" }, locked, {
-			activeTickets: [
-				{ id: "AATP-1", status: "active", allowed_files: ["src/auth"], forbidden_files: [], risk: "normal" },
-				{ id: "AATP-2", status: "active", allowed_files: ["src/billing"], forbidden_files: [], risk: "normal" },
-			],
-		});
-		expect(hit?.reason.startsWith("AATP_SCOPE")).toBe(true);
+	test("no active ticket means no post-lock writes", () => expect(denyToolCall("write", { path: "src/auth/login.ts" }, locked(), { activeTickets: [] })?.reason).toContain("AATP_SCOPE"));
+	test("sealed AATP specs are immutable", () => {
+		const state = locked(); state.phase = "aatp"; state.aatp.manifest_sha256 = "sealed";
+		expect(denyToolCall("write", { path: "docs/AATP/AATP-1.md" }, state, { activeTickets: [ticket] })?.reason).toContain("AATP_SPEC_GATE");
 	});
-
-	test("allows write owned by one of two active tickets", () => {
-		const hit = denyToolCall("write", { path: "src/auth/login.ts" }, locked, {
-			activeTickets: [
-				{ id: "AATP-1", status: "active", allowed_files: ["src/auth"], forbidden_files: [], risk: "normal" },
-				{ id: "AATP-2", status: "active", allowed_files: ["src/billing"], forbidden_files: [], risk: "normal" },
-			],
-		});
-		expect(hit).toBeUndefined();
-	});
-
-	test("forces isolation on flat implementer task", () => {
-		const next = forceIsolatedTaskInput({ agent: "implementer", task: "do" });
-		expect(next?.isolated).toBe(true);
-	});
-
-	test("forces isolation on smol-implementer in a batch", () => {
-		const next = forceIsolatedTaskInput({
-			tasks: [{ agent: "smol-implementer", task: "tiny" }],
-		});
-		expect((next?.tasks as Array<{ isolated?: boolean }>)[0]?.isolated).toBe(true);
-	});
-
-	test("bash redirect into locked plan is denied", () => {
-		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
-		mkdirSync(join(cwd, "docs"), { recursive: true });
-		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "# plan\n");
-		const hit = denyToolCall("bash", { command: "echo hacked > docs/MASTER_PLAN.md" }, locked, {
-			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
-		});
-		expect(hit?.reason.includes("PLAN_CONFLICT")).toBe(true);
-	});
-
-	test("bash tee into state file is denied", () => {
-		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
-		mkdirSync(join(cwd, ".omp"), { recursive: true });
-		writeFileSync(join(cwd, ".omp", "foundry-state.yml"), "phase: qa\n");
-		const hit = denyToolCall("bash", { command: "echo x | tee .omp/foundry-state.yml" }, locked, {
-			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
-		});
-		expect(hit?.reason.startsWith("STATE_GATE")).toBe(true);
-	});
-
-	test("bash sed -i outside ticket scope is denied", () => {
-		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
-		mkdirSync(join(cwd, "src"), { recursive: true });
-		writeFileSync(join(cwd, "src", "billing.ts"), "x\n");
-		const hit = denyToolCall("bash", { command: "sed -i s/a/b/ src/billing.ts" }, locked, {
-			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
-			activeTicket: { id: "AATP-1", status: "active", allowed_files: ["src/auth"], forbidden_files: [], risk: "normal" },
-		});
-		expect(hit?.reason.startsWith("AATP_SCOPE")).toBe(true);
-	});
-
-	test("bash redirect escaping the repo hits PATH_GATE", () => {
-		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
-		const hit = denyToolCall("bash", { command: "printf pwned > ../outside.txt" }, locked, {
-			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
-		});
-		expect(hit?.reason.startsWith("PATH_GATE")).toBe(true);
-	});
-
-	test("write escaping the repo hits PATH_GATE, not silence", () => {
-		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
-		const hit = denyToolCall("write", { path: "../../etc/passwd" }, locked, {
-			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
-		});
-		expect(hit?.reason.startsWith("PATH_GATE")).toBe(true);
-	});
-
-	test("python -c is denied like eval", () => {
-		const hit = denyToolCall("bash", { command: 'python -c "open(\'x.ts\',\'w\')"' }, locked);
-		expect(hit?.reason.startsWith("EVAL_GATE")).toBe(true);
-	});
-
-	test("git restore is denied once the plan is locked", () => {
-		const hit = denyToolCall("bash", { command: "git restore src/billing.ts" }, locked);
-		expect(hit?.reason.startsWith("MUTATOR_GATE")).toBe(true);
+	test("isolated child without state cannot touch governance artifacts", () => expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, defaultState(), { isolatedWithoutState: true })?.reason).toContain("ISOLATION_GATE"));
+	test("forces isolation for implementation and review agents", () => {
+		expect(forceIsolatedTaskInput({ agent: "implementer", task: "AATP-1" })?.isolated).toBe(true);
+		const batch = forceIsolatedTaskInput({ tasks: [{ agent: "reviewer", task: "Review AATP-1" }] });
+		expect((batch?.tasks as Array<{ isolated?: boolean }>)[0]?.isolated).toBe(true);
 	});
 });

@@ -1,11 +1,11 @@
 ---
 name: smol-implementer
-description: "Trivial AATP worker on @smol. Same Foundry contract as implementer. Never use bundled sonic."
-tools: read, grep, glob, write, edit, bash, lsp, report_conflict, aatp_begin, aatp_complete, aatp_block
+description: "Trivial governed AATP worker on @smol. Patch only; never bundled sonic."
+tools: read, grep, glob, write, edit, lsp
 model: "@smol"
 thinking-level: low
 blocking: true
 read-summarize: true
 ---
 
-Same contract as implementer. `aatp_begin` → implement → `aatp_complete`. No eval. No locked artifacts.
+Same governed contract as implementer. Exactly one AATP. No lifecycle tools, no governance-artifact edits, no arbitrary shell, and no mutating LSP actions. Parent Foundry validates/applies/commits the isolated patch.

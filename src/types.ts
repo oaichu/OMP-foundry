@@ -11,6 +11,7 @@ export type Phase =
 export type ArtifactStatus = "missing" | "draft" | "approved" | "locked" | "not_required";
 export type QaStatus = "pending" | "pass" | "fail";
 export type TicketStatus = "ready" | "active" | "completed" | "blocked";
+export type ReviewVerdict = "none" | "APPROVE" | "REQUEST_CHANGES" | "BLOCK";
 export type ConflictKind =
 	| "none"
 	| "PLAN_CONFLICT"
@@ -18,16 +19,15 @@ export type ConflictKind =
 	| "DEPENDENCY_CONFLICT"
 	| "SCOPE_INSUFFICIENT";
 
-export const CURRENT_STATE_SCHEMA = 1;
-export const FOUNDRY_VERSION = "0.3.0";
+export const CURRENT_STATE_SCHEMA = 2;
+export const FOUNDRY_VERSION = "0.3.1";
+
 export class StateError extends Error {
 	constructor(message: string) {
 		super(message);
 		this.name = "StateError";
 	}
 }
-
-
 
 export interface AatpTicket {
 	id: string;
@@ -36,7 +36,10 @@ export interface AatpTicket {
 	forbidden_files: string[];
 	risk: string;
 	agent?: string;
-	review?: "none" | "APPROVE" | "REQUEST_CHANGES" | "BLOCK";
+	review?: ReviewVerdict;
+	review_by?: string;
+	review_evidence_sha256?: string;
+	implementation_evidence_sha256?: string;
 }
 
 export interface CompanyState {
@@ -48,13 +51,19 @@ export interface CompanyState {
 	master_plan: { version: string; status: ArtifactStatus; sha256: string };
 	design: { required: boolean; version: string; status: ArtifactStatus; sha256: string };
 	tickets: Record<string, AatpTicket>;
-	aatp: { total: number; ready: number; active: number; completed: number; blocked: number };
+	aatp: {
+		total: number;
+		ready: number;
+		active: number;
+		completed: number;
+		blocked: number;
+		manifest_sha256: string;
+	};
 	qa: { status: QaStatus; tree_sha: string };
 	release: { ready: boolean; tree_sha: string };
 	unlock_token: string;
 	conflict: { kind: ConflictKind; reason: string };
 }
-
 
 export const STATE_REL = ".omp/foundry-state.yml";
 
@@ -69,18 +78,10 @@ export const PHASES: Phase[] = [
 	"release",
 ];
 
-export const ARTIFACT_STATUSES: ArtifactStatus[] = [
-	"missing",
-	"draft",
-	"approved",
-	"locked",
-	"not_required",
-];
-
+export const ARTIFACT_STATUSES: ArtifactStatus[] = ["missing", "draft", "approved", "locked", "not_required"];
 export const QA_STATUSES: QaStatus[] = ["pending", "pass", "fail"];
-
 export const TICKET_STATUSES: TicketStatus[] = ["ready", "active", "completed", "blocked"];
-
+export const REVIEW_VERDICTS: ReviewVerdict[] = ["none", "APPROVE", "REQUEST_CHANGES", "BLOCK"];
 export const CONFLICT_KINDS: ConflictKind[] = [
 	"none",
 	"PLAN_CONFLICT",
@@ -99,7 +100,7 @@ export function defaultState(): CompanyState {
 		master_plan: { version: "0", status: "missing", sha256: "" },
 		design: { required: false, version: "0", status: "missing", sha256: "" },
 		tickets: {},
-		aatp: { total: 0, ready: 0, active: 0, completed: 0, blocked: 0 },
+		aatp: { total: 0, ready: 0, active: 0, completed: 0, blocked: 0, manifest_sha256: "" },
 		qa: { status: "pending", tree_sha: "" },
 		release: { ready: false, tree_sha: "" },
 		unlock_token: "",
@@ -112,10 +113,9 @@ export const LOCKED_PLAN_PATHS = [
 	"docs/planning/master_plan_draft.md",
 	"docs/planning/plan_review.md",
 ];
-
 export const LOCKED_PRODUCT_PATHS = ["docs/product.md"];
-
 export const LOCKED_DESIGN_PATHS = ["docs/design.md", "src/design-system/", "src/designsystem/"];
+export const LOCKED_AATP_PATHS = ["docs/aatp/"];
 
 export const STATE_PATHS = [
 	".omp/foundry-state.yml",
@@ -124,14 +124,4 @@ export const STATE_PATHS = [
 	".omp/company-state.yaml",
 ];
 
-export const PRIVILEGED_TOOLS = new Set([
-	"company_init",
-	"company_status",
-	"aatp_begin",
-	"aatp_complete",
-	"aatp_block",
-	"aatp_review",
-	"report_conflict",
-	"foundry_skill_read",
-]);
-
+export const PRIVILEGED_TOOLS = new Set(["company_init", "company_status", "foundry_skill_read"]);
