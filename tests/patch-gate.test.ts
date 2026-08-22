@@ -10,6 +10,9 @@ function gitRepo(): string {
 	const dir = mkdtempSync(join(tmpdir(), "foundry-patch-"));
 	const git = (args: string[]) => spawnSync("git", args, { cwd: dir, encoding: "utf8" });
 	git(["init"]); git(["config", "user.email", "t@t"]); git(["config", "user.name", "t"]);
+	// Pin line endings so generated patches and applied files are byte-identical
+	// on Windows (autocrlf would rewrite LF to CRLF and break equality checks).
+	git(["config", "core.autocrlf", "false"]);
 	mkdirSync(join(dir, "src", "auth"), { recursive: true }); writeFileSync(join(dir, "src", "auth", "a.ts"), "1\n"); writeFileSync(join(dir, "package.json"), "{}\n");
 	git(["add", "."]); git(["commit", "-m", "init"]); return dir;
 }

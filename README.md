@@ -6,62 +6,74 @@
 
 <p align="center">
   <strong>Lock the plan. Then pour the code.</strong><br/>
-  A governed AI software foundry for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a>.
+  A governed AI software foundry for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a> —<br/>
+  <sub>where the architecture is <b>locked</b>, not merely remembered.</sub>
 </p>
 
 <p align="center">
+  <a href="https://github.com/can1357/oh-my-pi"><img alt="Oh My Pi 18+" src="https://img.shields.io/badge/Oh%20My%20Pi-18%2B-E4572E?style=for-the-badge"/></a>
   <a href="https://github.com/oaichu/omp-foundry/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/oaichu/omp-foundry?style=for-the-badge&label=release&color=FFB020"/></a>
   <a href="https://github.com/oaichu/omp-foundry/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/oaichu/omp-foundry/ci.yml?branch=main&style=for-the-badge&label=CI&color=2F9E6E"/></a>
   <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-14110E?style=for-the-badge"/></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/oaichu/omp-foundry/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/oaichu/omp-foundry?style=for-the-badge&label=star%20the%20foundry&logo=github&color=FF9F1C"/></a>
+  <img alt="install" src="https://img.shields.io/badge/install-omp%20plugin%20link-14110E?style=for-the-badge"/>
+</p>
+
+<p align="center">
+  <img src="docs/assets/hero.svg" width="100%" alt="Crucible pouring into a locked gate — OMP Foundry"/>
+</p>
+
 ---
+
+## Your agent “remembers” the architecture — until it doesn’t
+
+Every AI coding “company” is a long system prompt. The model *remembers* not to rewrite the plan, not to touch the locked design, not to push before QA. Then, at 2 a.m., on a 40-file refactor, it doesn’t — and it *helpfully* rewrites your architecture.
+
+Foundry makes that impossible, not unlikely. Not a polite request in a prompt — a `tool_call` deny enforced at the OMP extension boundary, by a state machine the model cannot edit:
+
+<p align="center">
+  <img src="docs/assets/terminal.svg" width="100%" alt="Foundry refusing agent overreach in real time"/>
+</p>
+
+After an AATP work order is sealed, **the model no longer owns governance transitions. Foundry does.** Workers run isolated with `apply=false`, return a patch artifact, and Foundry validates every canonical path against the exact ticket **before** anything touches your repository.
 
 ## What Foundry enforces
 
-Foundry is an **OMP tool-execution governance layer**, not an OS/container sandbox. Its purpose is to make the software workflow deterministic at the extension boundary:
-
 ```text
-PRODUCT
-  ↓ human approve
-3-stage PLAN
-  ↓ human lock
-DESIGN (when UI exists)
-  ↓ human lock/skip
-AATP DAG + sealed work-order manifest
-  ↓
-isolated worker, apply=false
-  ↓
-Foundry validates exact patch paths
-  ↓
-Foundry applies + commits valid patch
-  ↓
-independent review + evidence
-  ↓
+PRODUCT            ─ human approve ─┐
+3-stage PLAN       ─ human lock ────┤
+DESIGN (if UI)     ─ human lock/skip┤
+AATP DAG sealed manifest            ▼
+isolated worker (apply=false) → patch artifact
+Foundry validates exact paths → Foundry applies + commits
+independent review + hashed evidence
 deterministic QA on clean committed HEAD
-  ↓
-derived release gate
+derived release gate → you ship from a human shell
 ```
 
-The model does **not** own governance state transitions after the AATP is sealed. Foundry does.
+### Hard boundaries — every row is a real deny
 
-### Hard boundaries
-
-| Attempt | Result |
+| The “helpful” agent tries… | Foundry answers |
 | --- | --- |
-| Edit approved PRODUCT / locked PLAN / locked DESIGN | denied |
-| Edit sealed `docs/AATP/*` | denied |
-| Worker touches a file outside its exact `allowed_files` | patch rejected before apply |
-| Escape repository through `..` or symlink | denied by canonical path gate |
-| Use `eval` | denied for the Foundry session |
-| Use mutating LSP (`rename`, `rename_file`, `code_actions`, raw `request`, `reload`) | denied |
-| Use arbitrary agent shell / redirects / heredocs | denied |
-| Agent `git push`, publish, deploy, Docker push, release creation | always denied |
-| Worker tries to call AATP lifecycle tools directly | denied |
-| Review APPROVE without matching review report evidence | denied |
-| Release after QA with a dirty/different tree | denied |
+| Rewrite approved PRODUCT / locked PLAN / DESIGN | `BLOCKED: PLAN_CONFLICT. MASTER_PLAN is locked.` |
+| Edit a sealed `docs/AATP/*` work order | `AATP_SPEC_GATE: specs are sealed for this plan.` |
+| Patch a file outside its exact `allowed_files` | rejected **before apply** — your tree never sees it |
+| Escape the repo via `..` or a symlinked folder | `PATH_GATE: path escapes the repository: …` |
+| Hide a mutation in shell (`echo >`, heredoc, `sed -i`) | `BASH_GATE: arbitrary shell is denied in Foundry.` |
+| Run `eval` / `node -e` / `python -c` | `EVAL_GATE: … denied for the entire Foundry session.` |
+| Mutate code through LSP (`rename`, `code_actions`) | `LSP_GATE: mutating LSP action … is denied.` |
+| Transition its own ticket lifecycle | `LIFECYCLE_GATE: AATP lifecycle is parent-extension-owned.` |
+| Self-approve its work | review requires a completed ticket, an **independent** reviewer identity, and matching hashed evidence |
+| `git push` / `npm publish` / deploy / Docker push / `gh release` | `RELEASE_GATE: agent push/publish/deploy is always denied.` |
 
-Implementation and review workers run through OMP isolation with **`task.isolation.apply=false`**. OMP returns a patch artifact; Foundry validates every canonical changed path against the exact ticket **before** applying it to the parent repository.
+Invalid worker patches are never applied; rollback is patch-specific — Foundry never uses `git reset --hard` or `git clean -fd` on your tree.
+
+<p align="center">
+  <img src="docs/assets/gates.svg" width="100%" alt="Plan, design, and release writes are refused — not requested"/>
+</p>
 
 ## Install
 
@@ -71,14 +83,14 @@ cd omp-foundry
 omp plugin link .
 ```
 
-Restart OMP, then in the project you want Foundry to govern:
+Restart OMP, then in the project you want governed:
 
 ```text
 /foundry-init
 /foundry-doctor
 ```
 
-On a project without `.omp/config.yml`, Foundry creates:
+`/foundry-init` writes safe isolation defaults (`.omp/config.yml`, never overwritten if you have one):
 
 ```yaml
 task:
@@ -87,193 +99,102 @@ task:
     apply: false
 ```
 
-If the project already has `.omp/config.yml`, Foundry **does not overwrite it**. `/foundry-doctor` checks the effective OMP settings and blocks governed workers until isolation is enabled and `apply=false`.
+`/foundry-doctor` verifies the effective OMP isolation contract and blocks governed workers until isolation is on and `apply=false`. Foundry ignores only its own runtime state — your project OMP config stays versionable.
 
-Foundry ignores only its own runtime state files. It does **not** ignore the whole `.omp/` directory, so project OMP configuration remains versionable if you choose to commit it.
+## Everyday
 
-## Everyday workflow
-
-Usually keep running:
+One command, always:
 
 ```text
 /foundry
 ```
 
-It reports the next legal step.
+It reports the next legal step. You intervene at exactly four human gates — **product · plan lock · design · release**.
 
 | Command | Purpose |
 | --- | --- |
-| `/foundry-init` | scaffold Foundry documents/state and safe isolation defaults |
-| `/foundry-doctor` | verify OMP isolation contract |
-| `/foundry` | next legal workflow step |
-| `/foundry-approve product` | human product gate |
-| `/plan3` | drafter → critic → finalizer |
-| `/foundry-approve plan` | human plan lock |
-| `/plan-revise` | human-only reopen; invalidates downstream AATP/review/QA |
-| `/design` | generate design foundation + preview |
-| `/design approve` / `/design skip` | human design gate |
-| `/aatp` | generate AATP specs from locked plan/design |
-| `/build` | validate/seal AATP manifest and run ready DAG layer |
-| `/review AATP-xxx` | isolated independent review |
-| `/verify` | deterministic project verification |
-| `/release-check` | derive release readiness from current evidence |
-| `/foundry-version` | installed Foundry, OMP version, latest stable release |
+| `/foundry` | Next legal step |
+| `/foundry-init` · `/foundry-doctor` | Scaffold + verify isolation contract |
+| `/foundry-approve product\|plan` | Human gates |
+| `/plan3` · `/plan-revise` | Drafter → critic → finalizer · human-only reopen (invalidates AATP/review/QA) |
+| `/design` · `/design approve\|skip` | Design foundation + preview · human gate |
+| `/aatp` · `/build` | Generate specs · seal manifest, run ready DAG layer |
+| `/review AATP-xxx` | Isolated independent review |
+| `/verify` | Deterministic project verification |
+| `/release-check` | Derive release readiness from current evidence |
+| `/foundry-version` | Installed + OMP + latest stable release |
 
-## AATP execution model
+## How a work order runs
 
-Each `docs/AATP/AATP-*.md` is an immutable work-order specification once `/build` seals the manifest. It must contain an explicit non-empty `allowed_files` scope and valid dependencies.
+Each `docs/AATP/AATP-*.md` is an immutable work order once `/build` seals the manifest — explicit `allowed_files`, valid dependencies. For every ready item:
 
-For each ready item:
+1. Parent validates the exact `AATP-*` binding (missing/ambiguous/duplicate → fail closed).
+2. State transitions `ready → active` — by Foundry, not the worker.
+3. One **blocking, isolated** worker runs with `apply=false`.
+4. OMP returns the worker’s patch artifact.
+5. Foundry canonicalizes every touched path and checks it against **that ticket only**.
+6. Valid → Foundry applies and commits. Invalid → never applied, tree untouched.
+7. Independent review writes exactly `docs/reports/REVIEW-<id>.md` and must echo `FOUNDRY_REVIEW AATP-001 APPROVE`; the evidence is hashed with the reviewer’s identity.
+8. Release derivation demands every ticket completed, reviewed, QA-passed on clean committed HEAD.
 
-1. Parent Foundry validates the exact `AATP-*` binding.
-2. Parent state transitions `ready → active`.
-3. OMP runs one blocking isolated worker with `apply=false`.
-4. Worker cannot mutate Foundry state and cannot use arbitrary shell/eval.
-5. OMP returns the worker patch artifact.
-6. Foundry canonicalizes every touched path and checks it against that ticket only.
-7. Valid patch is applied and committed by Foundry; then parent state becomes `completed`.
-8. Invalid patch is never applied.
-
-This avoids the old split-brain design where isolated children attempted to mutate `.omp/foundry-state.yml` themselves.
-
-Before the first implementation layer, Foundry requires a clean source working tree. Governance-only setup changes may be committed as the implementation baseline. User source WIP must be committed or stashed first.
-
-Rollback is patch-specific: Foundry never uses `git reset --hard` or `git clean -fd` to undo a failed worker patch.
-
-## Review gate
-
-A completed AATP is not release-ready until independently reviewed.
-
-The reviewer is isolated and may only write its exact report:
-
-```text
-docs/reports/REVIEW-<id>.md
-```
-
-For security-critical work Foundry routes to `security-reviewer`.
-
-The report and reviewer output must contain the same marker:
-
-```text
-FOUNDRY_REVIEW AATP-001 APPROVE
-```
-
-(or `REQUEST_CHANGES` / `BLOCK`). Foundry hashes the evidence and records the reviewer identity. Release derivation requires APPROVE + independent identity + evidence for every ticket.
+Before the first implementation layer, the source tree must be clean (governance-only setup may be committed as the implementation baseline).
 
 ## Release integrity
 
-`/release-check` is derived, never sticky. It requires all of the following at the current repository state:
+`/release-check` is **derived, never sticky** — recomputed against the current repository state: artifact hashes unchanged, manifest sealed, all tickets completed, all reviews independently APPROVE with evidence, QA PASS at the current HEAD, clean tree.
 
-- PRODUCT approved and hash unchanged
-- PLAN locked and hash unchanged
-- DESIGN locked or explicitly not required
-- AATP manifest sealed and unchanged
-- all AATP tickets completed
-- all required reviews independently APPROVE with evidence
-- QA PASS against current committed HEAD
-- clean working tree
+Even green, agent release commands stay denied. **You ship from a human shell** — no single shell line can mutate code after the check and push it.
 
-Agent release commands remain denied even after this gate is green. **Release from a human shell** after `/release-check` reports `RELEASE_READY=true`.
+## Under the hood
 
-This deliberately prevents a single shell line from mutating code and pushing it after the pre-execution check.
+- **State** — `.omp/foundry-state.yml`, schema-versioned and fail-closed. Current schema **v2**; older states migrate forward with a one-time backup; newer unsupported schemas are rejected, never guessed.
+- **Updates** — checks the latest **GitHub Release** (not `main`) with a user-level cache; network failures are fail-open and never block coding. Foundry never self-updates while loaded. Stable: `git fetch --tags && git checkout <tag>`, then restart OMP.
+- **Repo intelligence** — one `RepoFacts` detector drives skill routing, QA and design classification (no detector drift): Web, SaaS, Android, .NET, Cloudflare, Python, Go, Rust… Skills are filtered by phase **and role**; only metadata is injected, bodies load on demand via `foundry_skill_read`.
+- **CI** — typecheck (`tsc --noEmit`), full test suite, plus an **OMP contract smoke** against current `can1357/oh-my-pi`: if upstream changes the isolation/patch/LSP contracts Foundry relies on, CI fails instead of shipping against an imagined API.
 
-## State schema and upgrades
-
-Runtime state lives at:
+### What Foundry writes
 
 ```text
-.omp/foundry-state.yml
+docs/PRODUCT.md                 the contract
+docs/MASTER_PLAN.md             the locked plan
+docs/DESIGN.md                  the locked design
+docs/planning/*                 drafts + red-team reviews
+docs/AATP/AATP-*.md · INDEX.md  sealed work orders
+docs/reports/REVIEW-*.md        independent review evidence
+docs/reports/QA.md              real command output
+.omp/foundry-state.yml          the state machine
 ```
 
-The state is schema-versioned and fail-closed. Current development schema is **v2**. Older schemas migrate forward with a one-time backup; a state created by a newer unsupported schema is rejected instead of guessed.
+### Roles — pour your own metals
 
-## Update notification
-
-Foundry checks the latest **GitHub Release**, not `main`, with a user-level cache. Network/cache failures are fail-open and never block coding.
-
-```text
-/foundry-version
-```
-
-If a newer stable tag exists, Foundry tells you. It never self-updates while loaded.
-
-For stable installs:
-
-```bash
-git fetch --tags
-git checkout <release-tag>
-```
-
-Then restart OMP. Do not use `git pull` for a stable tagged checkout; that tracks a branch, not a release.
-
-For a deliberate developer checkout:
-
-```bash
-git switch main
-git pull
-```
-
-## Repo intelligence and verification
-
-One `RepoFacts` detector now drives both skill routing and QA/design classification, avoiding detector drift. It recognizes relevant Web, SaaS, Android, Windows/.NET, Cloudflare, Python, Go, Rust and framework signals, and derives verification steps from the same facts.
-
-Examples include TypeScript/Biome, Android Gradle, `go vet`/`go test`, Python pytest with optional Ruff/Mypy detection, Rust fmt/clippy/test, and .NET test/build.
-
-Skills are filtered by phase **and role**. Only a small metadata pack is injected; detailed skill bodies are loaded on demand through `foundry_skill_read` to control token usage.
-
-## CI / OMP compatibility
-
-CI runs:
-
-```text
-bun install --frozen-lockfile
-bun run typecheck
-bun test
-index.ts syntax smoke
-checkout current can1357/oh-my-pi
-OMP contract smoke
-```
-
-The upstream contract smoke verifies the OMP assumptions Foundry relies on: task isolation settings, `applyChanges`/patch flow, and LSP mutation capabilities. If upstream OMP changes those contracts, CI fails rather than silently shipping against an imagined API.
-
-## Files Foundry writes
-
-```text
-docs/PRODUCT.md
-docs/MASTER_PLAN.md
-docs/DESIGN.md
-docs/planning/*
-docs/AATP/AATP-*.md
-docs/AATP/INDEX.md
-docs/reports/REVIEW-*.md
-docs/reports/QA.md
-docs/.foundry-governed
-.omp/foundry-state.yml
-```
-
-## Models / roles
-
-Foundry maps work onto OMP model roles; you choose the actual models:
+Open `/models → Roles`, map whatever you already pay for (`roles.example.yml` is a starting skeleton). Foundry never edits plugin files; you never edit Foundry’s.
 
 | Foundry role | Typical OMP role |
 | --- | --- |
-| product / floor lead | `@default` |
-| plan drafter | `@plan` |
-| plan finalizer / security | `@advisor` |
-| hard implementation | `@slow` |
-| normal implementation | `@task` |
-| design | `@designer` |
-| trivial implementation | `@smol` |
+| Product / floor lead | `@default` |
+| Plan drafter | `@plan` |
+| Plan finalizer / security | `@advisor` |
+| Hard implementation | `@slow` |
+| Normal implementation | `@task` |
+| Design | `@designer` |
+| Trivial implementation | `@smol` |
 
-See `roles.example.yml` for a starting point.
+### Security boundary — honest scoping
 
-## Security boundary
-
-Foundry reduces agent authority at the OMP tool and patch-application boundaries. It does **not** claim to defend against a hostile operating system, a malicious Git binary, a compromised OMP runtime, or already-malicious project build/test scripts. Those require an OS/container/VM sandbox and ordinary supply-chain controls.
+Foundry reduces agent authority at the **OMP tool and patch-application boundaries**. It does not defend against a hostile OS, a malicious Git binary, a compromised OMP runtime, or already-malicious build/test scripts — those need an OS/container/VM sandbox and normal supply-chain controls.
 
 ---
 
 <p align="center">
-  <strong>Your models don't need permission to rewrite the mold.</strong><br/>
+  <img src="docs/assets/flow.svg" width="100%" alt="Product → Plan3 → Design → AATP → Pour → Release"/>
+</p>
+
+<p align="center">
+  <strong>Your models don’t need permission to rewrite the mold.</strong><br/>
   <sub>Plan lock → exact work order → isolated patch → verify → pour.</sub>
+</p>
+
+<p align="center">
+  If Foundry ever saves you from a 2 a.m. “helpful” architecture rewrite —<br/>
+  <a href="https://github.com/oaichu/omp-foundry/stargazers"><img alt="Star it" src="https://img.shields.io/badge/star_the_foundry-FFB020?style=for-the-badge&logo=github"/></a>
 </p>
