@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 470" role="img" aria-label="OMP Foundry terminal — hard gates refusing out-of-scope writes">
+  <defs>
+    <linearGradient id="tbg" x1="0" y1="0" x2="0" y2="470" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#171310"/>
+      <stop offset="1" stop-color="#100D0A"/>
+    </linearGradient>
+  </defs>
+  <rect width="1100" height="470" rx="18" fill="url(#tbg)" stroke="#2A2118" stroke-width="2"/>
+  <circle cx="36" cy="34" r="7" fill="#E4572E"/>
+  <circle cx="60" cy="34" r="7" fill="#FF9F1C"/>
+  <circle cx="84" cy="34" r="7" fill="#FFB020"/>
+  <text x="550" y="40" fill="#C9B8A2" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" text-anchor="middle">oh-my-pi — omp-foundry session</text>
+  <line x1="24" y1="58" x2="1076" y2="58" stroke="#2A2118" stroke-width="1"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
+    <text x="36" y="94" fill="#FFD37A">/foundry</text>
+    <text x="118" y="94" fill="#FFF6E8">I want a personal finance app on Web + Android</text>
+    <text x="36" y="120" fill="#7EC8A9">→</text>
+    <text x="60" y="120" fill="#C9B8A2">PRODUCT drafted · wait for /foundry-approve product</text>
+
+    <text x="36" y="164" fill="#C9B8A2">worker@task</text>
+    <text x="150" y="164" fill="#FFF6E8">edit docs/MASTER_PLAN.md</text>
+    <text x="36" y="186" fill="#E4572E" font-weight="700">✗ BLOCKED: PLAN_CONFLICT. MASTER_PLAN is locked.</text>
+
+    <text x="36" y="222" fill="#C9B8A2">worker@task</text>
+    <text x="150" y="222" fill="#FFF6E8">echo "hacked" &gt; docs/MASTER_PLAN.md</text>
+    <text x="36" y="244" fill="#E4572E" font-weight="700">✗ BLOCKED: PLAN_CONFLICT. The redirect went through the same gate.</text>
+
+    <text x="36" y="280" fill="#C9B8A2">worker@task</text>
+    <text x="150" y="280" fill="#FFF6E8">write src/billing.ts · on ticket AATP-4 (src/auth/)</text>
+    <text x="36" y="302" fill="#E4572E" font-weight="700">✗ AATP_SCOPE: no active ticket allows src/billing.ts.</text>
+
+    <text x="36" y="338" fill="#C9B8A2">worker@task</text>
+    <text x="150" y="338" fill="#FFF6E8">printf pwned &gt; ../outside.txt</text>
+    <text x="36" y="360" fill="#E4572E" font-weight="700">✗ PATH_GATE: path escapes the repository: ../outside.txt</text>
+
+    <text x="36" y="396" fill="#C9B8A2">orchestrator</text>
+    <text x="150" y="396" fill="#FFF6E8">git push origin main</text>
+    <text x="36" y="418" fill="#E4572E" font-weight="700">✗ RELEASE_GATE: denied until the release gate is green at execution time.</text>
+
+    <text x="36" y="452" fill="#FFD37A">/verify</text>
+    <text x="118" y="452" fill="#7EC8A9">✓ lint=0 typecheck=0 unit=0 → QA pass @ 4f2c91a (clean tree)</text>
+  </g>
+</svg>

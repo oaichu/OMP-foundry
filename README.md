@@ -1,60 +1,77 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" width="88" height="88" alt="OMP Foundry mark"/>
+  <img src="docs/assets/logo.svg" width="96" height="96" alt="OMP Foundry mark"/>
 </p>
 
 <h1 align="center">OMP Foundry</h1>
 
 <p align="center">
   <strong>Lock the plan. Then pour the code.</strong><br/>
-  A governed AI foundry for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a> — not another “act like a software company” prompt.
+  A governed AI foundry for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a> — where the architecture is <em>locked</em>, not merely remembered.
 </p>
 
 <p align="center">
   <a href="https://github.com/can1357/oh-my-pi"><img alt="Oh My Pi 18+" src="https://img.shields.io/badge/Oh%20My%20Pi-18%2B-E4572E?style=for-the-badge"/></a>
-  <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-FFB020?style=for-the-badge"/></a>
-  <img alt="Plugin" src="https://img.shields.io/badge/install-omp%20plugin%20link-14110E?style=for-the-badge"/>
+  <a href="https://github.com/oaichu/omp-foundry/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/oaichu/omp-foundry?style=for-the-badge&label=release&color=FFB020"/></a>
+  <a href="https://github.com/oaichu/omp-foundry/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/oaichu/omp-foundry/ci.yml?branch=main&style=for-the-badge&label=CI&color=2F9E6E"/></a>
+  <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-14110E?style=for-the-badge"/></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/oaichu/omp-foundry/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/oaichu/omp-foundry?style=for-the-badge&label=star%20the%20foundry&logo=github&color=FF9F1C"/></a>
+  <img alt="install" src="https://img.shields.io/badge/install-omp%20plugin%20link-14110E?style=for-the-badge"/>
 </p>
 
 <p align="center">
   <img src="docs/assets/hero.svg" width="100%" alt="Crucible pouring into a locked gate — OMP Foundry"/>
 </p>
 
-You assign models to roles. Foundry runs the mill.
+---
 
-> **v0.3.0.** Tool-execution boundary inside Oh My Pi, not an OS sandbox. State files carry `schema_version`; missing version is legacy v0 and migrates deterministically, newer schemas fail closed. `eval` and eval-equivalents (`node -e`, `python -c`, …) are denied for the whole session. Shell write targets (`>`, `tee`, `sed -i`, `cp/mv/rm`) go through the same path gates as `write`; a path that escapes the repo is denied, never ignored. Worker tasks bind to the AATP named in their prompt; out-of-scope writes are reverted to the user's pre-task content, and out-of-repo writes are reported, never touched. Release actions re-derive the gate at execution time. AATP enforces a real transition table (`ready → active → completed → APPROVE`). `python -c`-style inline code, uninspectable mutators (`git apply`, `git restore`) are denied while the plan is locked. `/foundry-version` checks the latest GitHub release tag (24h cache, 1h fail-cache). CI typechecks with `tsc --noEmit`.
+## Your agent “remembers” the architecture — until it doesn’t
 
+Every AI coding “company” you’ve tried is a long system prompt. The model *remembers* not to rewrite the plan, not to touch the locked design, not to push before QA. Then, at 2 a.m., on a 40-file refactor, it doesn’t — and it *helpfully* rewrites your architecture.
 
+Foundry makes that impossible, not unlikely:
 
 ```text
-/foundry I want a personal finance app on Web + Android
+worker@task  edit docs/MASTER_PLAN.md
+✗ BLOCKED: PLAN_CONFLICT. MASTER_PLAN is locked.
 ```
 
-That is the only command a non-coder needs.
-
 <p align="center">
-  <img src="docs/assets/flow.svg" width="100%" alt="Product → Plan3 → Design → AATP → Pour → Release"/>
+  <img src="docs/assets/terminal.svg" width="100%" alt="Foundry refusing out-of-scope writes in real time"/>
 </p>
 
-## Why this exists
+Not a polite request in a prompt. A `tool_call` deny, enforced by a state machine the model cannot edit.
 
-Most agent “companies” are a long system prompt. The model *remembers* not to rewrite the architecture — until it doesn’t.
+## What it actually is
 
-Foundry is a **state machine + hard gates**:
-
-| Layer | What it actually is |
+| Layer | What you get |
 | --- | --- |
-| Workflow | Product → 3-model plan lock → design lock → AATP → workers → review → real QA → release |
-| Staff | Your models, mapped onto stock OMP roles |
-| Governance | `.omp/foundry-state.yml` + `tool_call` deny |
-| Context | LSP / grep first. No dump-the-repo. |
+| **Workflow** | Product → 3-model plan lock → design lock → AATP work orders → isolated workers → independent review → real QA → derived release |
+| **Governance** | `.omp/foundry-state.yml` (schema-versioned, migrating, fail-closed) + `tool_call` denies at the execution boundary |
+| **Staff** | Your models, your prices — mapped onto stock OMP roles (`@plan`, `@task`, `@smol`, `@advisor`…) |
+| **Context** | LSP / grep first. No dump-the-repo. Skills are phase-aware and injected, not hoped for |
+
+### The hard gates (real deny messages, from the source)
+
+| The “helpful” agent tries… | Foundry answers |
+| --- | --- |
+| Rewrite the locked plan — via editor *or* `echo … > MASTER_PLAN.md` | `BLOCKED: PLAN_CONFLICT. MASTER_PLAN is locked.` |
+| Write a file its ticket doesn’t own (`sed -i`, `tee`, `cp`, `rm` included) | `AATP_SCOPE: no active ticket allows src/billing.ts.` |
+| Smuggle a write outside the repo, or through a symlinked folder | `PATH_GATE: path escapes the repository: ../outside.txt` |
+| Run inline code (`node -e`, `python -c`, `eval`) | `EVAL_GATE: inline code execution is denied.` |
+| Rewrite history to hide evidence (`git apply`, `git restore`, `git clean`) | `MUTATOR_GATE: cannot be verified path-by-path.` |
+| Edit Foundry’s own state file | `STATE_GATE: .omp/foundry-state.yml is extension-owned.` |
+| `git push` / `npm publish` / `wrangler deploy` / `vercel` / `docker push`… | `RELEASE_GATE: denied until the release gate is green at execution time.` |
+
+And when an isolated worker *does* leak a change, Foundry reverts it **to your pre-task content** — not to HEAD — and never touches anything outside the repository.
 
 <p align="center">
   <img src="docs/assets/gates.svg" width="100%" alt="Plan, design, and release writes are refused — not requested"/>
 </p>
 
-A worker cannot “just refactor the plan.” The write is blocked.
-
-## Install
+## Start in 30 seconds
 
 ```bash
 git clone https://github.com/oaichu/omp-foundry
@@ -62,17 +79,53 @@ cd omp-foundry
 omp plugin link .
 ```
 
-Restart Oh My Pi. Confirm:
+Restart Oh My Pi, confirm with `omp plugin list`, then — this is the only command a non-coder ever needs:
 
-```bash
-omp plugin list
+```text
+/foundry I want a personal finance app on Web + Android
 ```
 
-You want `omp-foundry` in the list.
+Foundry drafts the product, waits for you, and walks the whole mill. You intervene at exactly four gates:
 
-## One-time: pour your own metals
+```mermaid
+flowchart LR
+  U([You]) --> P["① PRODUCT<br/>you confirm"]
+  P --> T["② PLAN 3<br/>draft → critique → lock"]
+  T --> D{UI?}
+  D -->|yes| G["③ DESIGN<br/>preview → approve"]
+  D -->|no| A
+  G --> A["AATP DAG<br/>isolated workers"]
+  A --> R[Independent review]
+  R --> Q["/verify<br/>real commands"]
+  Q --> X["④ RELEASE<br/>derived, never sticky"]
+  style U fill:#FFB020,stroke:none,color:#14110E
+  style P fill:#2A2118,stroke:#FFB020,color:#FFD37A
+  style T fill:#2A2118,stroke:#FF9F1C,color:#FFD37A
+  style G fill:#2A2118,stroke:#FF9F1C,color:#FFD37A
+  style A fill:#2A2118,stroke:#E4572E,color:#FFD37A
+  style X fill:#2A2118,stroke:#E4572E,color:#FFD37A
+```
 
-Open **`/models` → Roles**. Map whatever you pay for. Do not edit plugin files.
+Everything between the gates runs itself: `@plan` drafts, `@default` red-teams, `@advisor` locks. Workers take one ticket each, in isolation, and cannot see the plan they’re implementing inside of.
+
+## Everyday
+
+Keep running **`/foundry`** after each pause — it always names the next legal step.
+
+| Command | Use |
+| --- | --- |
+| `/foundry` | Next legal step (alias `/company`) |
+| `/foundry-init` | Scaffold docs + state |
+| `/plan3` · `/plan-revise` | Three-heat plan lock · human-only reopen |
+| `/design approve` · `/design skip` | UI gate |
+| `/aatp` · `/build` | Split the plan · spawn the ready layer |
+| `/review` · `/verify` | Independent review · deterministic QA |
+| `/release-check` | Final derived gate |
+| `/foundry-version` | Installed + latest release, OMP version |
+
+## Pour your own metals
+
+Open **`/models` → Roles** and map whatever you already pay for — Foundry never edits plugin files, you never edit Foundry’s. Skeleton: [`roles.example.yml`](./roles.example.yml).
 
 | Role | Foundry job |
 | --- | --- |
@@ -84,84 +137,38 @@ Open **`/models` → Roles**. Map whatever you pay for. Do not edit plugin files
 | `designer` | Tokens, preview, design lock |
 | `smol` | Trivial AATP |
 
-Copy-paste skeleton: [`roles.example.yml`](./roles.example.yml).
-
-## Everyday
-
-Keep running **`/foundry`** after each pause.
-
-1. `docs/PRODUCT.md` — you confirm the product  
-2. `@plan` drafts → `@default` red-teams → `@advisor` locks `docs/MASTER_PLAN.md`  
-3. If the stack has UI: preview, then `/design approve` or `/design skip`  
-4. Plan becomes `docs/AATP/*` work orders  
-5. `@task` / `@slow` implement one ticket each  
-6. Independent review. Security-critical → `@advisor`  
-7. `/verify` runs **real** test/build commands  
-8. `/release-check` — until green, `git push` / `npm publish` / `wrangler deploy` stay denied  
-
-You intervene at four gates: **product**, **plan lock**, **design approve**, **release**.
-
-```mermaid
-flowchart LR
-  U[You] --> F["/foundry"]
-  F --> P[PRODUCT]
-  P --> T[PLAN 3]
-  T --> D{UI?}
-  D -->|yes| G[DESIGN lock]
-  D -->|no| A[AATP DAG]
-  G --> A
-  A --> W[Workers]
-  W --> R[Review]
-  R --> Q[Verify]
-  Q --> X[Release]
-```
-
-## Extra levers
-
-| Command | Use |
-| --- | --- |
-| `/foundry` | Next legal step |
-| `/foundry-init` / `/company-init` | Force scaffold |
-| `/plan3` | Force draft → critique → lock |
-| `/design` `/design approve` `/design skip` | UI gate |
-| `/aatp` | Split the locked plan |
-| `/build` | Next independent AATP layer |
-| `/review` | Review a finished ticket |
-| `/verify` | Deterministic QA |
-| `/release-check` | Final gate |
-| `/foundry-version` | Installed Foundry/OMP + latest stable tag |
-
-`/company` remains an alias of `/foundry`.
-
-
-Built-in Oh My Pi Plan (Shift+Tab) is untouched: one `@plan` model. `/plan3` is the three-heat lock.
-
 ## What gets written
 
 ```text
-docs/PRODUCT.md
-docs/MASTER_PLAN.md
-docs/DESIGN.md
-docs/planning/MASTER_PLAN_DRAFT.md
-docs/planning/PLAN_REVIEW.md
-docs/AATP/
-docs/reports/
-.omp/foundry-state.yml
+docs/PRODUCT.md            the contract
+docs/MASTER_PLAN.md        the locked plan
+docs/DESIGN.md             the locked design
+docs/planning/             drafts + red-team reviews
+docs/AATP/                 work orders (one worker each)
+docs/reports/QA.md         real command output
+.omp/foundry-state.yml     the state machine (gitignored)
 ```
 
-## Uninstall
+## Update · Uninstall
 
-```bash
-omp plugin uninstall omp-foundry
-```
-
-Not an OMP fork. Update Oh My Pi independently.
-
-**Stable:** `git fetch --tags && git checkout v0.3.0` then restart OMP. Do not `git pull` — that tracks `main`.
+**Stable:** `git fetch --tags && git checkout v0.3.0` — Foundry itself tells you when a release lands (`/foundry-version`, 24h cache). Do not `git pull`; that tracks `main`.
 
 **Developer checkout:** `git switch main && git pull`.
 
+**Remove:** `omp plugin uninstall omp-foundry`. Not an OMP fork — Oh My Pi updates independently.
 
 ---
 
-If Foundry saved you from an agent that “helpfully” rewrote the architecture — star the repo so the next person finds the lock before the pour.
+<p align="center">
+  <img src="docs/assets/flow.svg" width="100%" alt="Product → Plan3 → Design → AATP → Pour → Release"/>
+</p>
+
+<p align="center">
+  <strong>Your models don’t need more freedom. They need a mold.</strong><br/>
+  <sub>Built on <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a> · MIT · state machine first, prompts second</sub>
+</p>
+
+<p align="center">
+  If Foundry saved you from a 2 a.m. “helpful” architecture rewrite —<br/>
+  <a href="https://github.com/oaichu/omp-foundry/stargazers"><img alt="Star it" src="https://img.shields.io/badge/star_the_foundry-FFB020?style=for-the-badge&logo=github"/></a>
+</p>
