@@ -1,0 +1,6 @@
+stack: saas
+extends: web
+notes:
+  - postgres + stripe skills stay project-local
+  - never trust tenant_id from the client
+ui: true

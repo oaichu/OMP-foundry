@@ -1,0 +1,11 @@
+{
+  "name": "omp-company-workflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Governed AI coding-company workflow for Oh My Pi: state machine, 3-stage plan, design/AATP gates, workers, review, QA.",
+  "license": "MIT",
+  "type": "module",
+  "omp": {
+    "extensions": ["./src/index.ts"]
+  }
+}

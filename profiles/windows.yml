@@ -1,0 +1,6 @@
+stack: windows
+verify:
+  - dotnet test
+  - dotnet build
+ui: true
+preview: DesignSystemGallery

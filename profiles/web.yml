@@ -1,0 +1,7 @@
+stack: web
+verify:
+  - biome check
+  - tsc --noEmit
+  - unit tests
+  - build
+ui: true

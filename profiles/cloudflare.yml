@@ -1,0 +1,5 @@
+stack: cloudflare
+verify:
+  - wrangler types / check
+mcp: project-local cloudflare-api only
+ui: false
