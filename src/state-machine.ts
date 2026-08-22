@@ -67,7 +67,7 @@ function parseTickets(yaml: string): Record<string, AatpTicket> {
 			forbidden_files: csv(pick(chunk, "forbidden_files")),
 			risk: pick(chunk, "risk") || "normal",
 			agent: pick(chunk, "agent") || undefined,
-			review: (pick(chunk, "review") as AatpTicket["review"]) || "none",
+			review: mustEnum(pick(chunk, "review") ?? "none", ["none", "APPROVE", "REQUEST_CHANGES", "BLOCK"] as const, `tickets.${id}.review`),
 		};
 	}
 	return tickets;
@@ -112,7 +112,7 @@ export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): 
 		const raw = pick(aatp, key);
 		if (raw !== undefined && raw !== "") {
 			const n = Number(raw);
-			if (!Number.isFinite(n)) throw new StateError(`invalid aatp.${key}`);
+			if (!Number.isSafeInteger(n) || n < 0) throw new StateError(`invalid aatp.${key}`);
 			base.aatp[key] = n;
 		}
 	}
@@ -195,8 +195,10 @@ export function loadStateResult(cwd: string): LoadedState {
 		let text: string;
 		try {
 			text = readFileSync(file, "utf8");
-		} catch {
-			continue;
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code === "ENOENT") continue;
+			return { ok: false, reason: `STATE_IO_ERROR: cannot read ${rel} (${code ?? "unknown"})` };
 		}
 		try {
 			const migrated = migrateToCurrent(text);

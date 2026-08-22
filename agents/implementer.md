@@ -4,7 +4,7 @@ description: "Company worker. One AATP. No plan/design edits. No child agents. N
 tools: read, grep, glob, write, edit, bash, lsp, report_conflict, aatp_begin, aatp_complete, aatp_block
 model: "@task"
 thinking-level: high
-blocking: false
+blocking: true
 read-summarize: true
 autoloadSkills: systematic-debugging
 ---

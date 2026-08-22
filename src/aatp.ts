@@ -133,3 +133,65 @@ export function seedTickets(state: CompanyState, specs: AatpSpec[]): void {
 		};
 	}
 }
+
+export type TransitionResult = { ok: true; ticket: CompanyState["tickets"][string] } | { ok: false; reason: string };
+
+// ready --deps done--> active --evidence--> completed --review--> APPROVE
+// Every other transition is rejected; status lives only in foundry-state.
+export function beginTicket(state: CompanyState, spec: AatpSpec | undefined, id: string): TransitionResult {
+	const existing = state.tickets[id];
+	if (!existing && !spec) {
+		return { ok: false, reason: `Unknown ticket ${id}. No spec found under docs/AATP.` };
+	}
+	for (const dep of spec?.dependencies ?? []) {
+		if (dep === "none" || dep === "") continue;
+		const depTicket = state.tickets[dep];
+		if (!depTicket) return { ok: false, reason: `DEPENDENCY_CONFLICT: ${id} depends on unknown ticket ${dep}.` };
+		if (depTicket.status !== "completed") {
+			return { ok: false, reason: `DEPENDENCY_CONFLICT: ${dep} is ${depTicket.status}, must be completed first.` };
+		}
+	}
+	const ticket = existing ?? {
+		id,
+		status: "ready" as const,
+		allowed_files: spec?.allowed_files ?? [],
+		forbidden_files: spec?.forbidden_files ?? ["docs/MASTER_PLAN.md", "docs/PRODUCT.md", "docs/DESIGN.md"],
+		risk: spec?.risk ?? "normal",
+		review: "none" as const,
+	};
+	if (ticket.status !== "ready") {
+		return { ok: false, reason: `${id} is ${ticket.status}; only ready tickets can begin.` };
+	}
+	ticket.status = "active";
+	if (spec) ticket.allowed_files = spec.allowed_files;
+	state.tickets[id] = ticket;
+	return { ok: true, ticket };
+}
+
+export function completeTicket(state: CompanyState, id: string): TransitionResult {
+	const ticket = state.tickets[id];
+	if (!ticket) return { ok: false, reason: "Unknown ticket. aatp_begin first." };
+	if (ticket.status !== "active") {
+		return { ok: false, reason: `${id} is ${ticket.status}; only active tickets can complete.` };
+	}
+	ticket.status = "completed";
+	state.tickets[id] = ticket;
+	return { ok: true, ticket };
+}
+
+export function reviewTicket(
+	state: CompanyState,
+	id: string,
+	verdict: "APPROVE" | "REQUEST_CHANGES" | "BLOCK",
+): TransitionResult {
+	const ticket = state.tickets[id];
+	if (!ticket) return { ok: false, reason: "Unknown ticket." };
+	if (ticket.status !== "completed") {
+		return { ok: false, reason: `${id} is ${ticket.status}; review requires a completed ticket.` };
+	}
+	ticket.review = verdict;
+	if (verdict === "REQUEST_CHANGES") ticket.status = "ready";
+	if (verdict === "BLOCK") ticket.status = "blocked";
+	state.tickets[id] = ticket;
+	return { ok: true, ticket };
+}

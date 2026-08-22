@@ -17,15 +17,39 @@ export function gitHead(cwd: string): string {
 	return result.stdout.trim();
 }
 
-export function workingTreeClean(cwd: string): boolean {
-	const result = spawnSync("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
-	return result.status === 0 && result.stdout.trim() === "";
+// Foundry-owned runtime files never count as "dirty": the state file and QA
+// report are written by the extension itself during verify/release.
+const FOUNDRY_OWNED = [/^\.omp\/(?:foundry|company)-state\.ya?ml$/i, /^\.omp\/(?:foundry|company)-state\.ya?ml\.pre-v\d+\.bak$/i, /^docs\/reports\/qa\.md$/i];
+
+export function isFoundryOwned(rel: string): boolean {
+	const normalized = rel.trim().replace(/\\/g, "/").replace(/^"|"$/g, "");
+	return FOUNDRY_OWNED.some((re) => re.test(normalized));
 }
 
-export function refreshArtifactHashes(cwd: string, state: CompanyState): void {
-	state.product.sha256 = sha256File(cwd, "docs/PRODUCT.md");
-	state.master_plan.sha256 = sha256File(cwd, "docs/MASTER_PLAN.md");
-	state.design.sha256 = sha256File(cwd, "docs/DESIGN.md");
+export function workingTreeClean(cwd: string): boolean {
+	// -uall lists untracked files individually; plain porcelain collapses
+	// whole directories (?? .omp/) and would bypass the foundry-owned filter.
+	const result = spawnSync("git", ["status", "--porcelain", "-uall"], { cwd, encoding: "utf8" });
+	if (result.status !== 0) return false;
+	for (const line of result.stdout.split("\n")) {
+		if (line.length < 4) continue;
+		const rest = line.slice(3).replace(/^"|"$/g, "");
+		const rel = (rest.split(" -> ").pop() ?? rest).trim();
+		if (rel && !isFoundryOwned(rel)) return false;
+	}
+	return true;
+}
+
+export type ArtifactKey = "product" | "master_plan" | "design";
+
+// Each approval gate locks only its own artifact hash so a later gate can
+// never silently bless a change to an earlier, already-approved artifact.
+export function lockArtifactHash(cwd: string, state: CompanyState, which: ArtifactKey): void {
+	const rel = which === "product" ? "docs/PRODUCT.md" : which === "master_plan" ? "docs/MASTER_PLAN.md" : "docs/DESIGN.md";
+	const sha = sha256File(cwd, rel);
+	if (which === "product") state.product.sha256 = sha;
+	else if (which === "master_plan") state.master_plan.sha256 = sha;
+	else state.design.sha256 = sha;
 }
 
 export function artifactsMatch(cwd: string, state: CompanyState): boolean {
@@ -53,10 +77,8 @@ export function deriveRelease(cwd: string, state: CompanyState): boolean {
 	const ready = productReady(state) && planLocked(state) && designAllowsUi(state) && aatpOk && reviewsApproved(state) && qaOk;
 	state.release.ready = ready;
 	state.release.tree_sha = ready ? head : "";
-	if (!clean || (state.qa.tree_sha && state.qa.tree_sha !== head)) {
-		state.qa.status = state.qa.status === "pass" && !clean ? "pending" : state.qa.status;
-		if (!clean && state.qa.status === "pass") state.qa.status = "pending";
-	}
+	if (!clean && state.qa.status === "pass") state.qa.status = "pending";
+	if (state.qa.tree_sha && head && state.qa.tree_sha !== head && state.qa.status === "pass") state.qa.status = "pending";
 	return ready;
 }
 

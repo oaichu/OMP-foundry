@@ -4,9 +4,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
+	beginTicket,
+	completeTicket,
 	hydrateAatp,
 	listAatpSpecs,
 	readyIndependent,
+	reviewTicket,
 	routeAgent,
 	seedTickets,
 	summarizeAatp,
@@ -15,9 +18,16 @@ import {
 import { CONTEXT_POLICY, phasePrompt } from "./context-policy";
 import { requireDesignIfUi, requirePlan, requireProduct } from "./gates";
 import { denyToolCall, forceIsolatedTaskInput, type ToolInput } from "./permissions";
-import { contentTextOf, governedTask, reviewTaskDelta, snapshotTree } from "./patch-gate";
+import {
+	contentTextOf,
+	governedTask,
+	reviewTaskDelta,
+	snapshotBaseline,
+	ticketIdsFromText,
+	type TreeBaseline,
+} from "./patch-gate";
 import { canonicalRepoPath } from "./paths";
-import { deriveRelease, invalidateQa, refreshArtifactHashes } from "./release";
+import { deriveRelease, invalidateQa, lockArtifactHash } from "./release";
 import { loadRegistry } from "./skills/registry";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
@@ -105,6 +115,15 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 		return;
 	}
 	if (counts.completed === counts.total && counts.total > 0 && state.qa.status !== "pass") {
+		const unreviewed = tasks.filter((t) => t.status === "completed" && t.review !== "APPROVE");
+		if (unreviewed.length > 0) {
+			orchestrate(
+				pi,
+				"Review before QA.",
+				`Run /review on completed tickets first (review invalidates QA anyway). Unreviewed: ${unreviewed.map((t) => t.id).join(", ")}.`,
+			);
+			return;
+		}
 		orchestrate(pi, "All AATP done. Run /verify.", "Foundry runs real test/build commands. Write docs/reports/QA.md.");
 		return;
 	}
@@ -114,7 +133,7 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	const z = pi.zod;
 	pi.setLabel("OMP Foundry");
-	const baselines = new Map<string, Set<string>>();
+	const baselines = new Map<string, TreeBaseline>();
 
 	const statusOf = (state: CompanyState): string =>
 		`${state.phase} plan=${state.master_plan.status} design=${state.design.status}`;
@@ -156,7 +175,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "task") {
 			const raw = event.input && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
-			if (governedTask(raw)) baselines.set(taskKey(event, ctx.cwd), snapshotTree(ctx.cwd));
+			if (governedTask(raw)) baselines.set(taskKey(event, ctx.cwd), snapshotBaseline(ctx.cwd));
 			const isolated = forceIsolatedTaskInput(raw);
 			if (isolated) return { input: isolated };
 		}
@@ -182,22 +201,30 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		const input = event.input && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
 		if (!governedTask(input)) return;
 		const { state } = safeState(ctx.cwd);
-		const tickets = Object.values(state.tickets).filter((t) => t.status !== "blocked");
 		const key = taskKey(event, ctx.cwd);
-		const before = baselines.get(key) ?? new Set<string>();
+		const baseline = baselines.get(key) ?? { paths: new Set<string>(), files: new Map<string, string | null>() };
 		baselines.delete(key);
-		const reviewed = reviewTaskDelta(ctx.cwd, before, tickets, event.details, contentTextOf(event.content));
-		if (reviewed.rejected.length === 0) return;
+		// Bind the task to the ticket named in its prompt; an ambiguous or
+		// missing binding with several active tickets fails closed (no scope).
+		const mentioned = ticketIdsFromText(JSON.stringify(input ?? {}));
+		const active = Object.values(state.tickets).filter((t) => t.status === "active");
+		const bound = mentioned.filter((id) => active.some((t) => t.id === id));
+		const tickets = bound.length === 1 ? [state.tickets[bound[0]]] : bound.length > 1 ? [] : active;
+		const reviewed = reviewTaskDelta(ctx.cwd, baseline, tickets, event.details, contentTextOf(event.content));
+		if (reviewed.escaped.length === 0 && reviewed.rejected.length === 0) return;
 		invalidateQa(state);
 		persist(ctx.cwd, state);
+		const lines = [
+			...(reviewed.escaped.length
+				? [`PATH_ESCAPE: writes outside the repository detected (reported, NOT reverted): ${reviewed.escaped.join(", ")}`]
+				: []),
+			...(reviewed.rejected.length
+				? [`AATP_SCOPE: reverted out-of-scope writes: ${reviewed.reverted.join(", ") || reviewed.rejected.join(", ")}`]
+				: []),
+		];
 		return {
 			isError: true,
-			content: [
-				{
-					type: "text" as const,
-					text: `AATP_SCOPE: reverted out-of-scope writes: ${reviewed.reverted.join(", ") || reviewed.rejected.join(", ")}`,
-				},
-			],
+			content: [{ type: "text" as const, text: lines.join("\n") }],
 		};
 	});
 
@@ -233,10 +260,21 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 			mkdirSync(join(ctx.cwd, "docs", "planning"), { recursive: true });
 			mkdirSync(join(ctx.cwd, "docs", "AATP"), { recursive: true });
 			mkdirSync(join(ctx.cwd, "docs", "reports"), { recursive: true });
-			for (const name of ["PRODUCT.md", "MASTER_PLAN.md", "DESIGN.md", "SECURITY.md", "ARCHITECTURE.md", "AATP.md", "RELEASE_REPORT.md"]) {
-				copyTemplate(ctx.cwd, name);
-			}
-			const existed = stateFileExists(ctx.cwd);
+		for (const name of ["PRODUCT.md", "MASTER_PLAN.md", "DESIGN.md", "SECURITY.md", "ARCHITECTURE.md", "AATP.md", "RELEASE_REPORT.md"]) {
+			copyTemplate(ctx.cwd, name);
+		}
+		// Foundry runtime state must not dirty the user's tree; ignore it on init.
+		const gitignorePath = join(ctx.cwd, ".gitignore");
+		let ignoreText = "";
+		try {
+			ignoreText = readFileSync(gitignorePath, "utf8");
+		} catch {
+			/* absent */
+		}
+		if (!/^\.omp\/?\s*$/m.test(ignoreText)) {
+			writeFileSync(gitignorePath, `${ignoreText}${ignoreText && !ignoreText.endsWith("\n") ? "\n" : ""}.omp/\n`, "utf8");
+		}
+		const existed = stateFileExists(ctx.cwd);
 			const existing = existed ? loadState(ctx.cwd) : defaultState();
 			const stack = detectStack(ctx.cwd);
 			if (!existed) {
@@ -294,23 +332,14 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		parameters: z.object({ id: z.string() }),
 		async execute(_id, params, _s, _u, ctx) {
 			const state = loadState(ctx.cwd);
-			const listed = listAatpSpecs(ctx.cwd).find((t) => t.id === params.id);
-			const ticket = state.tickets[params.id] ?? {
-				id: params.id,
-				status: "ready" as const,
-				allowed_files: listed?.allowed_files ?? [],
-				forbidden_files: listed?.forbidden_files ?? ["docs/MASTER_PLAN.md", "docs/PRODUCT.md", "docs/DESIGN.md"],
-				risk: listed?.risk ?? "normal",
-				review: "none" as const,
-			};
-			ticket.status = "active";
-			ticket.allowed_files = listed?.allowed_files ?? ticket.allowed_files;
-			state.tickets[params.id] = ticket;
+			const spec = listAatpSpecs(ctx.cwd).find((t) => t.id === params.id);
+			const result = beginTicket(state, spec, params.id);
+			if (!result.ok) return { content: [{ type: "text", text: result.reason }], isError: true };
 			state.phase = "implementation";
 			recountTickets(state);
 			invalidateQa(state);
 			persist(ctx.cwd, state);
-			return { content: [{ type: "text", text: `ACTIVE ${params.id}` }], details: ticket };
+			return { content: [{ type: "text", text: `ACTIVE ${params.id}` }], details: result.ticket };
 		},
 	});
 
@@ -323,14 +352,12 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		parameters: z.object({ id: z.string(), evidence: z.string() }),
 		async execute(_id, params, _s, _u, ctx) {
 			const state = loadState(ctx.cwd);
-			const ticket = state.tickets[params.id];
-			if (!ticket) return { content: [{ type: "text", text: "Unknown ticket. aatp_begin first." }], isError: true };
-			ticket.status = "completed";
-			state.tickets[params.id] = ticket;
+			const result = completeTicket(state, params.id);
+			if (!result.ok) return { content: [{ type: "text", text: result.reason }], isError: true };
 			recountTickets(state);
 			invalidateQa(state);
 			persist(ctx.cwd, state);
-			return { content: [{ type: "text", text: `COMPLETED ${params.id}: ${params.evidence}` }], details: ticket };
+			return { content: [{ type: "text", text: `COMPLETED ${params.id}: ${params.evidence}` }], details: result.ticket };
 		},
 	});
 
@@ -372,16 +399,12 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		}),
 		async execute(_id, params, _s, _u, ctx) {
 			const state = loadState(ctx.cwd);
-			const ticket = state.tickets[params.id];
-			if (!ticket) return { content: [{ type: "text", text: "Unknown ticket." }], isError: true };
-			ticket.review = params.verdict;
-			if (params.verdict === "REQUEST_CHANGES") ticket.status = "ready";
-			if (params.verdict === "BLOCK") ticket.status = "blocked";
-			state.tickets[params.id] = ticket;
+			const result = reviewTicket(state, params.id, params.verdict);
+			if (!result.ok) return { content: [{ type: "text", text: result.reason }], isError: true };
 			recountTickets(state);
 			invalidateQa(state);
 			persist(ctx.cwd, state);
-			return { content: [{ type: "text", text: `${params.id} review=${params.verdict}` }], details: ticket };
+			return { content: [{ type: "text", text: `${params.id} review=${params.verdict}` }], details: result.ticket };
 		},
 	});
 
@@ -395,7 +418,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		async execute(_id, params) {
 			const registry = loadRegistry(join(ROOT, "skills"));
 			const wanted = params.ids.slice(0, 3);
-			const bodies = wanted.map((id) => {
+			const bodies = wanted.map((id: string) => {
 				const hit = registry.find((s) => s.id === id);
 				return hit ? `# ${hit.id}\n${hit.description}\n\n${hit.body}` : `# ${id}\n(not found)`;
 			});
@@ -504,7 +527,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 				state.design.required = true;
 				state.design.version = state.design.version === "0" ? "1.0" : state.design.version;
 				state.phase = "aatp";
-				refreshArtifactHashes(ctx.cwd, state);
+				lockArtifactHash(ctx.cwd, state, "design");
 				invalidateQa(state);
 				persist(ctx.cwd, state);
 				orchestrate(pi, "DESIGN LOCKED by user.", "Continue with /aatp.");
@@ -540,7 +563,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 			if (which === "product" || which === "approve-product") {
 				state.product.status = "approved";
 				state.phase = "planning";
-				refreshArtifactHashes(ctx.cwd, state);
+				lockArtifactHash(ctx.cwd, state, "product");
 				invalidateQa(state);
 				persist(ctx.cwd, state);
 				orchestrate(pi, "PRODUCT approved by user.", "Run /plan3.");
@@ -552,7 +575,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 				state.unlock_token = "";
 				state.conflict = { kind: "none", reason: "" };
 				state.phase = state.design.required ? "design" : "aatp";
-				refreshArtifactHashes(ctx.cwd, state);
+				lockArtifactHash(ctx.cwd, state, "master_plan");
 				invalidateQa(state);
 				persist(ctx.cwd, state);
 				orchestrate(pi, "PLAN LOCKED by user.", "Continue /foundry (design or AATP).");

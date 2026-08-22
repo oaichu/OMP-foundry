@@ -4,7 +4,7 @@ description: "Trivial AATP worker on @smol. Same Foundry contract as implementer
 tools: read, grep, glob, write, edit, bash, lsp, report_conflict, aatp_begin, aatp_complete, aatp_block
 model: "@smol"
 thinking-level: low
-blocking: false
+blocking: true
 read-summarize: true
 ---
 
