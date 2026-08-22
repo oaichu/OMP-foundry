@@ -7,6 +7,7 @@ import {
 	type Phase,
 	type QaStatus,
 	STATE_REL,
+	STATE_PATHS,
 	defaultState,
 } from "./types";
 
@@ -95,11 +96,14 @@ export function statePath(cwd: string): string {
 }
 
 export function loadState(cwd: string): CompanyState {
-	try {
-		return parseState(readFileSync(statePath(cwd), "utf8"));
-	} catch {
-		return defaultState();
+	for (const rel of STATE_PATHS) {
+		try {
+			return parseState(readFileSync(join(cwd, rel), "utf8"));
+		} catch {
+			/* try next */
+		}
 	}
+	return defaultState();
 }
 
 export function saveState(cwd: string, state: CompanyState): void {

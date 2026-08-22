@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" role="img" aria-label="OMP Foundry — Lock the plan. Then pour the code.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1280" y2="560" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E0C0A"/>
+      <stop offset="1" stop-color="#1A1410"/>
+    </linearGradient>
+    <linearGradient id="pour" x1="640" y1="80" x2="640" y2="520" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFD37A"/>
+      <stop offset=".45" stop-color="#FF9F1C"/>
+      <stop offset="1" stop-color="#E4572E"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="640" cy="300" r="380" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF9F1C" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#FF9F1C" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1280" height="560" fill="url(#bg)"/>
+  <rect width="1280" height="560" fill="url(#glow)"/>
+  <g opacity=".35" fill="none" stroke="#3A2A1C" stroke-width="1">
+    <path d="M80 80h1120M80 160h1120M80 240h1120M80 320h1120M80 400h1120M80 480h1120"/>
+    <path d="M160 40v480M320 40v480M480 40v480M640 40v480M800 40v480M960 40v480M1120 40v480"/>
+  </g>
+  <path d="M600 70h80l24 48H576z" fill="#2A2118" stroke="#FFB020" stroke-width="3"/>
+  <path d="M628 118v86c0 8 4 14 12 18l48 22v42H592v-42l48-22c8-4 12-10 12-18v-86z" fill="url(#pour)"/>
+  <rect x="520" y="286" width="240" height="18" rx="4" fill="#FFB020"/>
+  <path d="M500 316h280l36 92H464z" fill="#241C16" stroke="#E4572E" stroke-width="3"/>
+  <text x="640" y="448" text-anchor="middle" fill="#FFF6E8" font-family="ui-sans-serif, system-ui, Segoe UI, sans-serif" font-size="56" font-weight="700" letter-spacing="4">OMP FOUNDRY</text>
+  <text x="640" y="498" text-anchor="middle" fill="#FFB020" font-family="ui-sans-serif, system-ui, Segoe UI, sans-serif" font-size="22" letter-spacing="3">LOCK THE PLAN. THEN POUR THE CODE.</text>
+</svg>

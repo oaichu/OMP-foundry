@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 220" role="img" aria-label="Foundry pipeline">
+  <rect width="1100" height="220" rx="20" fill="#14110E"/>
+  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700" text-anchor="middle">
+    <rect x="24" y="58" width="140" height="88" rx="14" fill="#2A2118" stroke="#FFB020"/>
+    <text x="94" y="98" fill="#FFD37A">PRODUCT</text>
+    <text x="94" y="120" fill="#C9B8A2" font-weight="500">you decide</text>
+    <rect x="196" y="58" width="160" height="88" rx="14" fill="#2A2118" stroke="#FF9F1C"/>
+    <text x="276" y="92" fill="#FFD37A">PLAN 3</text>
+    <text x="276" y="112" fill="#C9B8A2" font-weight="500">draft → critique</text>
+    <text x="276" y="130" fill="#C9B8A2" font-weight="500">→ lock</text>
+    <rect x="388" y="58" width="140" height="88" rx="14" fill="#2A2118" stroke="#E4572E"/>
+    <text x="458" y="98" fill="#FFB020">DESIGN</text>
+    <text x="458" y="120" fill="#C9B8A2" font-weight="500">you approve</text>
+    <rect x="560" y="58" width="140" height="88" rx="14" fill="#2A2118" stroke="#FFB020"/>
+    <text x="630" y="98" fill="#FFD37A">AATP</text>
+    <text x="630" y="120" fill="#C9B8A2" font-weight="500">work orders</text>
+    <rect x="732" y="58" width="160" height="88" rx="14" fill="#2A2118" stroke="#FF9F1C"/>
+    <text x="812" y="98" fill="#FFD37A">POUR</text>
+    <text x="812" y="120" fill="#C9B8A2" font-weight="500">workers + review</text>
+    <rect x="924" y="58" width="152" height="88" rx="14" fill="#3A1C12" stroke="#E4572E"/>
+    <text x="1000" y="98" fill="#FFB020">RELEASE</text>
+    <text x="1000" y="120" fill="#C9B8A2" font-weight="500">QA gate</text>
+    <path d="M164 102h32M356 102h32M528 102h32M700 102h32M892 102h32" stroke="#FF9F1C" stroke-width="3"/>
+  </g>
+</svg>

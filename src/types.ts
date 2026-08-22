@@ -29,7 +29,7 @@ export interface CompanyState {
 	conflict: { kind: ConflictKind; reason: string };
 }
 
-export const STATE_REL = ".omp/company-state.yml";
+export const STATE_REL = ".omp/foundry-state.yml";
 
 export function defaultState(): CompanyState {
 	return {
@@ -55,4 +55,4 @@ export const LOCKED_PRODUCT_PATHS = ["docs/product.md"];
 
 export const LOCKED_DESIGN_PATHS = ["docs/design.md", "src/design-system/", "src/designsystem/"];
 
-export const STATE_PATHS = [".omp/company-state.yml", ".omp/company-state.yaml"];
+export const STATE_PATHS = [".omp/foundry-state.yml", ".omp/foundry-state.yaml", ".omp/company-state.yml", ".omp/company-state.yaml"];

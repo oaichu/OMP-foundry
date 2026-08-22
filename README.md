@@ -1,117 +1,136 @@
-# omp-company-workflow
+<p align="center">
+  <img src="docs/assets/logo.svg" width="88" height="88" alt="OMP Foundry mark"/>
+</p>
 
-Oh My Pi plugin: a governed “AI software company” for any repo.
+<h1 align="center">OMP Foundry</h1>
 
-You assign **models to roles**. The plugin runs the rest.
+<p align="center">
+  <strong>Lock the plan. Then pour the code.</strong><br/>
+  A governed AI foundry for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a> — not another “act like a software company” prompt.
+</p>
+
+<p align="center">
+  <a href="https://github.com/can1357/oh-my-pi"><img alt="Oh My Pi 18+" src="https://img.shields.io/badge/Oh%20My%20Pi-18%2B-E4572E?style=for-the-badge"/></a>
+  <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-FFB020?style=for-the-badge"/></a>
+  <img alt="Plugin" src="https://img.shields.io/badge/install-omp%20plugin%20link-14110E?style=for-the-badge"/>
+</p>
+
+<p align="center">
+  <img src="docs/assets/hero.svg" width="100%" alt="Crucible pouring into a locked gate — OMP Foundry"/>
+</p>
+
+You assign models to roles. Foundry runs the mill.
 
 ```text
-/company
+/foundry I want a personal finance app on Web + Android
 ```
 
-That is the only command a non-coder needs. It reads `.omp/company-state.yml` and does the next legal step.
+That is the only command a non-coder needs.
+
+<p align="center">
+  <img src="docs/assets/flow.svg" width="100%" alt="Product → Plan3 → Design → AATP → Pour → Release"/>
+</p>
+
+## Why this exists
+
+Most agent “companies” are a long system prompt. The model *remembers* not to rewrite the architecture — until it doesn’t.
+
+Foundry is a **state machine + hard gates**:
+
+| Layer | What it actually is |
+| --- | --- |
+| Workflow | Product → 3-model plan lock → design lock → AATP → workers → review → real QA → release |
+| Staff | Your models, mapped onto stock OMP roles |
+| Governance | `.omp/foundry-state.yml` + `tool_call` deny |
+| Context | LSP / grep first. No dump-the-repo. |
+
+<p align="center">
+  <img src="docs/assets/gates.svg" width="100%" alt="Plan, design, and release writes are refused — not requested"/>
+</p>
+
+A worker cannot “just refactor the plan.” The write is blocked.
 
 ## Install
 
-Requires [Oh My Pi](https://github.com/can1357/oh-my-pi) 18+.
-
 ```bash
-git clone https://github.com/<you>/omp-company-workflow
-omp plugin link ./omp-company-workflow
+git clone https://github.com/oaichu/omp-foundry
+cd omp-foundry
+omp plugin link .
 ```
 
-Restart OMP. Check:
+Restart Oh My Pi. Confirm:
 
 ```bash
 omp plugin list
 ```
 
-You should see `omp-company-workflow`.
+You want `omp-foundry` in the list.
 
-To remove:
+## One-time: pour your own metals
 
-```bash
-omp plugin uninstall omp-company-workflow
-```
+Open **`/models` → Roles**. Map whatever you pay for. Do not edit plugin files.
 
-## One-time: assign your models
-
-In OMP open **`/models` → Roles**. Map whatever providers you pay for:
-
-| Role | Job in this plugin | Example |
-| --- | --- | --- |
-| `default` | Coordinator, product, critic, review | Grok / Opus / whatever you trust as lead |
-| `plan` | Architecture draft | GLM / o-series / your planner |
-| `advisor` | Lock the plan + security review | Your strongest principal |
-| `slow` | Hard implementation only | Same as advisor or one notch cheaper |
-| `task` | Normal implementation | Fast coding model |
-| `designer` | UI foundation | A vision-capable model |
-| `smol` | Tiny / trivial AATP | Cheapest model |
-
-You never edit plugin files to change models. Roles are yours.
-
-This user’s current example (optional, not required):
-
-```yaml
-# ~/.omp/agent/config.yml
-modelRoles:
-  default: xai-oauth/grok-4.6:high
-  plan: zai/glm-5.3:max
-  advisor: openai-codex/gpt-5.6-sol:xhigh
-  slow: openai-codex/gpt-5.6-sol:max
-  task: google-antigravity/gemini-3.7-flash:high
-  designer: google-antigravity/gemini-3.7-flash:high
-  smol: openrouter/deepseek/deepseek-v4-flash:free:auto
-```
-
-## Everyday use
-
-Say what you want, then:
-
-```text
-/company I want a personal finance SaaS on Web + Android
-```
-
-Keep pressing **`/company`** (or just “continue”) after each pause. The plugin will:
-
-1. Write `docs/PRODUCT.md` (`@default`)
-2. Draft → critique → lock `docs/MASTER_PLAN.md` (`@plan` → `@default` → `@advisor`)
-3. If the stack has UI: design + preview (`@designer`). You type `/design approve` or `/design skip`
-4. Split locked plan into `docs/AATP/*`
-5. Implement ready tasks (`@task`, hard ones `@slow`)
-6. Independent review (`@default`, security `@advisor`)
-7. Real test/build commands (`/verify`)
-8. `/release-check` — publish/deploy stays blocked until this is green
-
-You only decide at **product**, **plan lock**, **design approve**, and **release**.
-
-## Optional commands
-
-| Command | When |
+| Role | Foundry job |
 | --- | --- |
-| `/company` | Next step (default) |
-| `/company-init` | Force scaffold |
-| `/plan3` | Force three-model plan |
+| `default` | Floor lead — product, critique, review |
+| `plan` | Architect — writes the draft |
+| `advisor` | Principal — locks the plan, security review |
+| `slow` | Hard pours only |
+| `task` | Everyday implementation |
+| `designer` | Tokens, preview, design lock |
+| `smol` | Trivial AATP |
+
+Copy-paste skeleton: [`roles.example.yml`](./roles.example.yml).
+
+## Everyday
+
+Keep running **`/foundry`** after each pause.
+
+1. `docs/PRODUCT.md` — you confirm the product  
+2. `@plan` drafts → `@default` red-teams → `@advisor` locks `docs/MASTER_PLAN.md`  
+3. If the stack has UI: preview, then `/design approve` or `/design skip`  
+4. Plan becomes `docs/AATP/*` work orders  
+5. `@task` / `@slow` implement one ticket each  
+6. Independent review. Security-critical → `@advisor`  
+7. `/verify` runs **real** test/build commands  
+8. `/release-check` — until green, `git push` / `npm publish` / `wrangler deploy` stay denied  
+
+You intervene at four gates: **product**, **plan lock**, **design approve**, **release**.
+
+```mermaid
+flowchart LR
+  U[You] --> F["/foundry"]
+  F --> P[PRODUCT]
+  P --> T[PLAN 3]
+  T --> D{UI?}
+  D -->|yes| G[DESIGN lock]
+  D -->|no| A[AATP DAG]
+  G --> A
+  A --> W[Workers]
+  W --> R[Review]
+  R --> Q[Verify]
+  Q --> X[Release]
+```
+
+## Extra levers
+
+| Command | Use |
+| --- | --- |
+| `/foundry` | Next legal step |
+| `/foundry-init` / `/company-init` | Force scaffold |
+| `/plan3` | Force draft → critique → lock |
 | `/design` `/design approve` `/design skip` | UI gate |
-| `/aatp` | Force task split |
+| `/aatp` | Split the locked plan |
 | `/build` | Next independent AATP layer |
-| `/review` | Review a finished AATP |
+| `/review` | Review a finished ticket |
 | `/verify` | Deterministic QA |
 | `/release-check` | Final gate |
 
-Built-in OMP Plan (Shift+Tab) is unchanged: one `@plan` model. `/plan3` is the three-step lock.
+`/company` remains an alias of `/foundry`.
 
-## What the plugin blocks
+Built-in Oh My Pi Plan (Shift+Tab) is untouched: one `@plan` model. `/plan3` is the three-heat lock.
 
-Hard `tool_call` gates (not just a prompt):
-
-- Implementation before the master plan is locked
-- UI source before design is locked (when UI is required)
-- Edits to locked `docs/MASTER_PLAN.md`, approved `docs/PRODUCT.md`, locked `docs/DESIGN.md`
-- `git push` / `npm publish` / `wrangler deploy` / production migrate until `release.ready`
-
-Workers that disagree with the plan must call `report_conflict`. They cannot “just refactor the architecture”.
-
-## Layout the plugin creates
+## What gets written
 
 ```text
 docs/PRODUCT.md
@@ -121,14 +140,17 @@ docs/planning/MASTER_PLAN_DRAFT.md
 docs/planning/PLAN_REVIEW.md
 docs/AATP/
 docs/reports/
-.omp/company-state.yml
+.omp/foundry-state.yml
 ```
 
-## Uninstall / upgrade
-
-The plugin is not an OMP fork. OMP updates independently.
+## Uninstall
 
 ```bash
-cd omp-company-workflow && git pull
-# already linked — restart OMP
+omp plugin uninstall omp-foundry
 ```
+
+Not an OMP fork. Update Oh My Pi independently; `git pull` this plugin independently.
+
+---
+
+If Foundry saved you from an agent that “helpfully” rewrote the architecture — star the repo so the next person finds the lock before the pour.

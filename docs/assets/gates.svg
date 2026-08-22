@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 280" role="img" aria-label="Hard gates">
+  <rect width="1100" height="280" rx="20" fill="#14110E"/>
+  <text x="40" y="48" fill="#FFF6E8" font-family="ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700">Not a prompt. The write is refused.</text>
+  <g font-family="ui-sans-serif, system-ui, sans-serif" font-size="15">
+    <rect x="40" y="76" width="310" height="160" rx="16" fill="#201811"/>
+    <text x="64" y="118" fill="#E4572E" font-weight="700">PLAN locked</text>
+    <text x="64" y="150" fill="#C9B8A2">MASTER_PLAN.md</text>
+    <text x="64" y="176" fill="#C9B8A2">worker edit → DENY</text>
+    <rect x="370" y="76" width="310" height="160" rx="16" fill="#201811"/>
+    <text x="394" y="118" fill="#FF9F1C" font-weight="700">DESIGN locked</text>
+    <text x="394" y="150" fill="#C9B8A2">tokens / DESIGN.md</text>
+    <text x="394" y="176" fill="#C9B8A2">feature UI → DENY</text>
+    <rect x="700" y="76" width="360" height="160" rx="16" fill="#201811"/>
+    <text x="724" y="118" fill="#FFB020" font-weight="700">RELEASE not ready</text>
+    <text x="724" y="150" fill="#C9B8A2">git push · npm publish</text>
+    <text x="724" y="176" fill="#C9B8A2">wrangler deploy → DENY</text>
+  </g>
+</svg>

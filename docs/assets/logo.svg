@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="OMP Foundry">
+  <defs>
+    <linearGradient id="g" x1="16" y1="12" x2="80" y2="88" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB020"/>
+      <stop offset="1" stop-color="#E4572E"/>
+    </linearGradient>
+  </defs>
+  <rect width="96" height="96" rx="22" fill="#14110E"/>
+  <path fill="url(#g)" d="M28 70V34c0-8 6-14 14-14h4c8 0 14 6 14 14v6h-10v-6c0-2.2-1.8-4-4-4h-4c-2.2 0-4 1.8-4 4v36H28zm32-20c0-9 7-16 16-16h4v10h-4c-3.3 0-6 2.7-6 6v20h-10V50z"/>
+  <rect x="22" y="74" width="52" height="6" rx="3" fill="#FFB020"/>
+</svg>

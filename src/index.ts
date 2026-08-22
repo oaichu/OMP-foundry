@@ -259,8 +259,68 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("foundry", {
+		description: "Next foundry step — the only command a non-coder needs",
+		handler: async (args, ctx) => {
+			const state = loadState(ctx.cwd);
+			const idea = args.trim();
+			if (!existsSync(join(ctx.cwd, ".omp", "foundry-state.yml")) && !existsSync(join(ctx.cwd, ".omp", "company-state.yml"))) {
+				orchestrate(
+					pi,
+					"Start the foundry.",
+					[
+						"Call company_init.",
+						idea ? `User idea: ${idea}` : "If the user has not described the product, ask in one short question then spawn product-analyst.",
+						"Spawn blocking product-analyst. Then product_approve.",
+					].join("\n"),
+				);
+				return;
+			}
+			if (!productOk(state)) {
+				orchestrate(pi, "Finish the product.", "Spawn blocking product-analyst, then product_approve. Do not plan or code.");
+				return;
+			}
+			if (state.master_plan.status !== "locked") {
+				orchestrate(
+					pi,
+					"Run /plan3 automatically.",
+					"Spawn blocking plan-drafter, then plan-critic, then plan-finalizer. Finalizer calls plan_commit. Do not implement.",
+				);
+				return;
+			}
+			if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") {
+				orchestrate(
+					pi,
+					"Design is required.",
+					"Spawn blocking design-foundation and show a real preview. Wait for the user to say approve or skip. Do not implement features.",
+				);
+				return;
+			}
+			const tasks = listAatp(ctx.cwd);
+			if (tasks.length === 0) {
+				orchestrate(pi, "Generate AATP.", "Write docs/AATP/AATP-*.md + INDEX.md from MASTER_PLAN. Do not implement.");
+				return;
+			}
+			const ready = readyIndependent(tasks);
+			const counts = summarizeAatp(tasks);
+			if (ready.length > 0) {
+				orchestrate(
+					pi,
+					"Build the next independent AATP layer.",
+					ready.map((t) => `${t.id} → ${routeAgent(t.risk)} :: ${t.objective}`).join("\n"),
+				);
+				return;
+			}
+			if (counts.completed === counts.total && counts.total > 0 && state.qa.status !== "pass") {
+				orchestrate(pi, "All AATP done. Run /verify.", "Execute real test/build commands. Write docs/reports/QA.md.");
+				return;
+			}
+			orchestrate(pi, "Run /release-check.", "Compare gates and report what is still red.");
+		},
+	});
+
 	pi.registerCommand("company", {
-		description: "Next company step (non-coder: only command you need)",
+		description: "Alias of /foundry",
 		handler: async (args, ctx) => {
 			const state = loadState(ctx.cwd);
 			const idea = args.trim();
