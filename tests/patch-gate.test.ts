@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { applyPatchArtifact, commitAppliedPatch, parseConflict, parsePatchPaths, parseReviewVerdict, prepareImplementationBaseline, taskBindings, validatePatchArtifact, validatePatchPaths } from "../src/patch-gate";
+import { applyPatchArtifact, commitAppliedPatch, parseConflict, parsePatchPaths, parseReviewVerdict, prepareImplementationBaseline, restoreCleanHead, taskBindings, validatePatchArtifact, validatePatchPaths } from "../src/patch-gate";
 
 const ticket = { id: "AATP-001", status: "active" as const, allowed_files: ["src/auth", "package.json"], forbidden_files: [], risk: "normal", review: "none" as const };
 function gitRepo(): string {
@@ -12,6 +12,12 @@ function gitRepo(): string {
 	git(["init"]); git(["config", "user.email", "t@t"]); git(["config", "user.name", "t"]);
 	mkdirSync(join(dir, "src", "auth"), { recursive: true }); writeFileSync(join(dir, "src", "auth", "a.ts"), "1\n"); writeFileSync(join(dir, "package.json"), "{}\n");
 	git(["add", "."]); git(["commit", "-m", "init"]); return dir;
+}
+function patchFor(dir: string, file: string, next: string): string {
+	writeFileSync(join(dir, file), next);
+	const patch = spawnSync("git", ["diff", "--", file], { cwd: dir, encoding: "utf8" }).stdout;
+	spawnSync("git", ["restore", "--", file], { cwd: dir });
+	const patchPath = join(dir, "worker.patch"); writeFileSync(patchPath, patch); return patchPath;
 }
 
 describe("exact governed bindings", () => {
@@ -40,20 +46,27 @@ describe("pre-apply patch gate", () => {
 		expect(validatePatchPaths(dir, ["src/auth/a.ts"], ticket, "review").rejected).toEqual(["src/auth/a.ts"]);
 	});
 	test("valid patch is checked before extension-owned apply+commit", () => {
-		const dir = gitRepo(); writeFileSync(join(dir, "src", "auth", "a.ts"), "2\n");
-		const patch = spawnSync("git", ["diff", "--", "src/auth/a.ts"], { cwd: dir, encoding: "utf8" }).stdout;
-		spawnSync("git", ["restore", "--", "src/auth/a.ts"], { cwd: dir });
-		const patchPath = join(dir, "worker.patch"); writeFileSync(patchPath, patch);
+		const dir = gitRepo(), patchPath = patchFor(dir, "src/auth/a.ts", "2\n");
 		expect(validatePatchArtifact(dir, patchPath, ticket, "implementation").ok).toBe(true);
 		expect(applyPatchArtifact(dir, patchPath).ok).toBe(true);
 		expect(readFileSync(join(dir, "src", "auth", "a.ts"), "utf8")).toBe("2\n");
 		expect(commitAppliedPatch(dir, ticket.id, "implementation").ok).toBe(true);
+	});
+	test("rollback reverses only Foundry patch and preserves unrelated user file", () => {
+		const dir = gitRepo(), patchPath = patchFor(dir, "src/auth/a.ts", "worker\n");
+		expect(applyPatchArtifact(dir, patchPath).ok).toBe(true);
+		writeFileSync(join(dir, "user-notes.txt"), "preserve me\n");
+		restoreCleanHead(dir);
+		expect(readFileSync(join(dir, "src", "auth", "a.ts"), "utf8")).toBe("1\n");
+		expect(existsSync(join(dir, "user-notes.txt"))).toBe(true);
+		expect(readFileSync(join(dir, "user-notes.txt"), "utf8")).toBe("preserve me\n");
 	});
 });
 
 describe("worker evidence", () => {
 	test("parses review and conflict markers", () => {
 		expect(parseReviewVerdict("FOUNDRY_REVIEW AATP-001 APPROVE", "AATP-001")).toBe("APPROVE");
+		expect(parseReviewVerdict("+FOUNDRY_REVIEW AATP-001 BLOCK", "AATP-001")).toBe("BLOCK");
 		expect(parseReviewVerdict("APPROVE", "AATP-001")).toBeUndefined();
 		expect(parseConflict("FOUNDRY_CONFLICT PLAN_CONFLICT locked plan mismatch")?.kind).toBe("PLAN_CONFLICT");
 	});
