@@ -1,9 +1,11 @@
 {
   "name": "omp-foundry",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Lock the plan. Then pour the code. Governed AI foundry for Oh My Pi.",
   "license": "MIT",
-  "type": "module",
+  "scripts": {
+    "test": "bun test"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/oaichu/omp-foundry.git"

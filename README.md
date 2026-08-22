@@ -21,6 +21,9 @@
 
 You assign models to roles. Foundry runs the mill.
 
+> **v0.2-alpha.** Foundry is a hard **tool-execution** boundary inside Oh My Pi, not an OS sandbox. After plan lock, `eval` is denied outright (no code scanning). Release readiness is **derived** from artifact hashes + ticket state + QA tree SHA — it is not a sticky boolean. Human `/foundry-approve` and `/design approve` are the lock switches. Isolated implementers are requested on `/build`.
+
+
 ```text
 /foundry I want a personal finance app on Web + Android
 ```
