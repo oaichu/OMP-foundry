@@ -50,7 +50,9 @@ export function resolveSkillManifests(
 		chosen.push(item);
 		if (chosen.length >= MAX_SKILLS) break;
 	}
-	return withRequires(chosen, registry).slice(0, MAX_SKILLS);
+	// Dependencies are mandatory companions, so withRequires may push the
+	// pack past MAX_SKILLS rather than dropping a required skill.
+	return withRequires(chosen, registry);
 }
 
 export function resolveSkills(cwd: string, state: CompanyState, options: ResolveOptions = {}): string[] {

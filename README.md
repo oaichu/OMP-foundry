@@ -21,7 +21,7 @@
 
 You assign models to roles. Foundry runs the mill.
 
-> **v0.3.0.** Tool-execution boundary inside Oh My Pi, not an OS sandbox. State files carry `schema_version`. Missing version is legacy v0 and migrates deterministically; newer schemas fail closed. `/foundry-version` checks the latest GitHub release tag (24h cache). `eval` is denied for the whole Foundry session. Paths are canonicalized under the repo root. Isolated-task leaks are reverted against AATP after apply.
+> **v0.3.0.** Tool-execution boundary inside Oh My Pi, not an OS sandbox. State files carry `schema_version`; missing version is legacy v0 and migrates deterministically, newer schemas fail closed. `eval` and eval-equivalents (`node -e`, `python -c`, …) are denied for the whole session. Shell write targets (`>`, `tee`, `sed -i`, `cp/mv/rm`) go through the same path gates as `write`; a path that escapes the repo is denied, never ignored. Worker tasks bind to the AATP named in their prompt; out-of-scope writes are reverted to the user's pre-task content, and out-of-repo writes are reported, never touched. Release actions re-derive the gate at execution time. AATP enforces a real transition table (`ready → active → completed → APPROVE`). `python -c`-style inline code, uninspectable mutators (`git apply`, `git restore`) are denied while the plan is locked. `/foundry-version` checks the latest GitHub release tag (24h cache, 1h fail-cache). CI typechecks with `tsc --noEmit`.
 
 
 

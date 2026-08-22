@@ -5,10 +5,14 @@ import { FOUNDRY_VERSION } from "./types";
 
 export const LATEST_RELEASE = "https://github.com/oaichu/omp-foundry/releases/latest";
 const TTL_MS = 24 * 60 * 60 * 1000;
+// A failed fetch caches too, but for a shorter window so an offline session
+// does not refetch every session while still recovering quickly.
+const FAIL_TTL_MS = 60 * 60 * 1000;
 
 export interface UpdateCache {
 	checkedAt: number;
 	latest: string;
+	fetchFailed?: boolean;
 }
 
 export interface UpdateResult {
@@ -33,14 +37,47 @@ export function parseTagFromUrl(url: string): string | undefined {
 	return match?.[1];
 }
 
-export function compareSemver(a: string, b: string): number {
-	const pa = a.replace(/^v/, "").split(".").map((p) => Number.parseInt(p, 10) || 0);
-	const pb = b.replace(/^v/, "").split(".").map((p) => Number.parseInt(p, 10) || 0);
-	for (let i = 0; i < 3; i++) {
-		const d = (pa[i] ?? 0) - (pb[i] ?? 0);
-		if (d) return d;
+function parseSemver(version: string): { core: number[]; pre: string[] | null } {
+	const clean = version.replace(/^v/, "").split("+")[0];
+	const [corePart, prePart] = clean.split("-");
+	const core = corePart.split(".").map((p) => Number.parseInt(p, 10) || 0);
+	while (core.length < 3) core.push(0);
+	return { core, pre: prePart ? prePart.split(".") : null };
+}
+
+function comparePrerelease(a: string[], b: string[]): number {
+	for (let i = 0; i < Math.max(a.length, b.length); i++) {
+		const left = a[i];
+		const right = b[i];
+		if (left === undefined) return -1;
+		if (right === undefined) return 1;
+		const leftNum = /^\d+$/.test(left);
+		const rightNum = /^\d+$/.test(right);
+		if (leftNum && rightNum) {
+			const d = Number(left) - Number(right);
+			if (d) return d;
+		} else if (leftNum) {
+			return -1;
+		} else if (rightNum) {
+			return 1;
+		} else if (left !== right) {
+			return left < right ? -1 : 1;
+		}
 	}
 	return 0;
+}
+
+export function compareSemver(a: string, b: string): number {
+	const pa = parseSemver(a);
+	const pb = parseSemver(b);
+	for (let i = 0; i < 3; i++) {
+		const d = pa.core[i] - pb.core[i];
+		if (d) return d;
+	}
+	if (pa.pre === null && pb.pre === null) return 0;
+	if (pa.pre === null) return 1;
+	if (pb.pre === null) return -1;
+	return comparePrerelease(pa.pre, pb.pre);
 }
 
 export async function resolveOmpVersion(): Promise<string> {
@@ -105,7 +142,7 @@ export async function checkForUpdate(deps: UpdateCheckDeps = {}): Promise<Update
 	const omp = deps.omp ?? (await resolveOmpVersion());
 	const cachePath = deps.cachePath ?? (await xdgCachePath());
 	const cached = readCache(cachePath);
-	const fresh = cached && now() - cached.checkedAt < TTL_MS;
+	const fresh = cached && now() - cached.checkedAt < (cached.fetchFailed ? FAIL_TTL_MS : TTL_MS);
 	let latest = cached?.latest;
 	if (!fresh || deps.force) {
 		try {
@@ -113,9 +150,11 @@ export async function checkForUpdate(deps: UpdateCheckDeps = {}): Promise<Update
 			if (fetched) {
 				latest = fetched;
 				writeCache(cachePath, { checkedAt: now(), latest });
+			} else {
+				writeCache(cachePath, { checkedAt: now(), latest: latest ?? "", fetchFailed: true });
 			}
 		} catch {
-			/* offline or timeout — keep cache */
+			writeCache(cachePath, { checkedAt: now(), latest: latest ?? "", fetchFailed: true });
 		}
 	}
 	const newer = Boolean(latest && compareSemver(latest, installed) > 0);

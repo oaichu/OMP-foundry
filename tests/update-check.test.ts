@@ -84,3 +84,55 @@ describe("update-check", () => {
 		expect(result.newer).toBe(false);
 	});
 });
+
+describe("compareSemver prereleases", () => {
+	test("release outranks prerelease", () => {
+		expect(compareSemver("1.0.0-rc.1", "1.0.0")).toBeLessThan(0);
+		expect(compareSemver("1.0.0", "1.0.0-rc.1")).toBeGreaterThan(0);
+	});
+	test("numeric prerelease identifiers compare numerically", () => {
+		expect(compareSemver("1.0.0-beta.2", "1.0.0-beta.10")).toBeLessThan(0);
+		expect(compareSemver("1.0.0-alpha", "1.0.0-alpha.1")).toBeLessThan(0);
+	});
+	test("multi-digit cores still work", () => {
+		expect(compareSemver("0.10.0", "0.9.0")).toBeGreaterThan(0);
+	});
+});
+
+describe("update-check failure caching", () => {
+	test("failed fetch writes a short-lived fail cache", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-upd-"));
+		const cachePath = join(dir, "foundry-update.json");
+		writeFileSync(cachePath, JSON.stringify({ checkedAt: 1, latest: "0.2.0" }), "utf8");
+		const result = await checkForUpdate({
+			now: () => 1 + 25 * 60 * 60 * 1000,
+			installed: "0.3.0",
+			omp: "18.0.0",
+			cachePath,
+			fetchLatest: async () => {
+				throw new Error("timeout");
+			},
+		});
+		expect(result.latest).toBe("0.2.0");
+		const cache = JSON.parse(readFileSync(cachePath, "utf8"));
+		expect(cache.fetchFailed).toBe(true);
+	});
+
+	test("fail cache suppresses refetch within its short window", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-upd-"));
+		const cachePath = join(dir, "foundry-update.json");
+		writeFileSync(cachePath, JSON.stringify({ checkedAt: 1, latest: "0.2.0", fetchFailed: true }), "utf8");
+		let fetched = 0;
+		await checkForUpdate({
+			now: () => 1 + 30 * 60 * 1000,
+			installed: "0.3.0",
+			omp: "18.0.0",
+			cachePath,
+			fetchLatest: async () => {
+				fetched += 1;
+				return "9.9.9";
+			},
+		});
+		expect(fetched).toBe(0);
+	});
+});
