@@ -19,7 +19,7 @@ import { contentTextOf, governedTask, reviewTaskDelta, snapshotTree } from "./pa
 import { canonicalRepoPath } from "./paths";
 import { deriveRelease, invalidateQa, refreshArtifactHashes } from "./release";
 import { loadRegistry } from "./skills/registry";
-import { detectStack } from "./stack-detector";
+import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
 import { type CompanyState, defaultState } from "./types";
 import { applyQa, runVerify } from "./verify-runner";
