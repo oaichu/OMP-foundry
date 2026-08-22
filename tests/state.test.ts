@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { parseState, serializeState, StateError } from "../src/state-machine";
-import { defaultState } from "../src/types";
+import { parseState, serializeState } from "../src/state-machine";
+import { defaultState, StateError } from "../src/types";
 
 describe("state", () => {
 	test("roundtrip default", () => {

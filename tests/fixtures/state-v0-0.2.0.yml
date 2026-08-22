@@ -1,0 +1,38 @@
+phase: planning
+product:
+  status: approved
+  sha256: "p0"
+master_plan:
+  version: "1.0"
+  status: locked
+  sha256: "m0"
+design:
+  required: false
+  version: "0"
+  status: not_required
+  sha256: ""
+tickets:
+  AATP-001:
+    status: completed
+    allowed_files: src/auth
+    forbidden_files: docs/MASTER_PLAN.md
+    risk: normal
+    review: none
+aatp:
+  total: 1
+  ready: 0
+  active: 0
+  completed: 1
+  blocked: 0
+qa:
+  status: pending
+  tree_sha: ""
+release:
+  ready: false
+  tree_sha: ""
+unlock_token: ""
+conflict:
+  kind: none
+  reason: ""
+capabilities:
+  plan_lock: 9999999999999

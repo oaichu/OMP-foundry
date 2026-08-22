@@ -7,7 +7,8 @@ import {
 	CONFLICT_KINDS,
 	type CompanyState,
 	type ConflictKind,
-	type HumanCap,
+	CURRENT_STATE_SCHEMA,
+	FOUNDRY_VERSION,
 	PHASES,
 	type Phase,
 	QA_STATUSES,
@@ -16,16 +17,13 @@ import {
 	STATE_REL,
 	TICKET_STATUSES,
 	type TicketStatus,
-	CAP_TTL_MS,
+	StateError,
 	defaultState,
 } from "./types";
+import { backupOnce, migrateToCurrent } from "./schema";
 
-export class StateError extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "StateError";
-	}
-}
+export { StateError };
+
 
 function pick(block: string, key: string): string | undefined {
 	const match = block.match(new RegExp(`(?:^|\\n)\\s*${key}:\\s*(.*)`));
@@ -75,9 +73,21 @@ function parseTickets(yaml: string): Record<string, AatpTicket> {
 	return tickets;
 }
 
-export function parseState(yaml: string): CompanyState {
+export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): CompanyState {
 	if (!yaml.trim()) throw new StateError("empty state");
 	const base = defaultState();
+	const rawVersion = yaml.match(/(?:^|\n)schema_version:\s*(\S+)/);
+	if (rawVersion) {
+		const n = Number(rawVersion[1]);
+		if (!Number.isInteger(n) || n < 0) throw new StateError("invalid schema_version");
+		base.schema_version = n;
+	} else if (!opts.allowLegacy) {
+		throw new StateError("missing schema_version (legacy v0 — loadState migrates)");
+	} else {
+		base.schema_version = 0;
+	}
+	base.created_by = pick(yaml, "created_by") ?? (opts.allowLegacy ? "" : base.created_by);
+	base.last_written_by = pick(yaml, "last_written_by") ?? (opts.allowLegacy ? "" : base.last_written_by);
 	base.phase = mustEnum(pick(yaml, "phase"), PHASES, "phase");
 	const product = pickBlock(yaml, "product");
 	const plan = pickBlock(yaml, "master_plan");
@@ -116,6 +126,7 @@ export function parseState(yaml: string): CompanyState {
 	return base;
 }
 
+
 function serializeTickets(tickets: Record<string, AatpTicket>): string[] {
 	const ids = Object.keys(tickets);
 	if (ids.length === 0) return ["tickets: {}"];
@@ -135,6 +146,9 @@ function serializeTickets(tickets: Record<string, AatpTicket>): string[] {
 
 export function serializeState(state: CompanyState): string {
 	return [
+		`schema_version: ${state.schema_version}`,
+		`created_by: "${state.created_by}"`,
+		`last_written_by: "${state.last_written_by}"`,
 		`phase: ${state.phase}`,
 		`product:`,
 		`  status: ${state.product.status}`,
@@ -178,12 +192,23 @@ export type LoadedState = { ok: true; state: CompanyState; path: string } | { ok
 export function loadStateResult(cwd: string): LoadedState {
 	for (const rel of STATE_PATHS) {
 		const file = join(cwd, rel);
+		let text: string;
 		try {
-			const text = readFileSync(file, "utf8");
-			return { ok: true, state: parseState(text), path: file };
+			text = readFileSync(file, "utf8");
+		} catch {
+			continue;
+		}
+		try {
+			const migrated = migrateToCurrent(text);
+			if (migrated.didMigrate) {
+				backupOnce(file, migrated.from);
+				saveState(cwd, migrated.state);
+				return { ok: true, state: migrated.state, path: statePath(cwd) };
+			}
+			return { ok: true, state: migrated.state, path: file };
 		} catch (error) {
-			if (error instanceof StateError) return { ok: false, reason: `${rel}: ${error.message}` };
-			/* missing file — try next */
+			const reason = error instanceof Error ? error.message : String(error);
+			return { ok: false, reason: `${rel}: ${reason}` };
 		}
 	}
 	return { ok: true, state: defaultState(), path: statePath(cwd) };
@@ -196,12 +221,16 @@ export function loadState(cwd: string): CompanyState {
 }
 
 export function saveState(cwd: string, state: CompanyState): void {
+	state.schema_version = CURRENT_STATE_SCHEMA;
+	state.last_written_by = FOUNDRY_VERSION;
+	if (!state.created_by) state.created_by = FOUNDRY_VERSION;
 	const file = statePath(cwd);
 	mkdirSync(dirname(file), { recursive: true });
 	const tmp = `${file}.${process.pid}.tmp`;
 	writeFileSync(tmp, serializeState(state), "utf8");
 	renameSync(tmp, file);
 }
+
 
 export function planLocked(state: CompanyState): boolean {
 	return state.master_plan.status === "locked";
@@ -216,16 +245,6 @@ export function designAllowsUi(state: CompanyState): boolean {
 	return state.design.status === "locked" || state.design.status === "not_required";
 }
 
-export function grantCap(state: CompanyState, cap: HumanCap, now = Date.now()): void {
-	state.capabilities[cap] = now + CAP_TTL_MS;
-}
-
-export function consumeCap(state: CompanyState, cap: HumanCap, now = Date.now()): boolean {
-	const exp = state.capabilities[cap];
-	if (!exp || exp < now) return false;
-	delete state.capabilities[cap];
-	return true;
-}
 
 export function recountTickets(state: CompanyState): void {
 	const list = Object.values(state.tickets);

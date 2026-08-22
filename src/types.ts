@@ -18,7 +18,16 @@ export type ConflictKind =
 	| "DEPENDENCY_CONFLICT"
 	| "SCOPE_INSUFFICIENT";
 
-export type HumanCap = "product_approve" | "plan_lock" | "design_lock" | "design_skip";
+export const CURRENT_STATE_SCHEMA = 1;
+export const FOUNDRY_VERSION = "0.2.2";
+export class StateError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "StateError";
+	}
+}
+
+
 
 export interface AatpTicket {
 	id: string;
@@ -31,6 +40,9 @@ export interface AatpTicket {
 }
 
 export interface CompanyState {
+	schema_version: number;
+	created_by: string;
+	last_written_by: string;
 	phase: Phase;
 	product: { status: ArtifactStatus; sha256: string };
 	master_plan: { version: string; status: ArtifactStatus; sha256: string };
@@ -41,8 +53,8 @@ export interface CompanyState {
 	release: { ready: boolean; tree_sha: string };
 	unlock_token: string;
 	conflict: { kind: ConflictKind; reason: string };
-	capabilities: Partial<Record<HumanCap, number>>;
 }
+
 
 export const STATE_REL = ".omp/foundry-state.yml";
 
@@ -79,6 +91,9 @@ export const CONFLICT_KINDS: ConflictKind[] = [
 
 export function defaultState(): CompanyState {
 	return {
+		schema_version: CURRENT_STATE_SCHEMA,
+		created_by: FOUNDRY_VERSION,
+		last_written_by: FOUNDRY_VERSION,
 		phase: "discovery",
 		product: { status: "missing", sha256: "" },
 		master_plan: { version: "0", status: "missing", sha256: "" },
@@ -89,7 +104,6 @@ export function defaultState(): CompanyState {
 		release: { ready: false, tree_sha: "" },
 		unlock_token: "",
 		conflict: { kind: "none", reason: "" },
-		capabilities: {},
 	};
 }
 
@@ -121,4 +135,3 @@ export const PRIVILEGED_TOOLS = new Set([
 	"foundry_skill_read",
 ]);
 
-export const CAP_TTL_MS = 10 * 60 * 1000;

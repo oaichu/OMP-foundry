@@ -21,6 +21,14 @@ function pkgDeps(cwd: string): string[] {
 	}
 }
 
+function readIf(cwd: string, name: string): string {
+	try {
+		return readFileSync(join(cwd, name), "utf8");
+	} catch {
+		return "";
+	}
+}
+
 function present(cwd: string, names: string[]): string[] {
 	return names.filter((name) => existsSync(join(cwd, name)));
 }
@@ -47,10 +55,13 @@ export function detectRepo(cwd: string): RepoFacts {
 		"settings.gradle.kts",
 		"pubspec.yaml",
 		"Podfile",
-		"*.csproj",
 	]);
 	const entries = existsSync(cwd) ? readdirSync(cwd) : [];
 	if (entries.some((e) => e.endsWith(".csproj") || e.endsWith(".sln"))) files.push("*.csproj");
+
+	const pyText = `${readIf(cwd, "requirements.txt")}\n${readIf(cwd, "pyproject.toml")}`.toLowerCase();
+	const goText = readIf(cwd, "go.mod").toLowerCase();
+	const cargoText = readIf(cwd, "Cargo.toml").toLowerCase();
 
 	const languages: string[] = [];
 	if (has("typescript") || files.includes("tsconfig.json")) languages.push("typescript");
@@ -68,21 +79,34 @@ export function detectRepo(cwd: string): RepoFacts {
 	if (has("svelte")) frameworks.push("svelte");
 	if (has("express") || has("fastify") || has("hono") || has("koa")) frameworks.push("node");
 	if (has("@nestjs/core")) frameworks.push("nest");
-	if (has("fastapi") || existsSync(join(cwd, "pyproject.toml"))) {
-		/* fastapi via reqs text later */
-	}
+	if (/\bfastapi\b/.test(pyText)) frameworks.push("fastapi");
+	if (/\bdjango\b/.test(pyText)) frameworks.push("django");
+	if (/\bflask\b/.test(pyText)) frameworks.push("flask");
+	if (/github.com\/gin-gonic\/gin/.test(goText)) frameworks.push("gin");
+	if (/github.com\/labstack\/echo/.test(goText)) frameworks.push("echo");
+	if (/github.com\/go-chi\/chi/.test(goText)) frameworks.push("chi");
+	if (/actix-web|axum|rocket/.test(cargoText)) frameworks.push("rust-web");
 
 	const stacks: string[] = [];
 	if (frameworks.includes("react") || frameworks.includes("next") || frameworks.includes("vue") || frameworks.includes("svelte")) {
 		stacks.push("web");
 	}
-	if (languages.includes("python") || languages.includes("go") || has("express")) stacks.push("backend");
+	if (
+		languages.includes("python") ||
+		languages.includes("go") ||
+		languages.includes("rust") ||
+		frameworks.includes("node") ||
+		frameworks.includes("fastapi") ||
+		frameworks.includes("django") ||
+		frameworks.includes("flask")
+	) {
+		stacks.push("backend");
+	}
 	if (languages.includes("kotlin")) stacks.push("android", "mobile");
 	if (languages.includes("csharp")) stacks.push("windows", "desktop");
 	if (has("wrangler") || files.includes("wrangler.toml") || files.includes("wrangler.jsonc")) stacks.push("cloudflare", "cloud");
-	if (has("stripe")) stacks.push("saas");
-	if (has("@supabase/supabase-js")) stacks.push("saas");
-	if (files.includes("Cargo.toml") && !stacks.length) stacks.push("systems");
+	if (has("stripe") || has("@supabase/supabase-js")) stacks.push("saas");
+	if (files.includes("Cargo.toml") && !stacks.includes("backend")) stacks.push("systems");
 
 	return { languages, frameworks, stacks, dependencies, files };
 }

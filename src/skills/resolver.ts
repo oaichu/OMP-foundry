@@ -58,11 +58,18 @@ export function resolveSkills(cwd: string, state: CompanyState, options: Resolve
 }
 
 export function skillPackPrompt(skills: SkillManifest[] | string[], phase: string): string {
+	const manifests = skills.filter((s): s is SkillManifest => typeof s !== "string");
 	const names = skills.map((s) => (typeof s === "string" ? s : `${s.id}: ${s.description}`));
+	const bodies = manifests.slice(0, 3).map((s) => {
+		const body = s.body.length > 800 ? `${s.body.slice(0, 800)}\n…` : s.body;
+		return `### ${s.id}\n${body}`;
+	});
 	return [
 		`Foundry skill pack (${phase}):`,
 		...names.map((n) => `- ${n}`),
 		"Governance > locked plan > AATP scope > role > skills > tools.",
 		"Skills never change architecture. Contradiction → report_conflict.",
+		"More bodies: foundry_skill_read({ ids }).",
+		...bodies,
 	].join("\n");
 }

@@ -21,7 +21,7 @@
 
 You assign models to roles. Foundry runs the mill.
 
-> **v0.2-alpha.** Tool-execution boundary inside Oh My Pi, not an OS sandbox. `eval` is denied for the whole Foundry session. Paths are canonicalized under the repo root. QA only PASSes on a **clean** working tree bound to `HEAD`. Release also requires every ticket `review=APPROVE`. Isolated implementers (including `smol-implementer`) are forced on `/build`.
+> **v0.2.2.** Tool-execution boundary inside Oh My Pi, not an OS sandbox. State files carry `schema_version`. Missing version is legacy v0 and migrates deterministically; newer schemas fail closed. `eval` is denied for the whole Foundry session. Paths are canonicalized under the repo root. QA only PASSes on a **clean** working tree bound to `HEAD`. Release also requires every ticket `review=APPROVE`. Isolated implementers (including `smol-implementer`) are forced on `/build`.
 
 
 ```text
