@@ -12,6 +12,9 @@ export interface TaskItem { index: number; agent: string; task: string; isolated
 export interface TaskBinding extends TaskItem { ticketId: string; kind: "implementation" | "review"; }
 export interface TaskResultLike { index?: number; id?: string; agent?: string; task?: string; output?: string; patchPath?: string; exitCode?: number; error?: string; aborted?: boolean; }
 
+const LAST_APPLIED_PATCH = new Map<string, string>();
+const gitIdentity = { ...process.env, GIT_AUTHOR_NAME: process.env.GIT_AUTHOR_NAME ?? "OMP Foundry", GIT_AUTHOR_EMAIL: process.env.GIT_AUTHOR_EMAIL ?? "omp-foundry@local", GIT_COMMITTER_NAME: process.env.GIT_COMMITTER_NAME ?? "OMP Foundry", GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL ?? "omp-foundry@local" };
+
 export function parsePatchPaths(text: string): string[] {
 	const out = new Set<string>();
 	for (const match of text.matchAll(/^diff --git a\/(.+?) b\/(.+)$/gm)) { if (match[1] && match[1] !== "/dev/null") out.add(match[1]); if (match[2] && match[2] !== "/dev/null") out.add(match[2]); }
@@ -41,7 +44,7 @@ export function prepareImplementationBaseline(cwd: string): { ok: boolean; reaso
 	if (!safe) return { ok: false, reason: `WORKTREE_GATE: commit or stash non-governance changes before /build: ${dirty.join(", ")}` };
 	let result = spawnSync("git", ["add", "-A"], { cwd, encoding: "utf8" });
 	if (result.status !== 0) return { ok: false, reason: `BASELINE_COMMIT_FAILED: ${result.stderr.trim()}` };
-	result = spawnSync("git", ["commit", "-m", "foundry: lock approved implementation baseline"], { cwd, encoding: "utf8" });
+	result = spawnSync("git", ["commit", "-m", "foundry: lock approved implementation baseline"], { cwd, encoding: "utf8", env: gitIdentity });
 	if (result.status !== 0) return { ok: false, reason: `BASELINE_COMMIT_FAILED: ${result.stderr.trim() || result.stdout.trim()}` };
 	return { ok: true, committed: true };
 }
@@ -93,19 +96,31 @@ export function validatePatchArtifact(cwd: string, patchPath: string | undefined
 }
 export function applyPatchArtifact(cwd: string, patchPath: string | undefined): { ok: boolean; reason?: string } {
 	if (!patchPath || !existsSync(patchPath) || !readPatchArtifact(patchPath).trim()) return { ok: true };
+	const check = spawnSync("git", ["apply", "--check", "--", patchPath], { cwd, encoding: "utf8" });
+	if (check.status !== 0) return { ok: false, reason: `PATCH_APPLY_FAILED: ${check.stderr.trim() || check.stdout.trim()}` };
 	const result = spawnSync("git", ["apply", "--whitespace=nowarn", "--", patchPath], { cwd, encoding: "utf8" });
-	return result.status === 0 ? { ok: true } : { ok: false, reason: `PATCH_APPLY_FAILED: ${result.stderr.trim() || result.stdout.trim()}` };
+	if (result.status !== 0) return { ok: false, reason: `PATCH_APPLY_FAILED: ${result.stderr.trim() || result.stdout.trim()}` };
+	LAST_APPLIED_PATCH.set(cwd, patchPath);
+	return { ok: true };
 }
 export function commitAppliedPatch(cwd: string, ticketId: string, kind: "implementation" | "review"): { ok: boolean; reason?: string } {
 	let result = spawnSync("git", ["add", "-A"], { cwd, encoding: "utf8" });
 	if (result.status !== 0) return { ok: false, reason: `git add failed: ${result.stderr.trim()}` };
 	result = spawnSync("git", ["diff", "--cached", "--quiet"], { cwd, encoding: "utf8" });
-	if (result.status === 0) return { ok: true };
+	if (result.status === 0) { LAST_APPLIED_PATCH.delete(cwd); return { ok: true }; }
 	const message = kind === "review" ? `foundry: review ${ticketId}` : `foundry: complete ${ticketId}`;
-	result = spawnSync("git", ["commit", "-m", message], { cwd, encoding: "utf8" });
-	return result.status === 0 ? { ok: true } : { ok: false, reason: `git commit failed: ${result.stderr.trim() || result.stdout.trim()}` };
+	result = spawnSync("git", ["commit", "-m", message], { cwd, encoding: "utf8", env: gitIdentity });
+	if (result.status === 0) { LAST_APPLIED_PATCH.delete(cwd); return { ok: true }; }
+	return { ok: false, reason: `git commit failed: ${result.stderr.trim() || result.stdout.trim()}` };
 }
-export function restoreCleanHead(cwd: string): void { spawnSync("git", ["reset", "--hard", "HEAD"], { cwd, encoding: "utf8" }); spawnSync("git", ["clean", "-fd"], { cwd, encoding: "utf8" }); }
+/** Reverse only the last Foundry-applied patch. Never reset/clean unrelated parent work. */
+export function restoreCleanHead(cwd: string): void {
+	const patchPath = LAST_APPLIED_PATCH.get(cwd);
+	if (!patchPath || !existsSync(patchPath)) return;
+	spawnSync("git", ["reset"], { cwd, encoding: "utf8" });
+	const reversed = spawnSync("git", ["apply", "-R", "--whitespace=nowarn", "--", patchPath], { cwd, encoding: "utf8" });
+	if (reversed.status === 0) LAST_APPLIED_PATCH.delete(cwd);
+}
 export function hashEvidence(...parts: Array<string | undefined>): string { const hash = createHash("sha256"); for (const part of parts) { hash.update(part ?? ""); hash.update("\0"); } return hash.digest("hex"); }
 export function extractTaskResults(details: unknown): TaskResultLike[] { if (!details || typeof details !== "object") return []; const rec = details as { results?: TaskResultLike[] }; return Array.isArray(rec.results) ? rec.results : []; }
 export function parseReviewVerdict(output: string, ticketId: string): "APPROVE" | "REQUEST_CHANGES" | "BLOCK" | undefined {
