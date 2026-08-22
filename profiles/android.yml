@@ -1,7 +1,0 @@
-stack: android
-verify:
-  - gradlew lint
-  - gradlew test
-  - gradlew assembleDebug
-ui: true
-preview: DesignSystemShowcase / Compose Preview
