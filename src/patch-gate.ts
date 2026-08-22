@@ -94,7 +94,13 @@ export function revertPaths(cwd: string, rels: string[]): string[] {
 	for (const rel of rels) {
 		const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "--", rel], { cwd, encoding: "utf8" });
 		if (tracked.status === 0) {
-			spawnSync("git", ["restore", "--source=HEAD", "--worktree", "--staged", "--", rel], { cwd });
+			const restore = spawnSync("git", ["restore", "--source=HEAD", "--worktree", "--staged", "--", rel], {
+				cwd,
+				encoding: "utf8",
+			});
+			if (restore.status !== 0) {
+				spawnSync("git", ["checkout", "HEAD", "--", rel], { cwd, encoding: "utf8" });
+			}
 			reverted.push(rel);
 			continue;
 		}
@@ -138,3 +144,32 @@ export function governedTask(input: Record<string, unknown>): boolean {
 	}
 	return [...names].some((n) => n === "implementer" || n === "hard-implementer" || n === "smol-implementer");
 }
+
+export function reviewTaskDelta(
+	cwd: string,
+	before: Set<string>,
+	tickets: AatpTicket[],
+	details: unknown,
+	contentText: string,
+): { rejected: string[]; kept: string[]; reverted: string[] } {
+	const raw = [
+		...deltaPaths(before, gitChangedPaths(cwd)),
+		...extractResultPaths(details, contentText),
+	];
+	const unique = [...new Set(raw)];
+	const { rejected, kept } = rejectChangedPaths(cwd, unique, tickets);
+	const reverted = rejected.length ? revertPaths(cwd, rejected) : [];
+	return { rejected, kept, reverted };
+}
+
+export function contentTextOf(content: unknown): string {
+	if (typeof content === "string") return content;
+	if (!Array.isArray(content)) return "";
+	return content
+		.map((chunk) => {
+			if (chunk && typeof chunk === "object" && "text" in chunk) return String((chunk as { text: unknown }).text ?? "");
+			return "";
+		})
+		.join("\n");
+}
+

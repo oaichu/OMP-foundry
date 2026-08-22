@@ -15,10 +15,10 @@ import {
 import { CONTEXT_POLICY, phasePrompt } from "./context-policy";
 import { requireDesignIfUi, requirePlan, requireProduct } from "./gates";
 import { denyToolCall, forceIsolatedTaskInput, type ToolInput } from "./permissions";
+import { contentTextOf, governedTask, reviewTaskDelta, snapshotTree } from "./patch-gate";
 import { canonicalRepoPath } from "./paths";
 import { deriveRelease, invalidateQa, refreshArtifactHashes } from "./release";
 import { loadRegistry } from "./skills/registry";
-import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
 import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
 import { type CompanyState, defaultState } from "./types";
@@ -110,6 +110,7 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	const z = pi.zod;
 	pi.setLabel("OMP Foundry");
+	const baselines = new Map<string, Set<string>>();
 
 	const statusOf = (state: CompanyState): string =>
 		`${state.phase} plan=${state.master_plan.status} design=${state.design.status}`;
@@ -119,6 +120,8 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		if (!loaded.ok) return { state: defaultState(), broken: loaded.reason };
 		return { state: loaded.state };
 	};
+
+	const taskKey = (event: { toolCallId?: string }, cwd: string): string => event.toolCallId ?? cwd;
 
 	pi.on("session_start", async (_e, ctx) => {
 		const { state, broken } = safeState(ctx.cwd);
@@ -143,6 +146,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	pi.on("tool_call", async (event, ctx) => {
 		if (event.toolName === "task") {
 			const raw = event.input && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
+			if (governedTask(raw)) baselines.set(taskKey(event, ctx.cwd), snapshotTree(ctx.cwd));
 			const isolated = forceIsolatedTaskInput(raw);
 			if (isolated) return { input: isolated };
 		}
@@ -162,6 +166,31 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 			canonicalize: (raw) => canonicalRepoPath(ctx.cwd, raw),
 		});
 	});
+
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.toolName !== "task") return;
+		const input = event.input && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
+		if (!governedTask(input)) return;
+		const { state } = safeState(ctx.cwd);
+		const tickets = Object.values(state.tickets).filter((t) => t.status !== "blocked");
+		const key = taskKey(event, ctx.cwd);
+		const before = baselines.get(key) ?? new Set<string>();
+		baselines.delete(key);
+		const reviewed = reviewTaskDelta(ctx.cwd, before, tickets, event.details, contentTextOf(event.content));
+		if (reviewed.rejected.length === 0) return;
+		invalidateQa(state);
+		persist(ctx.cwd, state);
+		return {
+			isError: true,
+			content: [
+				{
+					type: "text" as const,
+					text: `AATP_SCOPE: reverted out-of-scope writes: ${reviewed.reverted.join(", ") || reviewed.rejected.join(", ")}`,
+				},
+			],
+		};
+	});
+
 
 	pi.registerTool({
 		name: "company_status",
