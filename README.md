@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/can1357/oh-my-pi"><img alt="Oh My Pi 18+" src="https://img.shields.io/badge/Oh%20My%20Pi-18%2B-E4572E?style=for-the-badge"/></a>
+  <a href="https://ko-fi.com/oaichu"><img alt="Buy Me A Coffee" src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffee-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white"/></a>
   <a href="https://github.com/oaichu/omp-foundry/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/oaichu/omp-foundry?style=for-the-badge&label=release&color=FFB020"/></a>
   <a href="https://github.com/oaichu/omp-foundry/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/oaichu/omp-foundry/ci.yml?branch=main&style=for-the-badge&label=CI&color=2F9E6E"/></a>
   <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-14110E?style=for-the-badge"/></a>
@@ -198,3 +199,18 @@ Foundry reduces agent authority at the **OMP tool and patch-application boundari
   If Foundry ever saves you from a 2 a.m. “helpful” architecture rewrite —<br/>
   <a href="https://github.com/oaichu/omp-foundry/stargazers"><img alt="Star it" src="https://img.shields.io/badge/star_the_foundry-FFB020?style=for-the-badge&logo=github"/></a>
 </p>
+
+---
+
+## 💖 Support the Foundry & Buy Me a Coffee
+
+If OMP Foundry saves you from architecture rewrites and powers your disciplined AI workflows, please consider supporting ongoing maintenance:
+
+<div align="center">
+  <a href="https://ko-fi.com/oaichu" target="_blank" rel="noopener noreferrer">
+    <img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Buy Me A Coffee at ko-fi.com" height="46" style="border: 0px; height: 46px; border-radius: 8px; box-shadow: 0 4px 14px rgba(255, 94, 91, 0.35);" />
+  </a>
+  <br/><br/>
+  <i>Every cup of coffee fuels continuous development, new workers, and governed AI tooling. Thank you! ☕✨</i>
+</div>
+
