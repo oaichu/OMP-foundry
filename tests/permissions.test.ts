@@ -88,4 +88,61 @@ describe("denyToolCall", () => {
 		});
 		expect((next?.tasks as Array<{ isolated?: boolean }>)[0]?.isolated).toBe(true);
 	});
+
+	test("bash redirect into locked plan is denied", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
+		mkdirSync(join(cwd, "docs"), { recursive: true });
+		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "# plan\n");
+		const hit = denyToolCall("bash", { command: "echo hacked > docs/MASTER_PLAN.md" }, locked, {
+			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
+		});
+		expect(hit?.reason.includes("PLAN_CONFLICT")).toBe(true);
+	});
+
+	test("bash tee into state file is denied", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
+		mkdirSync(join(cwd, ".omp"), { recursive: true });
+		writeFileSync(join(cwd, ".omp", "foundry-state.yml"), "phase: qa\n");
+		const hit = denyToolCall("bash", { command: "echo x | tee .omp/foundry-state.yml" }, locked, {
+			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
+		});
+		expect(hit?.reason.startsWith("STATE_GATE")).toBe(true);
+	});
+
+	test("bash sed -i outside ticket scope is denied", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
+		mkdirSync(join(cwd, "src"), { recursive: true });
+		writeFileSync(join(cwd, "src", "billing.ts"), "x\n");
+		const hit = denyToolCall("bash", { command: "sed -i s/a/b/ src/billing.ts" }, locked, {
+			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
+			activeTicket: { id: "AATP-1", status: "active", allowed_files: ["src/auth"], forbidden_files: [], risk: "normal" },
+		});
+		expect(hit?.reason.startsWith("AATP_SCOPE")).toBe(true);
+	});
+
+	test("bash redirect escaping the repo hits PATH_GATE", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
+		const hit = denyToolCall("bash", { command: "printf pwned > ../outside.txt" }, locked, {
+			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
+		});
+		expect(hit?.reason.startsWith("PATH_GATE")).toBe(true);
+	});
+
+	test("write escaping the repo hits PATH_GATE, not silence", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
+		const hit = denyToolCall("write", { path: "../../etc/passwd" }, locked, {
+			canonicalize: (raw) => canonicalRepoPath(cwd, raw),
+		});
+		expect(hit?.reason.startsWith("PATH_GATE")).toBe(true);
+	});
+
+	test("python -c is denied like eval", () => {
+		const hit = denyToolCall("bash", { command: 'python -c "open(\'x.ts\',\'w\')"' }, locked);
+		expect(hit?.reason.startsWith("EVAL_GATE")).toBe(true);
+	});
+
+	test("git restore is denied once the plan is locked", () => {
+		const hit = denyToolCall("bash", { command: "git restore src/billing.ts" }, locked);
+		expect(hit?.reason.startsWith("MUTATOR_GATE")).toBe(true);
+	});
 });

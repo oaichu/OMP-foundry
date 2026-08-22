@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
 	governedTask,
@@ -9,6 +9,9 @@ import {
 	rejectChangedPaths,
 	revertPaths,
 	reviewTaskDelta,
+	snapshotBaseline,
+	ticketIdsFromText,
+	type TreeBaseline,
 } from "../src/patch-gate";
 
 function gitRepo(): string {
@@ -24,6 +27,8 @@ function gitRepo(): string {
 	git(["commit", "-m", "init"]);
 	return dir;
 }
+
+const NO_BASELINE: TreeBaseline = { paths: new Set<string>(), files: new Map<string, string | null>() };
 
 describe("patch-gate", () => {
 	test("parses unified diff and apply_patch headers", () => {
@@ -60,9 +65,39 @@ describe("patch-gate", () => {
 		const tickets = [
 			{ id: "AATP-1", status: "active" as const, allowed_files: ["src/auth"], forbidden_files: [], risk: "normal" },
 		];
-		const reviewed = reviewTaskDelta(dir, new Set(), tickets, undefined, "");
+		const reviewed = reviewTaskDelta(dir, NO_BASELINE, tickets, undefined, "");
 		expect(reviewed.rejected.some((p) => p.includes("billing"))).toBe(true);
 		expect(readFileSync(join(dir, "src", "billing.ts"), "utf8").replace(/\r\n/g, "\n")).toBe("1\n");
+	});
+
+	test("escaped path is reported and never reverted or deleted", () => {
+		const dir = gitRepo();
+		const outside = join(dirname(dir), "outside-secret.txt");
+		writeFileSync(outside, "keep\n");
+		const tickets = [
+			{ id: "AATP-1", status: "active" as const, allowed_files: ["src/auth"], forbidden_files: [], risk: "normal" },
+		];
+		const reviewed = reviewTaskDelta(dir, NO_BASELINE, tickets, undefined, "*** Add File: ../outside-secret.txt\n");
+		expect(reviewed.escaped.some((p) => p.includes("outside-secret"))).toBe(true);
+		expect(existsSync(outside)).toBe(true);
+		expect(readFileSync(outside, "utf8")).toBe("keep\n");
+	});
+
+	test("revert restores the user's pre-task edit, not HEAD", () => {
+		const dir = gitRepo();
+		writeFileSync(join(dir, "src", "billing.ts"), "user-edit\n");
+		const baseline = snapshotBaseline(dir);
+		writeFileSync(join(dir, "src", "billing.ts"), "worker-hack\n");
+		const tickets = [
+			{ id: "AATP-1", status: "active" as const, allowed_files: ["src/auth"], forbidden_files: [], risk: "normal" },
+		];
+		const reviewed = reviewTaskDelta(dir, baseline, tickets, undefined, "");
+		expect(reviewed.rejected.some((p) => p.includes("billing"))).toBe(true);
+		expect(readFileSync(join(dir, "src", "billing.ts"), "utf8").replace(/\r\n/g, "\n")).toBe("user-edit\n");
+	});
+
+	test("ticketIdsFromText extracts unique ids case-insensitively", () => {
+		expect(ticketIdsFromText("Implement AATP-007 then aatp-007 again")).toEqual(["AATP-007"]);
 	});
 
 	test("governedTask detects batch implementers", () => {

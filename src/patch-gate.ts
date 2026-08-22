@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { canonicalRepoPath, underPrefix } from "./paths";
@@ -45,8 +45,50 @@ export function gitChangedPaths(cwd: string): string[] {
 	return [...names];
 }
 
-export function snapshotTree(cwd: string): Set<string> {
-	return new Set(gitChangedPaths(cwd));
+// A baseline captures the pre-task dirty state so a rejected worker write can
+// be reverted to what the user had, not blindly to HEAD. In the files map,
+// string = previous content, null = file was untracked before the task.
+export interface TreeBaseline {
+	paths: Set<string>;
+	files: Map<string, string | null>;
+}
+
+const BASELINE_MAX_BYTES = 1_000_000;
+
+function readBaselineContent(abs: string): string | undefined {
+	let text: string;
+	try {
+		text = readFileSync(abs, "utf8");
+	} catch {
+		return undefined;
+	}
+	if (text.length > BASELINE_MAX_BYTES || text.includes("\0")) return undefined;
+	return text;
+}
+
+export function snapshotBaseline(cwd: string): TreeBaseline {
+	const paths = new Set<string>();
+	const files = new Map<string, string | null>();
+	const porcelain = spawnSync("git", ["status", "--porcelain", "-uall"], { cwd, encoding: "utf8" });
+	if (porcelain.status === 0) {
+		for (const line of porcelain.stdout.split("\n")) {
+			if (line.length < 4) continue;
+			const untracked = line.slice(0, 2).includes("?");
+			const rest = line.slice(3).replace(/^"|"$/g, "");
+			const rel = (rest.split(" -> ").pop() ?? rest).trim();
+			if (!rel) continue;
+			paths.add(rel);
+			if (untracked) {
+				files.set(rel, null);
+			} else {
+				const content = readBaselineContent(join(cwd, rel));
+				if (content !== undefined) files.set(rel, content);
+			}
+		}
+		return { paths, files };
+	}
+	for (const rel of gitChangedPaths(cwd)) paths.add(rel);
+	return { paths, files };
 }
 
 export function deltaPaths(before: Set<string>, after: Iterable<string>): string[] {
@@ -57,41 +99,73 @@ export function deltaPaths(before: Set<string>, after: Iterable<string>): string
 	return out;
 }
 
+export function ticketIdsFromText(text: string): string[] {
+	return [...new Set((text.match(/\bAATP-[A-Za-z0-9_-]+/g) ?? []).map((id) => id.toUpperCase()))];
+}
+
 const ALWAYS_LOCKED = [...LOCKED_PLAN_PATHS, ...LOCKED_PRODUCT_PATHS, ...LOCKED_DESIGN_PATHS];
 
+// Escaped paths (canonicalization failed) are reported but never touched:
+// the reverter must not act on raw, untrusted paths.
 export function rejectChangedPaths(
 	cwd: string,
 	rawPaths: string[],
 	tickets: AatpTicket[],
-): { rejected: string[]; kept: string[] } {
+): { escaped: string[]; rejected: string[]; kept: string[] } {
+	const escaped: string[] = [];
 	const rejected: string[] = [];
 	const kept: string[] = [];
-	for (const raw of rawPaths) {
-		const rel = canonicalRepoPath(cwd, raw);
-		if (!rel) {
-			rejected.push(raw);
+	for (const path of [...new Set(rawPaths)]) {
+		const rel = canonicalRepoPath(cwd, path);
+		if (rel === null) {
+			escaped.push(path);
 			continue;
 		}
 		if (ALWAYS_LOCKED.some((n) => underPrefix(rel, n))) {
-			rejected.push(rel);
+			rejected.push(path);
 			continue;
 		}
 		if (!looksLikeImpl(rel)) {
-			kept.push(rel);
+			kept.push(path);
 			continue;
 		}
 		if (tickets.length === 0 || !tickets.some((t) => pathAllowed(rel, t))) {
-			rejected.push(rel);
+			rejected.push(path);
 			continue;
 		}
-		kept.push(rel);
+		kept.push(path);
 	}
-	return { rejected, kept };
+	return { escaped, rejected, kept };
 }
 
-export function revertPaths(cwd: string, rels: string[]): string[] {
+export function revertPaths(cwd: string, rels: string[], baseline?: Map<string, string | null>): string[] {
 	const reverted: string[] = [];
 	for (const rel of rels) {
+		if (baseline?.has(rel)) {
+			const content = baseline.get(rel);
+			const abs = join(cwd, rel);
+			spawnSync("git", ["reset", "--", rel], { cwd, encoding: "utf8" });
+			if (content == null) {
+				if (existsSync(abs)) {
+					try {
+						unlinkSync(abs);
+						reverted.push(rel);
+					} catch {
+						/* leave in place; still reported */
+					}
+				} else {
+					reverted.push(rel);
+				}
+			} else {
+				try {
+					writeFileSync(abs, content, "utf8");
+					reverted.push(rel);
+				} catch {
+					/* leave in place; still reported */
+				}
+			}
+			continue;
+		}
 		const tracked = spawnSync("git", ["ls-files", "--error-unmatch", "--", rel], { cwd, encoding: "utf8" });
 		if (tracked.status === 0) {
 			const restore = spawnSync("git", ["restore", "--source=HEAD", "--worktree", "--staged", "--", rel], {
@@ -147,19 +221,25 @@ export function governedTask(input: Record<string, unknown>): boolean {
 
 export function reviewTaskDelta(
 	cwd: string,
-	before: Set<string>,
+	baseline: TreeBaseline,
 	tickets: AatpTicket[],
 	details: unknown,
 	contentText: string,
-): { rejected: string[]; kept: string[]; reverted: string[] } {
+): { escaped: string[]; rejected: string[]; kept: string[]; reverted: string[] } {
 	const raw = [
-		...deltaPaths(before, gitChangedPaths(cwd)),
+		...deltaPaths(baseline.paths, gitChangedPaths(cwd)),
 		...extractResultPaths(details, contentText),
 	];
-	const unique = [...new Set(raw)];
-	const { rejected, kept } = rejectChangedPaths(cwd, unique, tickets);
-	const reverted = rejected.length ? revertPaths(cwd, rejected) : [];
-	return { rejected, kept, reverted };
+	// Files the user had already edited stay out of the path delta, so catch
+	// worker edits to them by comparing against the captured baseline content.
+	for (const [rel, content] of baseline.files) {
+		if (content === null || raw.includes(rel)) continue;
+		const current = readBaselineContent(join(cwd, rel));
+		if (current !== undefined && current !== content) raw.push(rel);
+	}
+	const { escaped, rejected, kept } = rejectChangedPaths(cwd, raw, tickets);
+	const reverted = rejected.length ? revertPaths(cwd, rejected, baseline.files) : [];
+	return { escaped, rejected, kept, reverted };
 }
 
 export function contentTextOf(content: unknown): string {
@@ -172,4 +252,3 @@ export function contentTextOf(content: unknown): string {
 		})
 		.join("\n");
 }
-
