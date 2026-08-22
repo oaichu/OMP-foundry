@@ -20,7 +20,7 @@ import { canonicalRepoPath } from "./paths";
 import { deriveRelease, invalidateQa, refreshArtifactHashes } from "./release";
 import { loadRegistry } from "./skills/registry";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
-import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
+import { detectStack } from "./stack-detector";
 import { type CompanyState, defaultState } from "./types";
 import { applyQa, runVerify } from "./verify-runner";
 
