@@ -38,6 +38,8 @@ describe("parent-owned transitions", () => {
 	});
 	test("review rejects active; request changes returns ready", () => {
 		const state = defaultState(); state.tickets["AATP-1"] = { id: "AATP-1", status: "active", allowed_files: [], forbidden_files: [], risk: "normal", review: "none" };
-		expect(reviewTicket(state, "AATP-1", "APPROVE").ok).toBe(false); state.tickets["AATP-1"]!.status = "completed"; expect(reviewTicket(state, "AATP-1", "REQUEST_CHANGES", "reviewer", "r").ok).toBe(true); expect(state.tickets["AATP-1"]?.status).toBe("ready");
+		expect(reviewTicket(state, "AATP-1", "APPROVE").ok).toBe(false);
+		const completed = defaultState(); completed.tickets["AATP-1"] = { id: "AATP-1", status: "completed", allowed_files: [], forbidden_files: [], risk: "normal", review: "none" };
+		expect(reviewTicket(completed, "AATP-1", "REQUEST_CHANGES", "reviewer", "r").ok).toBe(true); expect(completed.tickets["AATP-1"]?.status).toBe("ready");
 	});
 });
