@@ -20,7 +20,7 @@
 
 <p align="center">
   <a href="https://github.com/oaichu/omp-foundry/stargazers"><img alt="stars" src="https://img.shields.io/github/stars/oaichu/omp-foundry?style=for-the-badge&label=star%20the%20foundry&logo=github&color=FF9F1C"/></a>
-  <img alt="install" src="https://img.shields.io/badge/install-omp%20plugin%20link-14110E?style=for-the-badge"/>
+  <img alt="install" src="https://img.shields.io/badge/install-omp%20plugin-14110E?style=for-the-badge"/>
 </p>
 
 <p align="center">
@@ -45,8 +45,9 @@ After an AATP work order is sealed, **the model no longer owns governance transi
 
 ```text
 PRODUCT            ─ human approve ─┐
-3-stage PLAN       ─ human lock ────┤
-DESIGN (if UI)     ─ human lock/skip┤
+PLAN3               ─ human lock ────┤
+  draft → redteam → synth             │
+DESIGN (if UI)     ─ human lock/skip ┤
 AATP DAG sealed manifest            ▼
 isolated worker (apply=false) → patch artifact
 Foundry validates exact paths → Foundry applies + commits
@@ -78,29 +79,35 @@ Invalid worker patches are never applied; rollback is patch-specific — Foundry
 
 ## Install
 
+For development from a checkout:
+
 ```bash
 git clone https://github.com/oaichu/omp-foundry
 cd omp-foundry
 omp plugin link .
 ```
 
-Restart OMP, then in the project you want governed:
+For normal use, install a published Foundry release with OMP's plugin installer rather than linking a mutable working tree.
+
+Restart OMP. In each repository you want governed, the normal entrypoint is simply:
 
 ```text
-/foundry-init
-/foundry-doctor
+/foundry <your product idea>
 ```
 
-`/foundry-init` writes safe isolation defaults (`.omp/config.yml`, never overwritten if you have one):
+The first `/foundry` opts that repository in automatically: it scaffolds the governance docs/state, detects the stack, and creates project-local OMP policy. `/foundry-init` remains only as an advanced/manual bootstrap command.
+
+For a newly created `.omp/config.yml`, Foundry sets the worker isolation contract:
 
 ```yaml
 task:
   isolation:
     mode: auto
     apply: false
+modelRoleStorage: project
 ```
 
-`/foundry-doctor` verifies the effective OMP isolation contract and blocks governed workers until isolation is on and `apply=false`. Foundry ignores only its own runtime state — your project OMP config stays versionable.
+If a project already has `.omp/config.yml`, Foundry preserves its existing settings and adds the project role-storage policy; `/foundry-doctor` checks the **effective** isolation contract and fails governed workers closed if isolation is missing or `apply=true`.
 
 ## Everyday
 
@@ -110,24 +117,27 @@ One command, always:
 /foundry
 ```
 
-It reports the next legal step. You intervene at exactly four human gates — **product · plan lock · design · release**.
+It resumes the exact persisted workflow stage. You intervene at the human gates — **product · plan lock · design (when required) · release**.
 
 | Command | Purpose |
 | --- | --- |
-| `/foundry` | Next legal step |
-| `/foundry-init` · `/foundry-doctor` | Scaffold + verify isolation contract |
+| `/foundry` | Auto-bootstrap if needed, then resume the next legal step |
+| `/foundry-init` | Advanced/manual project bootstrap |
+| `/foundry-doctor` | Diagnose isolation + Foundry model-role availability |
 | `/foundry-approve product\|plan` | Human gates |
-| `/plan3` · `/plan-revise` | Drafter → critic → finalizer · human-only reopen (invalidates AATP/review/QA) |
+| `/plan3` · `/plan-revise` | Draft → red-team → synthesis · human-only reopen (invalidates downstream AATP/review/QA) |
 | `/design` · `/design approve\|skip` | Design foundation + preview · human gate |
-| `/aatp` · `/build` | Generate specs · seal manifest, run ready DAG layer |
-| `/review AATP-xxx` | Isolated independent review |
+| `/aatp` · `/build` | Generate/validate DAG · seal manifest, run ready layer |
+| `/review AATP-xxx` | Independent review |
 | `/verify` | Deterministic project verification |
 | `/release-check` | Derive release readiness from current evidence |
 | `/foundry-version` | Installed + OMP + latest stable release |
 
 ## How a work order runs
 
-Each `docs/AATP/AATP-*.md` is an immutable work order once `/build` seals the manifest — explicit `allowed_files`, valid dependencies. For every ready item:
+Each `docs/AATP/AATP-*.md` is an immutable work order once `/build` seals the manifest — explicit `allowed_files`, valid dependencies, and a risk class. Dependency references must exist and the graph must be acyclic. **Risk is the routing authority**: low/trivial → `smol-implementer`, normal → `implementer`, hard/difficult/critical → `hard-implementer`. There is no separate model-written `recommended_agent` override.
+
+For every ready item:
 
 1. Parent validates the exact `AATP-*` binding (missing/ambiguous/duplicate → fail closed).
 2. State transitions `ready → active` — by Foundry, not the worker.
@@ -135,8 +145,8 @@ Each `docs/AATP/AATP-*.md` is an immutable work order once `/build` seals the ma
 4. OMP returns the worker’s patch artifact.
 5. Foundry canonicalizes every touched path and checks it against **that ticket only**.
 6. Valid → Foundry applies and commits. Invalid → never applied, tree untouched.
-7. Independent review writes exactly `docs/reports/REVIEW-<id>.md` and must echo `FOUNDRY_REVIEW AATP-001 APPROVE`; the evidence is hashed with the reviewer’s identity.
-8. Release derivation demands every ticket completed, reviewed, QA-passed on clean committed HEAD.
+7. Independent review writes exactly `docs/reports/REVIEW-<id>.md` (or the security variant) and must echo the matching `FOUNDRY_REVIEW <id> ...` verdict; evidence is hashed with reviewer identity.
+8. Release derivation demands every ticket completed, independently approved, QA-passed on current clean committed HEAD.
 
 Before the first implementation layer, the source tree must be clean (governance-only setup may be committed as the implementation baseline).
 
@@ -144,26 +154,30 @@ Before the first implementation layer, the source tree must be clean (governance
 
 `/release-check` is **derived, never sticky** — recomputed against the current repository state: artifact hashes unchanged, manifest sealed, all tickets completed, all reviews independently APPROVE with evidence, QA PASS at the current HEAD, clean tree.
 
-Even green, agent release commands stay denied. **You ship from a human shell** — no single shell line can mutate code after the check and push it.
+Even green, agent release commands stay denied. **You ship from a human shell** — no single agent shell line can mutate code after the check and push it.
 
 ## Under the hood
 
-- **State** — `.omp/foundry-state.yml`, schema-versioned and fail-closed. Current schema **v2**; older states migrate forward with a one-time backup; newer unsupported schemas are rejected, never guessed.
-- **Updates** — checks the latest **GitHub Release** (not `main`) with a user-level cache; network failures are fail-open and never block coding. Foundry never self-updates while loaded. Stable: `git fetch --tags && git checkout <tag>`, then restart OMP.
+- **State** — `.omp/foundry-state.yml`, schema-versioned and fail-closed. Current schema **v4**; older states migrate forward with a one-time backup; newer unsupported schemas are rejected, never guessed. v4 removes the old inert `unlock_token` field.
+- **Plan3** — persisted runtime authority: `draft → redteam → synth → awaiting_lock`, with SHA-256 evidence for every stage artifact. Human plan approval fails if any accepted planning artifact drifted.
+- **Model roles** — ten global `foundry_*` defaults are registered additively in `~/.omp/agent/config.yml`; project configs inherit them unless you intentionally add a project-level `foundry_*` override.
+- **Updates** — checks the latest **GitHub Release** (not `main`) with a user-level cache; network failures are fail-open and never block coding. Foundry never self-updates while loaded.
 - **Repo intelligence** — one `RepoFacts` detector drives skill routing, QA and design classification (no detector drift): Web, SaaS, Android, .NET, Cloudflare, Python, Go, Rust… Skills are filtered by phase **and role**; only metadata is injected, bodies load on demand via `foundry_skill_read`.
-- **CI** — typecheck (`tsc --noEmit`), full test suite, plus an **OMP contract smoke** against current `can1357/oh-my-pi`: if upstream changes the isolation/patch/LSP contracts Foundry relies on, CI fails instead of shipping against an imagined API.
+- **Dead-code guard** — CI runs TypeScript with `noUnusedLocals` and `noUnusedParameters`, in addition to runtime tests and syntax smoke.
+- **OMP compatibility** — CI checks the current `can1357/oh-my-pi` isolation/patch/LSP contracts; upstream contract drift fails CI instead of shipping against an imagined API.
 
 ### What Foundry writes
 
 ```text
-docs/PRODUCT.md                 the contract
-docs/MASTER_PLAN.md             the locked plan
+docs/PRODUCT.md                 the product contract
+docs/MASTER_PLAN.md             the locked synthesis
 docs/DESIGN.md                  the locked design
-docs/planning/*                 drafts + red-team reviews
+docs/planning/*                 plan draft + red-team review
 docs/AATP/AATP-*.md · INDEX.md  sealed work orders
 docs/reports/REVIEW-*.md        independent review evidence
-docs/reports/QA.md              real command output
+docs/reports/QA.md              deterministic command output
 .omp/foundry-state.yml          the state machine
+.omp/config.yml                 project isolation/storage policy
 ```
 
 ### Uninstall — everything it touched, in order
@@ -181,29 +195,28 @@ If you linked a checkout with `omp plugin link .`, delete the checkout too. If y
 sed -i '/^  foundry_/d' ~/.omp/agent/config.yml     # or delete the ten foundry_* lines by hand
 ```
 
-```bash
-# 3. per governed project
-rm -rf .omp docs/.foundry-governed docs/planning docs/AATP docs/reports
-```
+For a governed project, remove only the Foundry artifacts/policy you no longer want; do not blindly delete `.omp/` if other OMP project configuration lives there.
 
-`docs/PRODUCT.md`, `MASTER_PLAN.md`, `DESIGN.md` and the Foundry lines in `.gitignore` can go the same way; committed history is never rewritten. Nothing else in your OMP setup — providers, auth, other plugins — is affected.
+### Roles — bring your own models
 
-### Roles — pour your own metals
+When the plugin first runs, it registers its **ten `foundry_*` model roles** in `~/.omp/agent/config.yml` — the plugin's only user-level write. Missing roles are cross-role aliases such as `foundry_redteam: "@slow"`, so they keep following the OMP roles you already maintain. Pin any Foundry stage by assigning a concrete model. Existing values are never overwritten.
 
-When the plugin first runs, it registers its **ten `foundry_*` model roles** in `~/.omp/agent/config.yml` — the plugin's only user-level write. Each is a **cross-role alias** (`foundry_redteam: "@slow"`), so it keeps following your OMP roles when you reassign those; pin a stage by giving it a concrete model (`foundry_redteam: openai/gpt-5.6:max`). Only missing keys are ever inserted — values you set yourself are never modified or removed. Note: OMP's `/models → Roles` tab lists its **built-in** roles only, so `foundry_*` (like any custom role key) is assigned by editing `~/.omp/agent/config.yml` — the aliases keep working regardless. Per-project, `/foundry-init` additionally sets `modelRoleStorage: project` so `/models` edits inside a governed repo stay local (`roles.example.yml` is a manual skeleton if you want full control).
+OMP's `/models → Roles` view lists its built-in roles, so custom `foundry_*` values are assigned in config. New governed projects **do not generate duplicate Foundry role values**, which means a model you choose once globally applies across projects. Add a `foundry_*` key to a project's `.omp/config.yml` only when you intentionally want that repository to override the global choice.
 
-Configure nothing at all and Foundry still runs: unset roles fall back through OMP's own chain down to your session's active model — a one-model foundry that keeps every gate, just without model diversity. One caveat: the user-level roles are registered in your **default** profile; a session started with `--profile` won't see them and runs in that same single-model fallback until you assign its roles.
+A non-default OMP `--profile` has its own configuration context; configure the Foundry roles for that profile if you want the same model diversity there.
 
-| Foundry role | Maps onto | Typical OMP role |
-| --- | --- | --- |
-| Floor lead | existing | `@default` |
-| Plan drafter | `foundry_plan` | `@plan` |
-| Plan red-team | `foundry_redteam` | `@slow` |
-| Plan synthesis / security | `foundry_synth` | `@advisor` |
-| Hard implementation | existing | `@slow` |
-| Normal implementation | existing | `@task` |
-| Design | existing | `@designer` |
-| Trivial implementation | existing | `@smol` |
+| Foundry role | Default alias intent |
+| --- | --- |
+| `foundry_product` | `@default` / product analysis |
+| `foundry_plan` | `@plan` / architecture draft |
+| `foundry_redteam` | `@slow` / adversarial plan attack |
+| `foundry_synth` | `@slow`/`@advisor` / adjudication |
+| `foundry_design` | `@designer` / design foundation |
+| `foundry_impl` | `@task` / normal implementation |
+| `foundry_hard` | `@slow` / difficult implementation |
+| `foundry_smol` | `@smol` / trivial implementation |
+| `foundry_review` | `@review`/`@default` / independent review |
+| `foundry_security` | `@slow`/`@advisor` / security review |
 
 ### Security boundary — honest scoping
 
@@ -238,4 +251,3 @@ If OMP Foundry saves you from architecture rewrites and powers your disciplined 
   <br/><br/>
   <i>Every cup of coffee fuels continuous development, new workers, and governed AI tooling. Thank you! ☕✨</i>
 </div>
-
