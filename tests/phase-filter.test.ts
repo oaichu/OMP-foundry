@@ -16,12 +16,12 @@ describe("role-aware skill routing", () => {
 		expect(roleOf("design-foundation")).toBe("designer");
 	});
 
-	test("pre-0.4 plan aliases stay planners for in-flight sessions", () => {
-		expect(roleOf("plan-critic")).toBe("planner");
-		expect(roleOf("plan-finalizer")).toBe("planner");
+	test("retired plan aliases no longer resolve", () => {
+		expect(roleOf("plan-critic")).toBeUndefined();
+		expect(roleOf("plan-finalizer")).toBeUndefined();
 	});
 
-	test("unknown agents have no role (fail toward unfiltered, never misfiled)", () => {
+	test("unknown agents have no role", () => {
 		expect(roleOf("scout")).toBeUndefined();
 		expect(roleOf(undefined)).toBeUndefined();
 	});
