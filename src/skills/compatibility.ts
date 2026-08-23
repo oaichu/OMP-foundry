@@ -7,12 +7,6 @@ export function respectsConflicts(candidate: SkillManifest, chosen: SkillManifes
 	return true;
 }
 
-export function missingRequires(candidate: SkillManifest, chosen: SkillManifest[], registry: SkillManifest[]): string[] {
-	const have = new Set(chosen.map((s) => s.id));
-	const known = new Set(registry.map((s) => s.id));
-	return candidate.requires.filter((id) => !have.has(id) && known.has(id));
-}
-
 export function withRequires(seed: SkillManifest[], registry: SkillManifest[]): SkillManifest[] {
 	const byId = new Map(registry.map((s) => [s.id, s]));
 	const out = [...seed];
