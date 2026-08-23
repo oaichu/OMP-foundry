@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { denyToolCall } from "../src/permissions";
-import { completePlan3Stage, enterPlan3, expectedPlan3Agent, plan3ArtifactsMatch, plan3Status } from "../src/plan3";
+import { abortPlan3, completePlan3Stage, enterPlan3, expectedPlan3Agent, plan3ArtifactsMatch, plan3Status } from "../src/plan3";
 import { defaultState } from "../src/types";
 
 function project(): string {
@@ -46,6 +46,16 @@ describe("Plan3 governed mode", () => {
 		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "final\n"); completePlan3Stage(cwd, state, "synth");
 		writeFileSync(join(cwd, "docs", "planning", "PLAN_REVIEW.md"), "tampered\n");
 		expect(plan3ArtifactsMatch(cwd, state)).toBe(false);
+	});
+
+	test("abort clears stale stage evidence", () => {
+		const state = defaultState();
+		enterPlan3(state);
+		state.planning.draft_sha256 = "draft";
+		state.planning.review_sha256 = "review";
+		abortPlan3(state);
+		expect(state.mode).toBe("normal");
+		expect(state.planning).toEqual({ stage: "idle", draft_sha256: "", review_sha256: "", final_sha256: "" });
 	});
 
 	test("write authority follows only the active planning artifact", () => {
