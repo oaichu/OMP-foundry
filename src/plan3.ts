@@ -40,18 +40,13 @@ export function enterPlan3(state: CompanyState, restart = false): void {
 
 export function abortPlan3(state: CompanyState): void {
 	state.mode = "normal";
-	state.planning.stage = "idle";
+	state.planning = { stage: "idle", draft_sha256: "", review_sha256: "", final_sha256: "" };
 	state.phase = state.master_plan.status === "locked" ? "aatp" : "planning";
 }
 
 export function expectedPlan3Agent(state: CompanyState): string | undefined {
 	const stage = state.planning.stage;
 	return stage === "draft" || stage === "redteam" || stage === "synth" ? PLAN3_AGENTS[stage] : undefined;
-}
-
-export function expectedPlan3Artifact(state: CompanyState): string | undefined {
-	const stage = state.planning.stage;
-	return stage === "draft" || stage === "redteam" || stage === "synth" ? PLAN3_ARTIFACTS[stage] : undefined;
 }
 
 export function plan3Instruction(state: CompanyState): string {

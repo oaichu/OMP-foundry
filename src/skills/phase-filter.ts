@@ -14,17 +14,7 @@ export function roleOf(agent?: string): SkillRole | undefined {
 	if (agent === "design-foundation") return "designer";
 	if (agent === "implementer" || agent === "hard-implementer" || agent === "smol-implementer") return "implementer";
 	if (agent === "reviewer" || agent === "security-reviewer") return "reviewer";
-	// plan-critic/plan-finalizer are pre-0.4 aliases kept for in-flight sessions
-	if (
-		agent === "plan-drafter" ||
-		agent === "plan-redteam" ||
-		agent === "plan-synth" ||
-		agent === "plan-critic" ||
-		agent === "plan-finalizer" ||
-		agent === "product-analyst"
-	) {
-		return "planner";
-	}
+	if (agent === "plan-drafter" || agent === "plan-redteam" || agent === "plan-synth" || agent === "product-analyst") return "planner";
 	return undefined;
 }
 

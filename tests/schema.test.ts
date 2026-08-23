@@ -8,8 +8,16 @@ import { CURRENT_STATE_SCHEMA, defaultState, FOUNDRY_VERSION, StateError } from 
 const v0 = readFileSync(join(import.meta.dir, "fixtures/state-v0-0.2.0.yml"), "utf8");
 function tmpProject(): string { const dir = mkdtempSync(join(tmpdir(), "foundry-schema-")); mkdirSync(join(dir, ".omp"), { recursive: true }); return dir; }
 
-describe("state schema v2", () => {
+describe("state schema migration", () => {
 	test("v0 migrates all the way to current", () => { const out = migrateToCurrent(v0); expect(out.from).toBe(0); expect(out.state.schema_version).toBe(CURRENT_STATE_SCHEMA); expect(out.yaml).toContain(`schema_version: ${CURRENT_STATE_SCHEMA}`); expect(out.state.aatp.manifest_sha256).toBe(""); expect(() => parseState(out.yaml)).not.toThrow(); });
+	test("v3 migration removes inert unlock_token", () => {
+		const current = serializeState(defaultState());
+		const v3 = current.replace(`schema_version: ${CURRENT_STATE_SCHEMA}`, "schema_version: 3").replace("conflict:\n", 'unlock_token: "legacy-dead-value"\nconflict:\n');
+		const out = migrateToCurrent(v3);
+		expect(out.from).toBe(3);
+		expect(out.state.schema_version).toBe(CURRENT_STATE_SCHEMA);
+		expect(out.yaml).not.toContain("unlock_token");
+	});
 	test("migration idempotent and current load does not rewrite", () => { const current = migrateToCurrent(v0).yaml; expect(migrateToCurrent(current).didMigrate).toBe(false); const dir = tmpProject(), file = join(dir, ".omp", "foundry-state.yml"); writeFileSync(file, current); expect(loadStateResult(dir).ok).toBe(true); expect(readFileSync(file, "utf8")).toBe(current); });
 	test("legacy load keeps original backup", () => { const dir = tmpProject(), file = join(dir, ".omp", "foundry-state.yml"); writeFileSync(file, v0); expect(loadStateResult(dir).ok).toBe(true); expect(existsSync(`${file}.pre-v1.bak`)).toBe(true); expect(readFileSync(file, "utf8")).toContain(`last_written_by: "${FOUNDRY_VERSION}"`); });
 	test("review and manifest evidence roundtrip", () => {

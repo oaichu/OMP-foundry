@@ -12,8 +12,6 @@ constraints: []
 acceptance: []
 verification: []
 risk: normal
-recommended_agent: implementer
-status: ready
 ---
 
 # AATP-000

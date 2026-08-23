@@ -47,7 +47,13 @@ function migrateV2ToV3(yaml: string): string {
 	state.last_written_by = FOUNDRY_VERSION;
 	return serializeState(state);
 }
-const MIGRATIONS: Record<number, (yaml: string) => string> = { 0: migrateV0ToV1, 1: migrateV1ToV2, 2: migrateV2ToV3 };
+function migrateV3ToV4(yaml: string): string {
+	const state = parseState(yaml);
+	state.schema_version = 4;
+	state.last_written_by = FOUNDRY_VERSION;
+	return serializeState(state);
+}
+const MIGRATIONS: Record<number, (yaml: string) => string> = { 0: migrateV0ToV1, 1: migrateV1ToV2, 2: migrateV2ToV3, 3: migrateV3ToV4 };
 export function migrateToCurrent(yaml: string): { yaml: string; state: CompanyState; from: number; didMigrate: boolean } {
 	const from = detectSchemaVersion(yaml);
 	if (from > CURRENT_STATE_SCHEMA) throw new SchemaTooNewError(from, CURRENT_STATE_SCHEMA);

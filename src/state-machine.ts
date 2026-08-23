@@ -108,7 +108,6 @@ export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): 
 	base.qa.tree_sha = pick(qa, "tree_sha") ?? "";
 	base.release.ready = pick(release, "ready") === "true";
 	base.release.tree_sha = pick(release, "tree_sha") ?? "";
-	base.unlock_token = pick(yaml, "unlock_token") ?? "";
 	base.conflict.kind = mustEnum(pick(conflict, "kind") ?? "none", CONFLICT_KINDS, "conflict.kind");
 	base.conflict.reason = pick(conflict, "reason") ?? "";
 	return base;
@@ -141,7 +140,7 @@ export function serializeState(state: CompanyState): string {
 		"aatp:", `  total: ${state.aatp.total}`, `  ready: ${state.aatp.ready}`, `  active: ${state.aatp.active}`, `  completed: ${state.aatp.completed}`, `  blocked: ${state.aatp.blocked}`, `  manifest_sha256: "${state.aatp.manifest_sha256}"`,
 		"qa:", `  status: ${state.qa.status}`, `  tree_sha: "${state.qa.tree_sha}"`,
 		"release:", `  ready: ${state.release.ready}`, `  tree_sha: "${state.release.tree_sha}"`,
-		`unlock_token: "${state.unlock_token}"`, "conflict:", `  kind: ${state.conflict.kind}`, `  reason: ${JSON.stringify(state.conflict.reason)}`, "",
+		"conflict:", `  kind: ${state.conflict.kind}`, `  reason: ${JSON.stringify(state.conflict.reason)}`, "",
 	].join("\n");
 }
 
