@@ -46,6 +46,18 @@ describe("extension integration smoke", () => {
 		expect(commands.has("release-check")).toBe(true);
 	});
 
+	test("installed plugin is inert in an ungoverned repository", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-inert-"));
+		const { handlers } = harness();
+		const toolHook = handlers.get("tool_call")![0];
+		const agentHook = handlers.get("before_agent_start")![0];
+		expect(await toolHook({ toolName: "write", input: { path: "src/free.ts" } }, ctx(cwd))).toBeUndefined();
+		expect(await toolHook({ toolName: "aatp_complete", input: { id: "AATP-1" } }, ctx(cwd))).toBeUndefined();
+		expect(await agentHook({ agentName: "implementer" }, ctx(cwd))).toBeUndefined();
+		expect(existsSync(join(cwd, ".omp", "foundry-state.yml"))).toBe(false);
+		expect(existsSync(join(cwd, "docs", ".foundry-governed"))).toBe(false);
+	});
+
 	test("/foundry self-bootstraps a new project without /foundry-init", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-auto-bootstrap-"));
 		const { commands, messages } = harness();
@@ -58,6 +70,16 @@ describe("extension integration smoke", () => {
 		expect(loadState(cwd).phase).toBe("discovery");
 		expect(messages.at(-1)).toContain("Foundry enabled for this project");
 		expect(messages.at(-1)).toContain("Spawn blocking product-analyst");
+	});
+
+	test("governed repository enforces lifecycle gate", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-hook-"));
+		saveState(cwd, defaultState());
+		const { handlers } = harness();
+		const hook = handlers.get("tool_call")![0];
+		const result = await hook({ toolName: "aatp_complete", input: { id: "AATP-1" } }, ctx(cwd));
+		expect(result.block).toBe(true);
+		expect(result.reason).toContain("LIFECYCLE_GATE");
 	});
 
 	test("design approve handler executes and locks without runtime ReferenceError", async () => {
@@ -84,14 +106,5 @@ describe("extension integration smoke", () => {
 		const result = await tools.get("foundry_exec")!.execute("1", { id: "build" }, "s", null, ctx(cwd));
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toContain("FOUNDRY_EXEC_GATE");
-	});
-
-	test("tool_call blocks legacy lifecycle names", async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "foundry-hook-"));
-		const { handlers } = harness();
-		const hook = handlers.get("tool_call")![0];
-		const result = await hook({ toolName: "aatp_complete", input: { id: "AATP-1" } }, ctx(cwd));
-		expect(result.block).toBe(true);
-		expect(result.reason).toContain("LIFECYCLE_GATE");
 	});
 });
