@@ -10,7 +10,6 @@ export interface AatpSpec {
 	allowed_files: string[];
 	forbidden_files: string[];
 	risk: string;
-	recommended_agent: string;
 	path: string;
 }
 
@@ -55,7 +54,6 @@ export function listAatpSpecs(cwd: string): AatpSpec[] {
 			allowed_files: parseList(body, "allowed_files"),
 			forbidden_files: parseList(body, "forbidden_files"),
 			risk: parseField(body, "risk") || "normal",
-			recommended_agent: parseField(body, "recommended_agent") || parseField(body, "recommended_worker") || "implementer",
 			path,
 		});
 	}
@@ -74,8 +72,27 @@ export function validateAatpSpecs(specs: AatpSpec[]): string[] {
 	for (const spec of specs) {
 		for (const dep of spec.dependencies) {
 			if (dep && dep !== "NONE" && !ids.has(dep)) errors.push(`${spec.id}: unknown dependency ${dep}`);
+			if (dep === spec.id) errors.push(`${spec.id}: self dependency`);
 		}
 	}
+
+	const graph = new Map(specs.map((spec) => [spec.id, spec.dependencies.filter((dep) => dep && dep !== "NONE" && ids.has(dep))]));
+	const visiting = new Set<string>(), visited = new Set<string>();
+	const visit = (id: string, chain: string[]): void => {
+		if (visiting.has(id)) {
+			const start = chain.indexOf(id);
+			const cycle = [...chain.slice(start), id].join(" -> ");
+			const message = `dependency cycle: ${cycle}`;
+			if (!errors.includes(message)) errors.push(message);
+			return;
+		}
+		if (visited.has(id)) return;
+		visiting.add(id);
+		for (const dep of graph.get(id) ?? []) visit(dep, [...chain, id]);
+		visiting.delete(id);
+		visited.add(id);
+	};
+	for (const id of graph.keys()) visit(id, []);
 	return errors;
 }
 
@@ -118,8 +135,8 @@ export function writeAatpIndex(cwd: string, tasks: AatpTask[]): void {
 	const dir = aatpDir(cwd);
 	mkdirSync(dir, { recursive: true });
 	const lines = [
-		"# AATP index", "", "| id | status | review | risk | agent | deps | objective |", "| --- | --- | --- | --- | --- | --- | --- |",
-		...tasks.map((t) => `| ${t.id} | ${t.status} | ${t.review} | ${t.risk} | ${t.recommended_agent} | ${t.dependencies.join(", ") || "none"} | ${t.objective.replace(/\|/g, "/")} |`), "",
+		"# AATP index", "", "| id | status | review | risk | deps | objective |", "| --- | --- | --- | --- | --- | --- |",
+		...tasks.map((t) => `| ${t.id} | ${t.status} | ${t.review} | ${t.risk} | ${t.dependencies.join(", ") || "none"} | ${t.objective.replace(/\|/g, "/")} |`), "",
 	];
 	writeFileSync(join(dir, "INDEX.md"), lines.join("\n"), "utf8");
 }
