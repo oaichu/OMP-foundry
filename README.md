@@ -168,17 +168,18 @@ docs/reports/QA.md              real command output
 
 ### Roles — pour your own metals
 
-Open `/models → Roles`, map whatever you already pay for (`roles.example.yml` is a starting skeleton). Foundry never edits plugin files; you never edit Foundry’s.
+On `/foundry-init`, Foundry bootstraps its own **project-local model roles** in `.omp/config.yml` — `foundry_plan` (draft), `foundry_redteam` (attack the draft), `foundry_synth` (write the locked plan) — mapped onto the OMP roles you already have. Your global OMP config is never touched, and existing config is never overwritten (`roles.example.yml` is a manual starting skeleton if you want full control).
 
-| Foundry role | Typical OMP role |
-| --- | --- |
-| Product / floor lead | `@default` |
-| Plan drafter | `@plan` |
-| Plan finalizer / security | `@advisor` |
-| Hard implementation | `@slow` |
-| Normal implementation | `@task` |
-| Design | `@designer` |
-| Trivial implementation | `@smol` |
+| Foundry role | Maps onto | Typical OMP role |
+| --- | --- | --- |
+| Floor lead | existing | `@default` |
+| Plan drafter | `foundry_plan` | `@plan` |
+| Plan red-team | `foundry_redteam` | `@slow` |
+| Plan synthesis / security | `foundry_synth` | `@advisor` |
+| Hard implementation | existing | `@slow` |
+| Normal implementation | existing | `@task` |
+| Design | existing | `@designer` |
+| Trivial implementation | existing | `@smol` |
 
 ### Security boundary — honest scoping
 
