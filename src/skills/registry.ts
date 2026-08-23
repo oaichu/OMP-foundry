@@ -32,19 +32,11 @@ function parseFrontmatter(text: string): { fields: Record<string, string>; body:
 
 function walk(dir: string, acc: string[]): void {
 	let entries: string[] = [];
-	try {
-		entries = readdirSync(dir);
-	} catch {
-		return;
-	}
+	try { entries = readdirSync(dir); } catch { return; }
 	for (const name of entries) {
 		const full = join(dir, name);
 		let stat;
-		try {
-			stat = statSync(full);
-		} catch {
-			continue;
-		}
+		try { stat = statSync(full); } catch { continue; }
 		if (stat.isDirectory()) walk(full, acc);
 		else if (name === "SKILL.md") acc.push(full);
 	}
@@ -56,8 +48,14 @@ export function parseManifest(path: string, text: string): SkillManifest | null 
 	if (!id) return null;
 	const layer = (fields.layer || "L2") as SkillLayer;
 	if (!LAYERS.includes(layer)) return null;
-	const phases = csv(fields.phases).filter((p): p is SkillPhase => PHASES.includes(p as SkillPhase));
-	const roles = csv(fields.roles).filter((r): r is SkillRole => ROLES.includes(r as SkillRole));
+
+	const rawPhases = csv(fields.phases);
+	const rawRoles = csv(fields.roles);
+	const phases = rawPhases.filter((p): p is SkillPhase => PHASES.includes(p as SkillPhase));
+	const roles = rawRoles.filter((r): r is SkillRole => ROLES.includes(r as SkillRole));
+	if (fields.phases !== undefined && rawPhases.length > 0 && phases.length === 0) return null;
+	if (fields.roles !== undefined && rawRoles.length > 0 && roles.length === 0) return null;
+
 	return {
 		id,
 		version: Number(fields.version || 1) || 1,
@@ -72,8 +70,8 @@ export function parseManifest(path: string, text: string): SkillManifest | null 
 			stacks: csv(fields["activate_when.stacks"] || fields.stacks),
 			languages: csv(fields["activate_when.languages"] || fields.languages),
 		},
-		roles: roles.length ? roles : [...ROLES],
-		phases: phases.length ? phases : [...PHASES],
+		roles: rawRoles.length ? roles : [...ROLES],
+		phases: rawPhases.length ? phases : [...PHASES],
 		priority: Number(fields.priority || 50) || 50,
 		body,
 		path,
