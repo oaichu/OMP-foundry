@@ -70,19 +70,23 @@ const PLAN_AGENTS = new Set(["plan-drafter", "plan-redteam", "plan-synth"]);
 type PendingRun = { bindings: TaskBinding[]; startedClean: boolean };
 type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
 type PendingPlanRun = { stage: ActivePlanStage; agent: string; index: number };
+type SafeState = { state: CompanyState; broken?: string; missing: boolean };
 
 function persist(cwd: string, state: CompanyState): CompanyState { saveState(cwd, state); return state; }
 function orchestrate(pi: ExtensionAPI, title: string, body: string): void { pi.sendUserMessage([title, "", body, "", CONTEXT_POLICY].join("\n")); }
 function productOk(state: CompanyState): boolean { return state.product.status === "approved" || state.product.status === "locked"; }
 function statusOf(state: CompanyState): string { return state.mode === "plan3" ? `${plan3Status(state)} plan=${state.master_plan.status}` : `${state.phase} plan=${state.master_plan.status} design=${state.design.status}`; }
 function commitGovernanceBaseline(cwd: string): string | undefined { const result = prepareImplementationBaseline(cwd); return result.ok ? undefined : result.reason; }
-function safeState(cwd: string): { state: CompanyState; broken?: string; missing: boolean } {
+function safeState(cwd: string): SafeState {
 	let missing = false;
 	try { missing = !stateFileExists(cwd); }
 	catch (error) { return { state: defaultState(), broken: error instanceof Error ? error.message : String(error), missing: false }; }
 	const loaded = loadStateResult(cwd);
 	if (!loaded.ok) return { state: defaultState(), broken: loaded.reason, missing };
 	return { state: loaded.state, missing };
+}
+function governedProject(cwd: string, loaded: SafeState): boolean {
+	return !loaded.missing || existsSync(join(cwd, MARKER));
 }
 function taskKey(event: { toolCallId?: string }, cwd: string): string { return event.toolCallId ?? cwd; }
 function plan3ModelsReady(cwd: string): string | undefined {
@@ -207,17 +211,15 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	const pendingPlan = new Map<string, PendingPlanRun>();
 
 	pi.on("session_start", async (_event, ctx) => {
-		const { state, broken } = safeState(ctx.cwd);
-		ctx.ui.setStatus("foundry", broken ? "STATE_CORRUPT" : statusOf(state));
+		const loaded = safeState(ctx.cwd);
+		const active = governedProject(ctx.cwd, loaded);
+		ctx.ui.setStatus("foundry", loaded.broken ? "STATE_CORRUPT" : active ? statusOf(loaded.state) : "inactive");
 		ctx.setTimeout(() => {
 			void checkForUpdate().then((result) => { if (result.notify) ctx.ui.notify(result.notify, "info"); }).catch(() => undefined);
 			try {
 				const registered = ensureGlobalFoundryRoles();
 				if (registered.added.length > 0) {
-					ctx.ui.notify(
-						`Foundry registered ${registered.added.length} model roles (foundry_*) in ~/.omp/agent/config.yml — assign models there; unset roles follow your OMP roles.`,
-						"info",
-					);
+					ctx.ui.notify(`Foundry registered ${registered.added.length} model roles (foundry_*) in ~/.omp/agent/config.yml — assign models there; unset roles follow your OMP roles.`, "info");
 				}
 			} catch {
 				/* config write must never block a session */
@@ -226,7 +228,9 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {
-		const { state, broken } = safeState(ctx.cwd);
+		const loaded = safeState(ctx.cwd);
+		if (!governedProject(ctx.cwd, loaded)) return;
+		const { state, broken } = loaded;
 		const agentName = String((event as { agent?: { name?: string }; agentName?: string }).agent?.name ?? (event as { agentName?: string }).agentName ?? "").toLowerCase();
 		const role = roleOf(agentName);
 		const pack = broken ? [] : resolveSkillManifests(ctx.cwd, state, role ? { role } : undefined);
@@ -234,11 +238,12 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
+		const loaded = safeState(ctx.cwd);
+		if (!governedProject(ctx.cwd, loaded)) return;
+		if (loaded.broken) return { block: true, reason: `STATE_CORRUPT: ${loaded.broken}` };
 		if (LIFECYCLE_TOOLS.has(event.toolName)) return { block: true, reason: "LIFECYCLE_GATE: AATP lifecycle is parent-extension-owned; agents cannot transition tickets directly." };
 		if (event.toolName === "task") {
 			const raw = event.input && typeof event.input === "object" ? event.input as Record<string, unknown> : {};
-			const loaded = safeState(ctx.cwd);
-			if (loaded.broken) return { block: true, reason: `STATE_CORRUPT: ${loaded.broken}` };
 			if (loaded.state.mode === "plan3") {
 				const items = taskItems(raw), planItems = items.filter((item) => PLAN_AGENTS.has(item.agent));
 				if (planItems.length > 0) {
@@ -275,7 +280,8 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 			const isolated = forceIsolatedTaskInput(raw);
 			if (isolated) return { input: isolated };
 		}
-		const loaded = safeState(ctx.cwd), activeTickets = Object.values(loaded.state.tickets).filter((t) => t.status === "active"), isolatedWithoutState = loaded.missing && existsSync(join(ctx.cwd, MARKER));
+		const activeTickets = Object.values(loaded.state.tickets).filter((t) => t.status === "active");
+		const isolatedWithoutState = loaded.missing && existsSync(join(ctx.cwd, MARKER));
 		return denyToolCall(event.toolName, (event.input ?? {}) as ToolInput, loaded.state, { stateBroken: loaded.broken, activeTickets, cwd: ctx.cwd, isolatedWithoutState, canonicalize: (raw) => canonicalRepoPath(ctx.cwd, raw) });
 	});
 
@@ -307,8 +313,10 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({ name: "foundry_status", label: "Foundry Status", description: "Read Foundry state, mode, and AATP counters.", loadMode: "essential", approval: "read", parameters: z.object({}), async execute(_id, _params, _session, _user, ctx) {
-		const loaded = safeState(ctx.cwd); if (loaded.broken) return { content: [{ type: "text", text: loaded.broken }], isError: true };
-		const tasks = hydrateAatp(ctx.cwd, loaded.state), stack = detectStack(ctx.cwd), publicState = { ...loaded.state, aatp: { ...loaded.state.aatp, ...summarizeAatp(tasks) }, stack, display_mode: statusOf(loaded.state) };
+		const loaded = safeState(ctx.cwd);
+		if (!governedProject(ctx.cwd, loaded)) return { content: [{ type: "text", text: JSON.stringify({ active: false }, null, 2) }], details: { active: false } };
+		if (loaded.broken) return { content: [{ type: "text", text: loaded.broken }], isError: true };
+		const tasks = hydrateAatp(ctx.cwd, loaded.state), stack = detectStack(ctx.cwd), publicState = { active: true, ...loaded.state, aatp: { ...loaded.state.aatp, ...summarizeAatp(tasks) }, stack, display_mode: statusOf(loaded.state) };
 		return { content: [{ type: "text", text: JSON.stringify(publicState, null, 2) }], details: publicState };
 	} });
 
