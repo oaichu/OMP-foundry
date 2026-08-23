@@ -40,7 +40,7 @@ export function enterPlan3(state: CompanyState, restart = false): void {
 
 export function abortPlan3(state: CompanyState): void {
 	state.mode = "normal";
-	state.planning.stage = "idle";
+	state.planning = { stage: "idle", draft_sha256: "", review_sha256: "", final_sha256: "" };
 	state.phase = state.master_plan.status === "locked" ? "aatp" : "planning";
 }
 
