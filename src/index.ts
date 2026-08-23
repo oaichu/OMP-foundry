@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -72,7 +71,6 @@ type PendingRun = { bindings: TaskBinding[]; startedClean: boolean };
 type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
 type PendingPlanRun = { stage: ActivePlanStage; agent: string; index: number };
 
-function token(): string { return randomBytes(16).toString("hex"); }
 function persist(cwd: string, state: CompanyState): CompanyState { saveState(cwd, state); return state; }
 function orchestrate(pi: ExtensionAPI, title: string, body: string): void { pi.sendUserMessage([title, "", body, "", CONTEXT_POLICY].join("\n")); }
 function productOk(state: CompanyState): boolean { return state.product.status === "approved" || state.product.status === "locked"; }
@@ -232,7 +230,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const agentName = String((event as { agent?: { name?: string }; agentName?: string }).agent?.name ?? (event as { agentName?: string }).agentName ?? "").toLowerCase();
 		const role: SkillRole | undefined = agentName.includes("plan") ? "planner" : agentName.includes("design") ? "designer" : agentName.includes("review") ? "reviewer" : agentName.includes("implement") ? "implementer" : undefined;
 		const pack = broken ? [] : resolveSkillManifests(ctx.cwd, state, role ? { role } : undefined);
-		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, state.phase)}`, display: true, details: { ...state, unlock_token: undefined, skills: pack.map((s) => s.id) } } };
+		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, state.phase)}`, display: true, details: { ...state, skills: pack.map((s) => s.id) } } };
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
@@ -310,7 +308,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({ name: "foundry_status", label: "Foundry Status", description: "Read Foundry state, mode, and AATP counters.", loadMode: "essential", approval: "read", parameters: z.object({}), async execute(_id, _params, _session, _user, ctx) {
 		const loaded = safeState(ctx.cwd); if (loaded.broken) return { content: [{ type: "text", text: loaded.broken }], isError: true };
-		const tasks = hydrateAatp(ctx.cwd, loaded.state), stack = detectStack(ctx.cwd), publicState = { ...loaded.state, aatp: { ...loaded.state.aatp, ...summarizeAatp(tasks) }, unlock_token: undefined, stack, display_mode: statusOf(loaded.state) };
+		const tasks = hydrateAatp(ctx.cwd, loaded.state), stack = detectStack(ctx.cwd), publicState = { ...loaded.state, aatp: { ...loaded.state.aatp, ...summarizeAatp(tasks) }, stack, display_mode: statusOf(loaded.state) };
 		return { content: [{ type: "text", text: JSON.stringify(publicState, null, 2) }], details: publicState };
 	} });
 
@@ -356,7 +354,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("plan3", { description: "Enter/resume governed Draft → Redteam → Synth planning mode", handler: plan3Handler });
 	pi.registerCommand("3-stage-plan", { description: "Alias of /plan3", handler: plan3Handler });
 	pi.registerCommand("plan-revise", { description: "Human-only: reopen locked plan and restart Plan3", handler: async (args, ctx) => {
-		const state = loadState(ctx.cwd); state.master_plan.status = "draft"; state.unlock_token = token(); state.conflict = { kind: "PLAN_CONFLICT", reason: args.trim() || "user revise" }; resetAatp(state); invalidateQa(state); enterPlan3(state, true); persist(ctx.cwd, state); orchestrate(pi, "PLAN reopened by user.", `${plan3Status(state)}\n${plan3Instruction(state)}\nDownstream AATP/reviews/QA were invalidated.`);
+		const state = loadState(ctx.cwd); state.master_plan.status = "draft"; state.conflict = { kind: "PLAN_CONFLICT", reason: args.trim() || "user revise" }; resetAatp(state); invalidateQa(state); enterPlan3(state, true); persist(ctx.cwd, state); orchestrate(pi, "PLAN reopened by user.", `${plan3Status(state)}\n${plan3Instruction(state)}\nDownstream AATP/reviews/QA were invalidated.`);
 	} });
 
 	pi.registerCommand("design", { description: "Design foundation after plan lock", handler: async (args, ctx) => {
@@ -372,7 +370,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (which === "plan" || which === "approve-plan") {
 			if (state.mode !== "plan3" || state.planning.stage !== "awaiting_lock") { ctx.ui.notify("PLAN3_GATE: plan approval requires a completed Draft → Redteam → Synth cycle.", "warning"); return; }
 			if (!plan3ArtifactsMatch(ctx.cwd, state)) { ctx.ui.notify("PLAN3_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan3 or restore the accepted artifacts.", "error"); return; }
-			state.master_plan.status = "locked"; state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version; state.unlock_token = ""; state.conflict = { kind: "none", reason: "" }; state.mode = "normal"; state.phase = state.design.required ? "design" : "aatp"; lockArtifactHash(ctx.cwd, state, "master_plan"); resetAatp(state); invalidateQa(state); persist(ctx.cwd, state); orchestrate(pi, "PLAN LOCKED by user.", "Plan3 evidence accepted. Continue /foundry."); return;
+			state.master_plan.status = "locked"; state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version; state.conflict = { kind: "none", reason: "" }; state.mode = "normal"; state.phase = state.design.required ? "design" : "aatp"; lockArtifactHash(ctx.cwd, state, "master_plan"); resetAatp(state); invalidateQa(state); persist(ctx.cwd, state); orchestrate(pi, "PLAN LOCKED by user.", "Plan3 evidence accepted. Continue /foundry."); return;
 		}
 		ctx.ui.notify("Usage: /foundry-approve product|plan", "warning");
 	} });
