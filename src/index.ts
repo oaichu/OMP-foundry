@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -21,9 +21,10 @@ import {
 	validateAatpSpecs,
 	writeAatpIndex,
 } from "./aatp";
+import { bootstrapFoundryProject } from "./bootstrap";
 import { CONTEXT_POLICY, phasePrompt } from "./context-policy";
 import { requireDesignIfUi, requirePlan, requireProduct } from "./gates";
-import { checkIsolationContract, ensureProjectIsolationConfig, narrowFoundryGitignore } from "./omp-runtime";
+import { checkFoundryProjectRoles, checkIsolationContract } from "./omp-runtime";
 import { denyToolCall, forceIsolatedTaskInput, type ToolInput } from "./permissions";
 import {
 	applyPatchArtifact,
@@ -36,17 +37,28 @@ import {
 	prepareImplementationBaseline,
 	restoreCleanHead,
 	taskBindings,
+	taskItems,
 	type TaskBinding,
 	validatePatchArtifact,
 } from "./patch-gate";
 import { canonicalRepoPath } from "./paths";
+import {
+	abortPlan3,
+	completePlan3Stage,
+	enterPlan3,
+	expectedPlan3Agent,
+	hashPlan3Artifact,
+	plan3ArtifactsMatch,
+	plan3Instruction,
+	plan3Status,
+} from "./plan3";
 import { deriveRelease, invalidateQa, lockArtifactHash, workingTreeClean } from "./release";
 import { loadRegistry } from "./skills/registry";
 import type { SkillRole } from "./skills/manifest-schema";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
 import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
-import { type CompanyState, defaultState } from "./types";
+import { type CompanyState, type Plan3Stage, defaultState } from "./types";
 import { checkForUpdate, versionReport } from "./update-check";
 import { applyQa, runVerify } from "./verify-runner";
 
@@ -54,22 +66,17 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CUSTOM = "com.omp.company-workflow.state";
 const MARKER = "docs/.foundry-governed";
 const LIFECYCLE_TOOLS = new Set(["aatp_begin", "aatp_complete", "aatp_block", "aatp_review"]);
-const PLAN3 = "Spawn blocking, sequential: plan-drafter → plan-critic → plan-finalizer. Artifacts: docs/planning/MASTER_PLAN_DRAFT.md, docs/planning/PLAN_REVIEW.md, docs/MASTER_PLAN.md. Finalizer writes MASTER_PLAN only. Human locks with /foundry-approve plan. Do not implement.";
+const PLAN_AGENTS = new Set(["plan-drafter", "plan-redteam", "plan-synth", "plan-critic", "plan-finalizer"]);
 
 type PendingRun = { bindings: TaskBinding[]; startedClean: boolean };
+type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
+type PendingPlanRun = { stage: ActivePlanStage; agent: string; index: number };
 
 function token(): string { return randomBytes(16).toString("hex"); }
-function copyTemplate(cwd: string, name: string): void {
-	const dest = join(cwd, "docs", name);
-	if (existsSync(dest)) return;
-	mkdirSync(dirname(dest), { recursive: true });
-	const src = join(ROOT, "templates", name);
-	if (existsSync(src)) writeFileSync(dest, readFileSync(src, "utf8"), "utf8");
-}
 function persist(cwd: string, state: CompanyState): CompanyState { saveState(cwd, state); return state; }
 function orchestrate(pi: ExtensionAPI, title: string, body: string): void { pi.sendUserMessage([title, "", body, "", CONTEXT_POLICY].join("\n")); }
 function productOk(state: CompanyState): boolean { return state.product.status === "approved" || state.product.status === "locked"; }
-function statusOf(state: CompanyState): string { return `${state.phase} plan=${state.master_plan.status} design=${state.design.status}`; }
+function statusOf(state: CompanyState): string { return state.mode === "plan3" ? `${plan3Status(state)} plan=${state.master_plan.status}` : `${state.phase} plan=${state.master_plan.status} design=${state.design.status}`; }
 function commitGovernanceBaseline(cwd: string): string | undefined { const result = prepareImplementationBaseline(cwd); return result.ok ? undefined : result.reason; }
 function safeState(cwd: string): { state: CompanyState; broken?: string; missing: boolean } {
 	let missing = false;
@@ -80,18 +87,42 @@ function safeState(cwd: string): { state: CompanyState; broken?: string; missing
 	return { state: loaded.state, missing };
 }
 function taskKey(event: { toolCallId?: string }, cwd: string): string { return event.toolCallId ?? cwd; }
+function plan3ModelsReady(cwd: string): string | undefined {
+	const roles = checkFoundryProjectRoles(cwd);
+	return roles.ok ? undefined : roles.reason ?? "FOUNDRY_MODEL_ROLES_REQUIRED";
+}
+function plan3PriorEvidenceMatches(cwd: string, state: CompanyState): boolean {
+	if (state.planning.stage === "draft") return true;
+	if (!state.planning.draft_sha256 || hashPlan3Artifact(cwd, "draft") !== state.planning.draft_sha256) return false;
+	if (state.planning.stage === "redteam") return true;
+	if (!state.planning.review_sha256 || hashPlan3Artifact(cwd, "redteam") !== state.planning.review_sha256) return false;
+	return true;
+}
+function enterOrResumePlan3(pi: ExtensionAPI, cwd: string, state: CompanyState, restart = false): void {
+	const modelGate = plan3ModelsReady(cwd);
+	if (modelGate) { orchestrate(pi, "Plan3 model roles are not ready.", `${modelGate}\nOpen /model → Roles in this project and assign the foundry_* roles.`); return; }
+	enterPlan3(state, restart);
+	persist(cwd, state);
+	orchestrate(pi, plan3Status(state), plan3Instruction(state));
+}
 
 function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 	const loaded = safeState(cwd);
 	if (loaded.broken) { orchestrate(pi, "Foundry state blocked.", loaded.broken); return; }
-	const state = loaded.state;
 	const idea = args.trim();
 	if (loaded.missing) {
-		orchestrate(pi, "Start the foundry.", ["Call company_init.", idea ? `User idea: ${idea}` : "If the user has not described the product, ask one short question then spawn product-analyst.", "Spawn blocking product-analyst. Then wait for /foundry-approve product."].join("\n"));
+		const boot = bootstrapFoundryProject(cwd, ROOT);
+		orchestrate(pi, "Foundry enabled for this project.", [
+			`stack=${boot.stackIds.join(",") || "unknown"} ui=${boot.ui}`,
+			`project model roles bootstrapped=${boot.rolesBootstrapped.length}`,
+			idea ? `User idea: ${idea}` : "If the user has not described the product, ask one short question.",
+			"Spawn blocking product-analyst. Then wait for /foundry-approve product.",
+		].join("\n"));
 		return;
 	}
+	const state = loaded.state;
 	if (!productOk(state)) { orchestrate(pi, "Finish the product.", "Spawn blocking product-analyst. Wait for /foundry-approve product. Do not plan or code."); return; }
-	if (state.master_plan.status !== "locked") { orchestrate(pi, "Run /plan3 automatically.", PLAN3); return; }
+	if (state.master_plan.status !== "locked") { enterOrResumePlan3(pi, cwd, state); return; }
 	if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") { orchestrate(pi, "Design is required.", "Spawn blocking design-foundation, build a real preview, then wait for /design approve or /design skip."); return; }
 	const tasks = hydrateAatp(cwd, state);
 	if (tasks.length === 0) { orchestrate(pi, "Generate AATP.", "Run /aatp. Write docs/AATP/AATP-*.md from the locked plan; do not implement."); return; }
@@ -109,6 +140,11 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 function resultForBinding(results: ReturnType<typeof extractTaskResults>, binding: TaskBinding) {
 	const indexed = results.find((r) => (r.index ?? 0) === binding.index);
 	if (!indexed || (indexed.agent && indexed.agent !== binding.agent)) return undefined;
+	return indexed;
+}
+function resultForPlan(results: ReturnType<typeof extractTaskResults>, pending: PendingPlanRun) {
+	const indexed = results.find((r) => (r.index ?? 0) === pending.index);
+	if (!indexed || (indexed.agent && indexed.agent !== pending.agent)) return undefined;
 	return indexed;
 }
 
@@ -139,10 +175,7 @@ function processGovernedResults(cwd: string, state: CompanyState, bindings: Task
 		}
 		if (binding.kind === "review") {
 			const reportVerdict = parseReviewVerdict(checked.patch, binding.ticketId);
-			if (!reportVerdict || reportVerdict !== reviewVerdict) {
-				messages.push(`${binding.ticketId}: REVIEW_GATE report marker must match final-output verdict; no review patch applied`);
-				continue;
-			}
+			if (!reportVerdict || reportVerdict !== reviewVerdict) { messages.push(`${binding.ticketId}: REVIEW_GATE report marker must match final-output verdict; no review patch applied`); continue; }
 		}
 		const applied = applyPatchArtifact(cwd, result.patchPath);
 		if (!applied.ok) {
@@ -174,6 +207,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	const z = pi.zod;
 	pi.setLabel("OMP Foundry");
 	const pending = new Map<string, PendingRun>();
+	const pendingPlan = new Map<string, PendingPlanRun>();
 
 	pi.on("session_start", async (_event, ctx) => {
 		const { state, broken } = safeState(ctx.cwd);
@@ -186,13 +220,25 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		const agentName = String((event as { agent?: { name?: string }; agentName?: string }).agent?.name ?? (event as { agentName?: string }).agentName ?? "").toLowerCase();
 		const role: SkillRole | undefined = agentName.includes("plan") ? "planner" : agentName.includes("design") ? "designer" : agentName.includes("review") ? "reviewer" : agentName.includes("implement") ? "implementer" : undefined;
 		const pack = broken ? [] : resolveSkillManifests(ctx.cwd, state, role ? { role } : undefined);
-		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state.phase)} ${statusOf(state)}.\n${skillPackPrompt(pack, state.phase)}`, display: true, details: { ...state, unlock_token: undefined, skills: pack.map((s) => s.id) } } };
+		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, state.phase)}`, display: true, details: { ...state, unlock_token: undefined, skills: pack.map((s) => s.id) } } };
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
 		if (LIFECYCLE_TOOLS.has(event.toolName)) return { block: true, reason: "LIFECYCLE_GATE: AATP lifecycle is parent-extension-owned; agents cannot transition tickets directly." };
 		if (event.toolName === "task") {
 			const raw = event.input && typeof event.input === "object" ? event.input as Record<string, unknown> : {};
+			const loaded = safeState(ctx.cwd);
+			if (loaded.broken) return { block: true, reason: `STATE_CORRUPT: ${loaded.broken}` };
+			if (loaded.state.mode === "plan3") {
+				const items = taskItems(raw), planItems = items.filter((item) => PLAN_AGENTS.has(item.agent));
+				if (planItems.length > 0) {
+					const expected = expectedPlan3Agent(loaded.state);
+					if (!expected) return { block: true, reason: `PLAN3_GATE: no planning agent is allowed at stage ${loaded.state.planning.stage}.` };
+					if (items.length !== 1 || planItems.length !== 1 || planItems[0].agent !== expected) return { block: true, reason: `PLAN3_GATE: stage ${loaded.state.planning.stage} requires exactly one blocking ${expected}; no other Plan3 stage may run.` };
+					if (!plan3PriorEvidenceMatches(ctx.cwd, loaded.state)) return { block: true, reason: "PLAN3_EVIDENCE_GATE: a prior stage artifact changed after it was accepted. Restart /plan3 or restore the artifact." };
+					pendingPlan.set(taskKey(event, ctx.cwd), { stage: loaded.state.planning.stage as ActivePlanStage, agent: expected, index: planItems[0].index });
+				}
+			}
 			if (governedTask(raw)) {
 				const contract = checkIsolationContract(ctx.cwd);
 				if (!contract.ok) return { block: true, reason: contract.reason ?? "Foundry isolation contract failed." };
@@ -226,9 +272,20 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 
 	pi.on("tool_result", async (event, ctx) => {
 		if (event.toolName !== "task") return;
-		const run = pending.get(taskKey(event, ctx.cwd));
+		const key = taskKey(event, ctx.cwd);
+		const planRun = pendingPlan.get(key);
+		if (planRun) {
+			pendingPlan.delete(key);
+			const result = resultForPlan(extractTaskResults(event.details), planRun);
+			if (!result || result.exitCode !== 0 || result.error || result.aborted) return { isError: true, content: [{ type: "text" as const, text: `PLAN3_STAGE_FAILED: ${planRun.stage} did not complete; stage remains unchanged.` }] };
+			const state = loadState(ctx.cwd), completed = completePlan3Stage(ctx.cwd, state, planRun.stage);
+			if (!completed.ok) return { isError: true, content: [{ type: "text" as const, text: completed.reason ?? "PLAN3_STAGE_GATE" }] };
+			persist(ctx.cwd, state); ctx.ui.setStatus("foundry", statusOf(state));
+			return { content: [{ type: "text" as const, text: `${plan3Status(state)}\n${plan3Instruction(state)}` }] };
+		}
+		const run = pending.get(key);
 		if (!run) return;
-		pending.delete(taskKey(event, ctx.cwd));
+		pending.delete(key);
 		if (run.startedClean && !workingTreeClean(ctx.cwd)) {
 			const state = loadState(ctx.cwd);
 			for (const binding of run.bindings) if (binding.kind === "implementation") resetTicket(state, binding.ticketId);
@@ -240,21 +297,16 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		return { isError: messages.some((m) => /failed|blocked|GATE|rejected/i.test(m)), content: [{ type: "text" as const, text: messages.join("\n") }] };
 	});
 
-	pi.registerTool({ name: "company_status", label: "Foundry Status", description: "Read Foundry state and AATP counters.", loadMode: "essential", approval: "read", parameters: z.object({}), async execute(_id, _params, _session, _user, ctx) {
+	pi.registerTool({ name: "company_status", label: "Foundry Status", description: "Read Foundry state, mode, and AATP counters.", loadMode: "essential", approval: "read", parameters: z.object({}), async execute(_id, _params, _session, _user, ctx) {
 		const loaded = safeState(ctx.cwd); if (loaded.broken) return { content: [{ type: "text", text: loaded.broken }], isError: true };
-		const tasks = hydrateAatp(ctx.cwd, loaded.state), stack = detectStack(ctx.cwd), publicState = { ...loaded.state, aatp: { ...loaded.state.aatp, ...summarizeAatp(tasks) }, unlock_token: undefined, stack };
+		const tasks = hydrateAatp(ctx.cwd, loaded.state), stack = detectStack(ctx.cwd), publicState = { ...loaded.state, aatp: { ...loaded.state.aatp, ...summarizeAatp(tasks) }, unlock_token: undefined, stack, display_mode: statusOf(loaded.state) };
 		return { content: [{ type: "text", text: JSON.stringify(publicState, null, 2) }], details: publicState };
 	} });
 
-	pi.registerTool({ name: "company_init", label: "Foundry Init", description: "Create Foundry docs/state and safe project isolation defaults without clobbering existing OMP config.", loadMode: "essential", approval: "write", parameters: z.object({ name: z.string().optional() }), async execute(_id, params, _session, _user, ctx) {
-		mkdirSync(join(ctx.cwd, "docs", "planning"), { recursive: true }); mkdirSync(join(ctx.cwd, "docs", "AATP"), { recursive: true }); mkdirSync(join(ctx.cwd, "docs", "reports"), { recursive: true });
-		for (const name of ["PRODUCT.md", "MASTER_PLAN.md", "DESIGN.md", "SECURITY.md", "ARCHITECTURE.md", "AATP.md", "RELEASE_REPORT.md"]) copyTemplate(ctx.cwd, name);
-		if (!existsSync(join(ctx.cwd, MARKER))) writeFileSync(join(ctx.cwd, MARKER), "OMP Foundry governed repository.\n", "utf8");
-		narrowFoundryGitignore(ctx.cwd); const config = ensureProjectIsolationConfig(ctx.cwd);
-		const existed = stateFileExists(ctx.cwd), state = existed ? loadState(ctx.cwd) : defaultState(), stack = detectStack(ctx.cwd);
-		if (!existed) { state.design.required = stack.ui; state.phase = "discovery"; persist(ctx.cwd, state); }
-		ctx.ui.setStatus("foundry", statusOf(state));
-		return { content: [{ type: "text", text: `${existed ? "Kept" : "Initialized"} Foundry. stack=${stack.ids.join(",")} ui=${stack.ui} isolation_config=${config.created ? "created" : "existing-check-with-/foundry-doctor"} name=${params.name ?? ""}` }], details: state };
+	pi.registerTool({ name: "company_init", label: "Foundry Init", description: "Advanced/manual bootstrap. /foundry auto-bootstraps new projects using this same project-local path.", loadMode: "essential", approval: "write", parameters: z.object({ name: z.string().optional() }), async execute(_id, params, _session, _user, ctx) {
+		const boot = bootstrapFoundryProject(ctx.cwd, ROOT);
+		ctx.ui.setStatus("foundry", statusOf(boot.state));
+		return { content: [{ type: "text", text: `${boot.existed ? "Kept" : "Initialized"} Foundry. stack=${boot.stackIds.join(",")} ui=${boot.ui} project_config=${boot.configCreated ? "created" : "updated-without-global-mutation"} foundry_roles=${boot.rolesBootstrapped.length} name=${params.name ?? ""}` }], details: boot.state };
 	} });
 
 	pi.registerTool({ name: "foundry_exec", label: "Foundry Design Verify", description: "Run one detected verification command during unlocked design only; no arbitrary command input.", loadMode: "essential", approval: "write", parameters: z.object({ id: z.string() }), async execute(_id, params, _session, _user, ctx) {
@@ -271,16 +323,33 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		return { content: [{ type: "text", text: bodies.join("\n\n") }], details: { ids: wanted } };
 	} });
 
-	pi.registerCommand("foundry", { description: "Next legal Foundry step", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
+	pi.registerCommand("foundry", { description: "Auto-bootstrap this repo if needed, then run the next legal Foundry step", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
 	pi.registerCommand("company", { description: "Alias of /foundry", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
-	const initHandler = async (args: string, ctx: { cwd: string; waitForIdle: () => Promise<void> }) => { await ctx.waitForIdle(); orchestrate(pi, "Bootstrap Foundry.", ["Call company_init.", "If docs/PRODUCT.md is still a stub, spawn blocking product-analyst.", "Then wait for /foundry-approve product.", args.trim() ? `Project: ${args.trim()}` : ""].filter(Boolean).join("\n")); };
-	pi.registerCommand("foundry-init", { description: "Bootstrap PRODUCT/docs + Foundry state", handler: initHandler });
+	const initHandler = async (_args: string, ctx: { cwd: string; waitForIdle: () => Promise<void> }) => { await ctx.waitForIdle(); const boot = bootstrapFoundryProject(ctx.cwd, ROOT); orchestrate(pi, boot.existed ? "Foundry already initialized." : "Foundry initialized manually.", "Use /foundry as the normal entrypoint. /foundry-doctor is available for diagnostics."); };
+	pi.registerCommand("foundry-init", { description: "Advanced/manual project bootstrap; normal users can just run /foundry", handler: initHandler });
 	pi.registerCommand("company-init", { description: "Alias of /foundry-init", handler: initHandler });
-	pi.registerCommand("foundry-doctor", { description: "Check required OMP isolation/apply settings", handler: async (_args, ctx) => { const contract = checkIsolationContract(ctx.cwd); orchestrate(pi, contract.ok ? "Foundry runtime contract OK." : "Foundry runtime contract BLOCKED.", contract.ok ? `isolation=${contract.mode} apply=${contract.apply}` : contract.reason ?? "unknown"); } });
+	pi.registerCommand("foundry-doctor", { description: "Check OMP isolation and project-scoped Foundry model roles", handler: async (_args, ctx) => {
+		const isolation = checkIsolationContract(ctx.cwd), roles = checkFoundryProjectRoles(ctx.cwd);
+		const ok = isolation.ok && roles.ok;
+		orchestrate(pi, ok ? "Foundry runtime contract OK." : "Foundry runtime contract BLOCKED.", [isolation.ok ? `isolation=${isolation.mode} apply=${isolation.apply}` : isolation.reason, roles.ok ? "modelRoleStorage=project; all foundry_* roles mapped" : roles.reason].filter(Boolean).join("\n"));
+	} });
 	pi.registerCommand("foundry-version", { description: "Show Foundry/OMP versions and latest stable tag", handler: async (_args, ctx) => { const result = await checkForUpdate({ force: true }); if (result.notify) ctx.ui.notify(result.notify, "info"); orchestrate(pi, "Foundry version", versionReport(result)); } });
-	pi.registerCommand("plan3", { description: "Three-stage plan, then human lock", handler: async (args, ctx) => { const state = loadState(ctx.cwd), missing = requireProduct(state); if (missing) { ctx.ui.notify(missing, "warning"); return; } orchestrate(pi, "Run /plan3. Read skill://three-stage-plan.", [PLAN3, args.trim()].filter(Boolean).join("\n")); } });
-	pi.registerCommand("3-stage-plan", { description: "Alias of /plan3", handler: async (args, _ctx) => orchestrate(pi, "Alias /plan3", `${PLAN3}\n${args}`) });
-	pi.registerCommand("plan-revise", { description: "Human-only: reopen locked plan and invalidate downstream AATP/QA", handler: async (args, ctx) => { const state = loadState(ctx.cwd); state.master_plan.status = "draft"; state.unlock_token = token(); state.phase = "planning"; state.conflict = { kind: "PLAN_CONFLICT", reason: args.trim() || "user revise" }; resetAatp(state); invalidateQa(state); persist(ctx.cwd, state); orchestrate(pi, "PLAN reopened by user.", "Downstream AATP/reviews/QA were invalidated. Run /plan3, then /foundry-approve plan."); } });
+
+	const plan3Handler = async (args: string, ctx: { cwd: string; ui: { notify: (message: string, level?: "error" | "info" | "warning") => void } }) => {
+		const state = loadState(ctx.cwd), missing = requireProduct(state);
+		if (missing) { ctx.ui.notify(missing, "warning"); return; }
+		const sub = args.trim().toLowerCase();
+		if (sub === "status") { orchestrate(pi, plan3Status(state), state.mode === "plan3" ? plan3Instruction(state) : "Plan3 is not active."); return; }
+		if (sub === "abort") { abortPlan3(state); persist(ctx.cwd, state); orchestrate(pi, "Plan3 aborted by user.", "Planning stage authority is cleared. The plan remains unlocked unless it was already locked."); return; }
+		if (state.master_plan.status === "locked") { ctx.ui.notify("PLAN_GATE: master plan is locked. Use /plan-revise before starting a new Plan3 cycle.", "warning"); return; }
+		enterOrResumePlan3(pi, ctx.cwd, state, sub === "restart");
+	};
+	pi.registerCommand("plan3", { description: "Enter/resume governed Draft → Redteam → Synth planning mode", handler: plan3Handler });
+	pi.registerCommand("3-stage-plan", { description: "Alias of /plan3", handler: plan3Handler });
+	pi.registerCommand("plan-revise", { description: "Human-only: reopen locked plan and restart Plan3", handler: async (args, ctx) => {
+		const state = loadState(ctx.cwd); state.master_plan.status = "draft"; state.unlock_token = token(); state.conflict = { kind: "PLAN_CONFLICT", reason: args.trim() || "user revise" }; resetAatp(state); invalidateQa(state); enterPlan3(state, true); persist(ctx.cwd, state); orchestrate(pi, "PLAN reopened by user.", `${plan3Status(state)}\n${plan3Instruction(state)}\nDownstream AATP/reviews/QA were invalidated.`);
+	} });
+
 	pi.registerCommand("design", { description: "Design foundation after plan lock", handler: async (args, ctx) => {
 		const state = loadState(ctx.cwd), gate = requirePlan(state); if (gate) { ctx.ui.notify(gate, "warning"); return; }
 		const sub = args.trim().toLowerCase();
@@ -290,8 +359,12 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	} });
 	pi.registerCommand("foundry-approve", { description: "Human gate: product | plan", handler: async (args, ctx) => {
 		const which = args.trim().toLowerCase(), state = loadState(ctx.cwd);
-		if (which === "product" || which === "approve-product") { state.product.status = "approved"; state.phase = "planning"; lockArtifactHash(ctx.cwd, state, "product"); invalidateQa(state); persist(ctx.cwd, state); orchestrate(pi, "PRODUCT approved by user.", "Run /plan3."); return; }
-		if (which === "plan" || which === "approve-plan") { state.master_plan.status = "locked"; state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version; state.unlock_token = ""; state.conflict = { kind: "none", reason: "" }; state.phase = state.design.required ? "design" : "aatp"; lockArtifactHash(ctx.cwd, state, "master_plan"); resetAatp(state); invalidateQa(state); persist(ctx.cwd, state); orchestrate(pi, "PLAN LOCKED by user.", "Continue /foundry."); return; }
+		if (which === "product" || which === "approve-product") { state.product.status = "approved"; state.phase = "planning"; lockArtifactHash(ctx.cwd, state, "product"); invalidateQa(state); persist(ctx.cwd, state); orchestrate(pi, "PRODUCT approved by user.", "Run /plan3 or /foundry. Plan3 uses project-scoped @foundry_plan/@foundry_redteam/@foundry_synth roles."); return; }
+		if (which === "plan" || which === "approve-plan") {
+			if (state.mode !== "plan3" || state.planning.stage !== "awaiting_lock") { ctx.ui.notify("PLAN3_GATE: plan approval requires a completed Draft → Redteam → Synth cycle.", "warning"); return; }
+			if (!plan3ArtifactsMatch(ctx.cwd, state)) { ctx.ui.notify("PLAN3_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan3 or restore the accepted artifacts.", "error"); return; }
+			state.master_plan.status = "locked"; state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version; state.unlock_token = ""; state.conflict = { kind: "none", reason: "" }; state.mode = "normal"; state.phase = state.design.required ? "design" : "aatp"; lockArtifactHash(ctx.cwd, state, "master_plan"); resetAatp(state); invalidateQa(state); persist(ctx.cwd, state); orchestrate(pi, "PLAN LOCKED by user.", "Plan3 evidence accepted. Continue /foundry."); return;
+		}
 		ctx.ui.notify("Usage: /foundry-approve product|plan", "warning");
 	} });
 	pi.registerCommand("aatp", { description: "Generate AATP DAG from locked plan+design", handler: async (_args, ctx) => { const state = loadState(ctx.cwd), gate = requireDesignIfUi(state); if (gate) { ctx.ui.notify(gate, "warning"); return; } state.phase = "aatp"; state.aatp.manifest_sha256 = ""; persist(ctx.cwd, state); orchestrate(pi, "Generate AATP. Read docs/AATP.md template.", "Write docs/AATP/AATP-*.md with explicit allowed_files and valid dependencies. Do not implement. /build will validate and seal the manifest."); } });

@@ -2,7 +2,7 @@
 name: product-analyst
 description: "Company phase 00. Write docs/PRODUCT.md only. NEVER code or lock a plan."
 tools: read, grep, glob, write, edit, ask
-model: "@default"
+model: "@foundry_product"
 thinking-level: high
 blocking: true
 read-summarize: true

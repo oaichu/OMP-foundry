@@ -2,7 +2,7 @@
 name: reviewer
 description: "Independent AATP reviewer. Writes only the review report; parent Foundry records verdict."
 tools: read, grep, glob, lsp, write
-model: "@default"
+model: "@foundry_review"
 thinking-level: high
 blocking: true
 read-summarize: true

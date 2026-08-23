@@ -1,9 +1,9 @@
 ---
 name: security-reviewer
-description: "Security-only independent reviewer on @advisor. Never implements."
+description: "Security-only independent reviewer. Never implements."
 tools: read, grep, glob, lsp, write
-model: "@advisor"
-thinking-level: xhigh
+model: "@foundry_security"
+thinking-level: max
 blocking: true
 read-summarize: true
 autoloadSkills: security-review

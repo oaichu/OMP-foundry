@@ -66,7 +66,11 @@ function bashAllowed(command: string): boolean {
 }
 function prePlanAllowed(rel: string, state: CompanyState): boolean {
 	if (state.phase === "discovery") return underPrefix(rel, "docs/product.md");
-	if (state.phase === "planning") return matchesAny(rel, ["docs/master_plan.md", "docs/planning/"]);
+	if (state.phase !== "planning") return false;
+	if (state.mode !== "plan3") return matchesAny(rel, ["docs/master_plan.md", "docs/planning/"]);
+	if (state.planning.stage === "draft") return underPrefix(rel, "docs/planning/master_plan_draft.md");
+	if (state.planning.stage === "redteam") return underPrefix(rel, "docs/planning/plan_review.md");
+	if (state.planning.stage === "synth") return underPrefix(rel, "docs/master_plan.md");
 	return false;
 }
 
@@ -104,7 +108,10 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 	}
 	if (!planLocked(state)) {
 		const bad = rels.filter((rel) => !prePlanAllowed(rel, state));
-		if (bad.length) return { block: true, reason: `PLAN_GATE: pre-lock writes are limited to the active planning artifact; denied ${bad.join(", ")}.` };
+		if (bad.length) {
+			const stage = state.mode === "plan3" ? ` Plan3 stage=${state.planning.stage}.` : "";
+			return { block: true, reason: `PLAN_GATE:${stage} pre-lock writes are limited to the active planning artifact; denied ${bad.join(", ")}.` };
+		}
 		return;
 	}
 	if (state.phase === "design" && state.design.status !== "locked") {

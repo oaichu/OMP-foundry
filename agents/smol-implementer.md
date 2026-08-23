@@ -1,8 +1,8 @@
 ---
 name: smol-implementer
-description: "Trivial governed AATP worker on @smol. Patch only; never bundled sonic."
+description: "Trivial governed AATP worker. Patch only; never bundled sonic."
 tools: read, grep, glob, write, edit, lsp
-model: "@smol"
+model: "@foundry_smol"
 thinking-level: low
 blocking: true
 read-summarize: true

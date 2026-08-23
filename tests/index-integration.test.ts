@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ompCompanyWorkflow from "../src/index";
-import { saveState } from "../src/state-machine";
+import { loadState, saveState } from "../src/state-machine";
 import { defaultState } from "../src/types";
 
 function fakeZod() {
@@ -16,17 +16,17 @@ function fakeZod() {
 }
 
 function harness() {
-	const tools = new Map<string, any>(), commands = new Map<string, any>(), handlers = new Map<string, any[]>();
+	const tools = new Map<string, any>(), commands = new Map<string, any>(), handlers = new Map<string, any[]>(), messages: string[] = [];
 	const api: any = {
 		zod: fakeZod(),
 		setLabel() {},
-		sendUserMessage() {},
+		sendUserMessage(message: string) { messages.push(message); },
 		on(name: string, handler: any) { const list = handlers.get(name) ?? []; list.push(handler); handlers.set(name, list); },
 		registerTool(tool: any) { tools.set(tool.name, tool); },
 		registerCommand(name: string, config: any) { commands.set(name, config); },
 	};
 	ompCompanyWorkflow(api);
-	return { tools, commands, handlers };
+	return { tools, commands, handlers, messages };
 }
 
 function ctx(cwd: string) {
@@ -46,6 +46,20 @@ describe("extension integration smoke", () => {
 		expect(commands.has("release-check")).toBe(true);
 	});
 
+	test("/foundry self-bootstraps a new project without /foundry-init", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-auto-bootstrap-"));
+		const { commands, messages } = harness();
+		await commands.get("foundry")!.handler("Build a small API", ctx(cwd));
+		expect(existsSync(join(cwd, ".omp", "foundry-state.yml"))).toBe(true);
+		expect(existsSync(join(cwd, ".omp", "config.yml"))).toBe(true);
+		expect(existsSync(join(cwd, "docs", ".foundry-governed"))).toBe(true);
+		expect(existsSync(join(cwd, "docs", "PRODUCT.md"))).toBe(true);
+		expect(readFileSync(join(cwd, ".omp", "config.yml"), "utf8")).toContain("modelRoleStorage: project");
+		expect(loadState(cwd).phase).toBe("discovery");
+		expect(messages.at(-1)).toContain("Foundry enabled for this project");
+		expect(messages.at(-1)).toContain("Spawn blocking product-analyst");
+	});
+
 	test("design approve handler executes and locks without runtime ReferenceError", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-index-"));
 		mkdirSync(join(cwd, "docs"), { recursive: true });
@@ -58,7 +72,6 @@ describe("extension integration smoke", () => {
 		saveState(cwd, state);
 		const { commands } = harness();
 		await commands.get("design")!.handler("approve", ctx(cwd));
-		const { loadState } = await import("../src/state-machine");
 		const after = loadState(cwd);
 		expect(after.design.status).toBe("locked");
 		expect(after.phase).toBe("aatp");

@@ -1,8 +1,8 @@
 ---
 name: hard-implementer
-description: "Escalation AATP worker on @slow. Patch only; parent Foundry owns lifecycle/apply/commit."
+description: "Escalation governed AATP worker. Patch only; parent Foundry owns lifecycle/apply/commit."
 tools: read, grep, glob, write, edit, lsp
-model: "@slow"
+model: "@foundry_hard"
 thinking-level: max
 blocking: true
 read-summarize: true

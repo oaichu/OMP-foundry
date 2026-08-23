@@ -2,7 +2,7 @@
 name: implementer
 description: "Governed AATP worker. Patch only; parent Foundry owns lifecycle/apply/commit."
 tools: read, grep, glob, write, edit, lsp
-model: "@task"
+model: "@foundry_impl"
 thinking-level: high
 blocking: true
 read-summarize: true
