@@ -22,14 +22,9 @@ export interface BootstrapResult {
 	stackIds: string[];
 	ui: boolean;
 	configCreated: boolean;
-	rolesBootstrapped: string[];
 }
 
-/**
- * Opt a repository into Foundry. This is intentionally project-local: it
- * creates governance artifacts and .omp/config.yml only in cwd and never
- * mutates OMP's global configuration.
- */
+/** Opt a repository into Foundry without overwriting global model choices. */
 export function bootstrapFoundryProject(cwd: string, root: string): BootstrapResult {
 	mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
 	mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
@@ -48,16 +43,5 @@ export function bootstrapFoundryProject(cwd: string, root: string): BootstrapRes
 		saveState(cwd, state);
 	}
 
-	return {
-		existed,
-		state,
-		stackIds: stack.ids,
-		ui: stack.ui,
-		configCreated: config.created,
-		rolesBootstrapped: config.rolesBootstrapped,
-	};
-}
-
-export function foundryMarkerExists(cwd: string): boolean {
-	return existsSync(join(cwd, MARKER));
+	return { existed, state, stackIds: stack.ids, ui: stack.ui, configCreated: config.created };
 }
