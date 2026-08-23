@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 export interface IsolationContract {
@@ -57,10 +57,6 @@ function effectiveRoles(cwd: string): Record<string, string> {
 }
 
 export function aliasRoleMap(roles: Record<string, string>): Record<(typeof FOUNDRY_MODEL_ROLES)[number], string> {
-	// Bootstrap writes cross-role aliases (e.g. "@slow"), not concrete model
-	// ids: the role keeps following the user's own OMP roles when they
-	// reassign them in /models, and never goes stale. Users who want a
-	// specific model overwrite the alias with a model id.
 	const pick = (...names: string[]) => {
 		const role = names.find((name) => typeof roles[name] === "string" && roles[name].trim());
 		return role ? `@${role}` : "";
@@ -77,10 +73,6 @@ export function aliasRoleMap(roles: Record<string, string>): Record<(typeof FOUN
 		foundry_review: pick("review", "default", "slow"),
 		foundry_security: pick("slow", "advisor", "review", "default"),
 	};
-}
-
-function fallbackRoleMap(cwd: string): Record<(typeof FOUNDRY_MODEL_ROLES)[number], string> {
-	return aliasRoleMap(effectiveRoles(cwd));
 }
 
 function topLevelBlock(text: string, key: string): { start: number; end: number; lines: string[] } | undefined {
@@ -106,17 +98,14 @@ function ensureTopLevelScalar(text: string, key: string, value: string): string 
 	return `${lines.join("\n")}\n`;
 }
 
-// A leading @ is a reserved YAML indicator: alias values must be quoted or
-// the whole settings file fails to parse and OMP quarantines it.
 function formatRoleValue(value: string): string {
 	return value.startsWith("@") ? `"${value}"` : value;
 }
 
 function ensureModelRoles(text: string, defaults: Record<string, string>): string {
-	let next = text;
-	let block = topLevelBlock(next, "modelRoles");
+	const block = topLevelBlock(text, "modelRoles");
 	if (!block) {
-		const lines = next.replace(/\r\n/g, "\n").split("\n");
+		const lines = text.replace(/\r\n/g, "\n").split("\n");
 		while (lines.length && !lines[lines.length - 1]) lines.pop();
 		lines.push("modelRoles:");
 		for (const role of FOUNDRY_MODEL_ROLES) if (defaults[role]) lines.push(`  ${role}: ${formatRoleValue(defaults[role])}`);
@@ -128,46 +117,44 @@ function ensureModelRoles(text: string, defaults: Record<string, string>): strin
 		if (match) existing.add(match[1]);
 	}
 	const inserts = FOUNDRY_MODEL_ROLES.filter((role) => !existing.has(role) && defaults[role]).map((role) => `  ${role}: ${formatRoleValue(defaults[role])}`);
-	if (!inserts.length) return next.endsWith("\n") ? next : `${next}\n`;
+	if (!inserts.length) return text.endsWith("\n") ? text : `${text}\n`;
 	block.lines.splice(block.end, 0, ...inserts);
 	return `${block.lines.join("\n").replace(/\n+$/, "")}\n`;
 }
 
-export function ensureProjectFoundryConfig(cwd: string): { created: boolean; path: string; rolesBootstrapped: string[] } {
+/** Project config owns isolation/storage policy; model choices inherit global foundry_* roles unless explicitly overridden. */
+export function ensureProjectFoundryConfig(cwd: string): { created: boolean; path: string } {
 	const path = join(cwd, ".omp", "config.yml");
 	mkdirSync(dirname(path), { recursive: true });
 	const created = !existsSync(path);
 	let text = created ? "task:\n  isolation:\n    mode: auto\n    apply: false\n" : readFileSync(path, "utf8");
 	text = ensureTopLevelScalar(text, "modelRoleStorage", "project");
-	const defaults = fallbackRoleMap(cwd);
-	text = ensureModelRoles(text, defaults);
 	writeFileSync(path, text, "utf8");
-	return { created, path, rolesBootstrapped: FOUNDRY_MODEL_ROLES.filter((role) => Boolean(defaults[role])) };
+	return { created, path };
 }
 
 export function userConfigPath(): string {
 	return join(homedir(), ".omp", "agent", "config.yml");
 }
 
-function missingRoleKeys(text: string): string[] {
-	if (!text.trim()) return [...FOUNDRY_MODEL_ROLES];
-	const block = topLevelBlock(text, "modelRoles");
+function roleKeys(text: string): Set<string> {
 	const present = new Set<string>();
+	const block = topLevelBlock(text, "modelRoles");
 	if (block) {
-		for (let i = block.start + 1; i < block.end; i++) {
-			const match = block.lines[i].match(/^\s{2}([A-Za-z0-9_.-]+):/);
+		for (let i = block.start + 1; i < block.end; i += 1) {
+			const match = block.lines[i].match(/^\s{2}([A-Za-z0-9_.-]+):\s*(\S.+)$/);
 			if (match) present.add(match[1]);
 		}
 	}
+	return present;
+}
+
+function missingRoleKeys(text: string): string[] {
+	const present = roleKeys(text);
 	return FOUNDRY_MODEL_ROLES.filter((role) => !present.has(role));
 }
 
-/**
- * Register the foundry_* roles at user level so they show up in /models
- * everywhere as soon as the plugin runs. Only missing keys are inserted,
- * as @aliases that follow the user's own roles; nothing existing is ever
- * modified or removed. This is the plugin's one deliberate global write.
- */
+/** Register global Foundry role defaults once; existing user choices are never overwritten. */
 export function ensureGlobalFoundryRoles(options: { path?: string; roles?: Record<string, string> } = {}): {
 	path: string;
 	added: string[];
@@ -176,21 +163,13 @@ export function ensureGlobalFoundryRoles(options: { path?: string; roles?: Recor
 	const path = options.path ?? userConfigPath();
 	const before = existsSync(path) ? readFileSync(path, "utf8") : "";
 	const added = missingRoleKeys(before);
-	if (added.length === 0) {
-		return { path, added: [], values: {} };
-	}
+	if (added.length === 0) return { path, added: [], values: {} };
 	const aliases = aliasRoleMap(options.roles ?? effectiveRoles(process.cwd()));
 	for (const role of FOUNDRY_MODEL_ROLES) if (!aliases[role]) aliases[role] = "@default";
 	mkdirSync(dirname(path), { recursive: true });
-	let text = before;
-	text = ensureModelRoles(text, aliases);
+	const text = ensureModelRoles(before, aliases);
 	writeFileSync(path, text, "utf8");
 	return { path, added, values: aliases };
-}
-
-export function ensureProjectIsolationConfig(cwd: string): { created: boolean; path: string } {
-	const result = ensureProjectFoundryConfig(cwd);
-	return { created: result.created, path: result.path };
 }
 
 export function checkFoundryProjectRoles(
@@ -198,28 +177,23 @@ export function checkFoundryProjectRoles(
 	userConfig: string = userConfigPath(),
 ): { ok: boolean; missing: string[]; storageProject: boolean; reason?: string } {
 	try {
-		const path = join(cwd, ".omp", "config.yml");
-		const text = readFileSync(path, "utf8");
-		const storageProject = /^modelRoleStorage:\s*project\s*$/m.test(text);
-		const block = topLevelBlock(text, "modelRoles");
-		const present = new Set<string>();
-		if (block) for (let i = block.start + 1; i < block.end; i++) {
-			const match = block.lines[i].match(/^\s{2}([A-Za-z0-9_.-]+):\s*(\S.+)$/);
-			if (match) present.add(match[1]);
-		}
-		// Roles registered at user level by ensureGlobalFoundryRoles count too:
-		// project scope only needs to override them, not duplicate them.
-		for (const role of missingRoleKeys(text)) {
-			try {
-				const globalText = readFileSync(userConfig, "utf8");
-				const globalBlock = topLevelBlock(globalText, "modelRoles");
-				if (globalBlock && new RegExp(`^\\s{2}${role}:\\s*\\S`, "m").test(globalBlock.lines.join("\n"))) present.add(role);
-			} catch {
-				break;
-			}
+		const projectPath = join(cwd, ".omp", "config.yml");
+		const projectText = readFileSync(projectPath, "utf8");
+		const storageProject = /^modelRoleStorage:\s*project\s*$/m.test(projectText);
+		const present = roleKeys(projectText);
+		try {
+			const globalText = readFileSync(userConfig, "utf8");
+			for (const role of roleKeys(globalText)) present.add(role);
+		} catch {
+			/* missing user config is handled by the missing-role result */
 		}
 		const missing = FOUNDRY_MODEL_ROLES.filter((role) => !present.has(role));
-		return { ok: storageProject && missing.length === 0, missing, storageProject, reason: storageProject && missing.length === 0 ? undefined : `FOUNDRY_MODEL_ROLES_REQUIRED: roles missing=${missing.join(",") || "none"} modelRoleStorage=${storageProject ? "project" : "not-project"}. Open /model Roles inside this project.` };
+		return {
+			ok: storageProject && missing.length === 0,
+			missing,
+			storageProject,
+			reason: storageProject && missing.length === 0 ? undefined : `FOUNDRY_MODEL_ROLES_REQUIRED: roles missing=${missing.join(",") || "none"} modelRoleStorage=${storageProject ? "project" : "not-project"}. Configure modelRoles in ~/.omp/agent/config.yml or this project's .omp/config.yml.`,
+		};
 	} catch (error) {
 		return { ok: false, missing: [...FOUNDRY_MODEL_ROLES], storageProject: false, reason: `FOUNDRY_PROJECT_CONFIG_ERROR: ${error instanceof Error ? error.message : String(error)}` };
 	}
