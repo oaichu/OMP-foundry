@@ -340,7 +340,7 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 	} });
 	pi.registerCommand("foundry-version", { description: "Show Foundry/OMP versions and latest stable tag", handler: async (_args, ctx) => { const result = await checkForUpdate({ force: true }); if (result.notify) ctx.ui.notify(result.notify, "info"); orchestrate(pi, "Foundry version", versionReport(result)); } });
 
-	const plan3Handler = async (args: string, ctx: { cwd: string; ui: { notify: (message: string, level?: string) => void } }) => {
+	const plan3Handler = async (args: string, ctx: { cwd: string; ui: { notify: (message: string, level?: "error" | "info" | "warning") => void } }) => {
 		const state = loadState(ctx.cwd), missing = requireProduct(state);
 		if (missing) { ctx.ui.notify(missing, "warning"); return; }
 		const sub = args.trim().toLowerCase();
