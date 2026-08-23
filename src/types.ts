@@ -16,8 +16,8 @@ export type TicketStatus = "ready" | "active" | "completed" | "blocked";
 export type ReviewVerdict = "none" | "APPROVE" | "REQUEST_CHANGES" | "BLOCK";
 export type ConflictKind = "none" | "PLAN_CONFLICT" | "DESIGN_CONFLICT" | "DEPENDENCY_CONFLICT" | "SCOPE_INSUFFICIENT";
 
-export const CURRENT_STATE_SCHEMA = 3;
-export const FOUNDRY_VERSION = "0.6.1";
+export const CURRENT_STATE_SCHEMA = 4;
+export const FOUNDRY_VERSION = "0.6.2";
 
 export class StateError extends Error {
 	constructor(message: string) { super(message); this.name = "StateError"; }
@@ -50,7 +50,6 @@ export interface CompanyState {
 	aatp: { total: number; ready: number; active: number; completed: number; blocked: number; manifest_sha256: string };
 	qa: { status: QaStatus; tree_sha: string };
 	release: { ready: boolean; tree_sha: string };
-	unlock_token: string;
 	conflict: { kind: ConflictKind; reason: string };
 }
 
@@ -79,7 +78,6 @@ export function defaultState(): CompanyState {
 		aatp: { total: 0, ready: 0, active: 0, completed: 0, blocked: 0, manifest_sha256: "" },
 		qa: { status: "pending", tree_sha: "" },
 		release: { ready: false, tree_sha: "" },
-		unlock_token: "",
 		conflict: { kind: "none", reason: "" },
 	};
 }
