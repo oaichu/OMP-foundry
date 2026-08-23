@@ -170,6 +170,8 @@ docs/reports/QA.md              real command output
 
 When the plugin first runs, it registers its **ten `foundry_*` model roles at user level** — they appear in `/models → Roles` everywhere, ready to assign. Each is written as a **cross-role alias** (`foundry_redteam: "@slow"`), so it keeps following your OMP roles when you reassign them; give one a specific model (`provider/model:level`) to pin a stage. Only missing keys are ever inserted — values you set yourself are never modified or removed. Per-project, `/foundry-init` additionally sets `modelRoleStorage: project` so `/models` edits inside a governed repo stay local (`roles.example.yml` is a manual skeleton if you want full control).
 
+Configure nothing at all and Foundry still runs: unset roles fall back through OMP's own chain down to your session's active model — a one-model foundry that keeps every gate, just without model diversity. One caveat: the user-level roles are registered in your **default** profile; a session started with `--profile` won't see them and runs in that same single-model fallback until you assign its roles.
+
 | Foundry role | Maps onto | Typical OMP role |
 | --- | --- | --- |
 | Floor lead | existing | `@default` |
