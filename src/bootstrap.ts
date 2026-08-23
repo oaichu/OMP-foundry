@@ -1,15 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { ensureProjectFoundryConfig, narrowFoundryGitignore } from "./omp-runtime";
+import { safeRepoPath } from "./paths";
 import { detectStack } from "./stack-detector";
 import { loadState, saveState, stateFileExists } from "./state-machine";
 import { type CompanyState, defaultState } from "./types";
 
 const MARKER = "docs/.foundry-governed";
-const TEMPLATES = ["PRODUCT.md", "MASTER_PLAN.md", "DESIGN.md", "SECURITY.md", "ARCHITECTURE.md", "AATP.md", "RELEASE_REPORT.md"] as const;
+const TEMPLATES = ["PRODUCT.md", "MASTER_PLAN.md", "DESIGN.md"] as const;
 
 function copyTemplate(cwd: string, root: string, name: string): void {
-	const dest = join(cwd, "docs", name);
+	const dest = safeRepoPath(cwd, `docs/${name}`);
+	if (!dest) throw new Error(`PATH_GATE: refusing template path docs/${name} through a symlink or outside the repository.`);
 	if (existsSync(dest)) return;
 	mkdirSync(dirname(dest), { recursive: true });
 	const src = join(root, "templates", name);
@@ -26,11 +28,15 @@ export interface BootstrapResult {
 
 /** Opt a repository into Foundry without overwriting global model choices. */
 export function bootstrapFoundryProject(cwd: string, root: string): BootstrapResult {
-	mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
-	mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
-	mkdirSync(join(cwd, "docs", "reports"), { recursive: true });
+	for (const rel of ["docs/planning", "docs/AATP", "docs/reports"]) {
+		const dir = safeRepoPath(cwd, rel);
+		if (!dir) throw new Error(`PATH_GATE: refusing bootstrap directory ${rel} through a symlink or outside the repository.`);
+		mkdirSync(dir, { recursive: true });
+	}
 	for (const name of TEMPLATES) copyTemplate(cwd, root, name);
-	if (!existsSync(join(cwd, MARKER))) writeFileSync(join(cwd, MARKER), "OMP Foundry governed repository.\n", "utf8");
+	const marker = safeRepoPath(cwd, MARKER);
+	if (!marker) throw new Error(`PATH_GATE: refusing governance marker ${MARKER} through a symlink or outside the repository.`);
+	if (!existsSync(marker)) writeFileSync(marker, "OMP Foundry governed repository.\n", "utf8");
 
 	narrowFoundryGitignore(cwd);
 	const config = ensureProjectFoundryConfig(cwd);

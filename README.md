@@ -33,7 +33,7 @@
 
 Every AI coding “company” is a long system prompt. The model *remembers* not to rewrite the plan, not to touch the locked design, not to push before QA. Then, at 2 a.m., on a 40-file refactor, it doesn’t — and it *helpfully* rewrites your architecture.
 
-Foundry makes that impossible, not unlikely. Not a polite request in a prompt — a `tool_call` deny enforced at the OMP extension boundary, by a state machine the model cannot edit:
+Foundry moves that risk out of the prompt and into a `tool_call` deny enforced at the OMP extension boundary, backed by a state machine and patch gate the model cannot edit:
 
 <p align="center">
   <img src="docs/assets/terminal.svg" width="100%" alt="Foundry refusing agent overreach in real time"/>
@@ -70,6 +70,8 @@ derived release gate → you ship from a human shell
 | Transition its own ticket lifecycle | `LIFECYCLE_GATE: AATP lifecycle is parent-extension-owned.` |
 | Self-approve its work | review requires a completed ticket, an **independent** reviewer identity, and matching hashed evidence |
 | `git push` / `npm publish` / deploy / Docker push / `gh release` | `RELEASE_GATE: agent push/publish/deploy is always denied.` |
+| Use a symlink, URI, Windows alias, or unknown LSP action to cross the repo boundary | fail-closed `PATH_GATE` / `LSP_GATE` |
+| Add a helper/unknown agent to a governed task batch | `TASK_GATE`: only declared Foundry agents and exact AATP bindings are accepted |
 
 Invalid worker patches are never applied; rollback is patch-specific — Foundry never uses `git reset --hard` or `git clean -fd` on your tree.
 
@@ -127,7 +129,7 @@ It resumes the exact persisted workflow stage. You intervene at the human gates 
 | `/foundry-approve product\|plan` | Human gates |
 | `/plan3` · `/plan-revise` | Draft → red-team → synthesis · human-only reopen (invalidates downstream AATP/review/QA) |
 | `/design` · `/design approve\|skip` | Design foundation + preview · human gate |
-| `/aatp` · `/build` | Generate/validate DAG · seal manifest, run ready layer |
+| `/aatp` · `/build` | Route the locked project to `aatp-compiler` (`@foundry_synth`), validate/seal the DAG, then run the ready layer |
 | `/review AATP-xxx` | Independent review |
 | `/verify` | Deterministic project verification |
 | `/release-check` | Derive release readiness from current evidence |
@@ -135,7 +137,7 @@ It resumes the exact persisted workflow stage. You intervene at the human gates 
 
 ## How a work order runs
 
-Each `docs/AATP/AATP-*.md` is an immutable work order once `/build` seals the manifest — explicit `allowed_files`, valid dependencies, and a risk class. Dependency references must exist and the graph must be acyclic. **Risk is the routing authority**: low/trivial → `smol-implementer`, normal → `implementer`, hard/difficult/critical → `hard-implementer`. There is no separate model-written `recommended_agent` override.
+After the human locks the plan (and approves or skips design when applicable), Foundry automatically routes one blocking `aatp-compiler` agent through the existing `@foundry_synth` capability. It decomposes the **whole locked project** into AATP work orders; it does not implement code and cannot rewrite the locked plan/design. A recompile archives the previous generated DAG under `docs/AATP/archive/`, then Foundry validates and seals the new manifest before any worker can start. Each active `docs/AATP/AATP-*.md` is immutable once sealed — explicit `allowed_files`, forbidden governance paths, acceptance/verification evidence, valid dependencies, and a risk class. Dependency references must exist and the graph must be acyclic. **Risk is the routing authority**: low/trivial → `smol-implementer`, normal → `implementer`, hard/difficult/critical → `hard-implementer`. There is no separate AATP model role and no model-written `recommended_agent` override.
 
 For every ready item:
 
@@ -149,6 +151,12 @@ For every ready item:
 8. Release derivation demands every ticket completed, independently approved, QA-passed on current clean committed HEAD.
 
 Before the first implementation layer, the source tree must be clean (governance-only setup may be committed as the implementation baseline).
+
+### Capability writers and cheap-first execution
+
+`foundry_synth` is the single reasoning capability used by Plan3 synthesis and the post-lock `aatp-compiler`; there is **no separate AATP model role**. The compiler and Plan3 stage agents receive short-lived in-memory capabilities and write through `foundry_aatp_write` / `foundry_plan_write`. Native writes to unsealed governance artifacts are denied, so another task cannot impersonate the compiler by merely knowing its agent name.
+
+Normal implementation remains cheap-first: risk routes work to `smol-implementer`, `implementer`, or `hard-implementer`; deterministic checks run before review; review/security roles are selected by ticket risk. Model names stay in OMP `modelRoles`, not in Foundry's policy.
 
 ## Release integrity
 
@@ -165,6 +173,9 @@ Even green, agent release commands stay denied. **You ship from a human shell** 
 - **Repo intelligence** — one `RepoFacts` detector drives skill routing, QA and design classification (no detector drift): Web, SaaS, Android, .NET, Cloudflare, Python, Go, Rust… Skills are filtered by phase **and role**; only metadata is injected, bodies load on demand via `foundry_skill_read`.
 - **Dead-code guard** — CI runs TypeScript with `noUnusedLocals` and `noUnusedParameters`, in addition to runtime tests and syntax smoke.
 - **OMP compatibility** — CI checks the current `can1357/oh-my-pi` isolation/patch/LSP contracts; upstream contract drift fails CI instead of shipping against an imagined API.
+- **Verification safety** — detected checks are structured argv (`shell=false`), bounded by step/total time and output limits, use `npx --no-install`, and resolve executables outside the repository. Foundry records the HEAD before and after verification and refuses QA when it moves.
+- **Filesystem and patch safety** — repository paths reject traversal, URI schemes, symlink components, Windows reserved/short-name aliases, and POSIX backslash ambiguity. Patch bytes are compared before apply, rolled back exactly on rejection, and hashed again before staging/commit.
+- **Resource bounds** — state/config/skills/locked-plan/AATP readers cap bytes, entries, dependency depth, and verification steps; malformed inline lists, mismatched AATP filenames, unknown risk classes, oversized task results, and oversized patch artifacts fail closed before expensive work. The only helper exception is `scout`, and it is limited to draft-stage evidence gathering.
 
 ### What Foundry writes
 
@@ -210,7 +221,7 @@ A non-default OMP `--profile` has its own configuration context; configure the F
 | `foundry_product` | `@default` / product analysis |
 | `foundry_plan` | `@plan` / architecture draft |
 | `foundry_redteam` | `@slow` / adversarial plan attack |
-| `foundry_synth` | `@slow`/`@advisor` / adjudication |
+| `foundry_synth` | `@slow`/`@advisor` / Plan3 adjudication + project-wide AATP compilation |
 | `foundry_design` | `@designer` / design foundation |
 | `foundry_impl` | `@task` / normal implementation |
 | `foundry_hard` | `@slow` / difficult implementation |
@@ -220,7 +231,21 @@ A non-default OMP `--profile` has its own configuration context; configure the F
 
 ### Security boundary — honest scoping
 
-Foundry reduces agent authority at the **OMP tool and patch-application boundaries**. It does not defend against a hostile OS, a malicious Git binary, a compromised OMP runtime, or already-malicious build/test scripts — those need an OS/container/VM sandbox and normal supply-chain controls.
+Foundry reduces agent authority at the **OMP tool, capability-writer, and patch-application boundaries**. It sanitizes ambient Git redirectors for its own operations, but it does not defend against a hostile OS, a compromised OMP runtime, or already-malicious build/test scripts/dependencies. Verification intentionally executes project-defined checks; use an OS/container/VM sandbox and normal supply-chain controls for untrusted repositories.
+
+## Final local checks
+
+Run these before publishing a change:
+
+```bash
+bun run typecheck
+bun test
+bun -e "new Bun.Transpiler({loader:'ts'}).transformSync(await Bun.file('src/index.ts').text())"
+git diff --check
+bun run check:omp-contract -- <path-to-oh-my-pi-checkout>
+```
+
+The contract smoke test needs a checkout of the matching Oh My Pi source tree; it is expected to report a missing-path error when that checkout is not present.
 
 ---
 

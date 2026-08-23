@@ -82,8 +82,11 @@ export function defaultState(): CompanyState {
 	};
 }
 
-export const LOCKED_PLAN_PATHS = ["docs/master_plan.md", "docs/planning/master_plan_draft.md", "docs/planning/plan_review.md"];
-export const LOCKED_PRODUCT_PATHS = ["docs/product.md"];
-export const LOCKED_DESIGN_PATHS = ["docs/design.md", "src/design-system/", "src/designsystem/"];
-export const LOCKED_AATP_PATHS = ["docs/aatp/"];
+// These spellings match the generated repository artifacts.  Authorization
+// compares governance paths case-insensitively so older/lower-case aliases
+// remain locked on case-sensitive filesystems too.
+export const LOCKED_PLAN_PATHS = ["docs/MASTER_PLAN.md", "docs/planning/MASTER_PLAN_DRAFT.md", "docs/planning/PLAN_REVIEW.md"];
+export const LOCKED_PRODUCT_PATHS = ["docs/PRODUCT.md"];
+export const LOCKED_DESIGN_PATHS = ["docs/DESIGN.md", "src/design-system/", "src/designsystem/"];
+export const LOCKED_AATP_PATHS = ["docs/AATP/"];
 export const STATE_PATHS = [".omp/foundry-state.yml", ".omp/foundry-state.yaml", ".omp/company-state.yml", ".omp/company-state.yaml"];

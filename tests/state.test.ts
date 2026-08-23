@@ -16,6 +16,9 @@ describe("state", () => {
 	test("rejects empty", () => {
 		expect(() => parseState("")).toThrow(StateError);
 	});
+	test("rejects oversized state input before parsing", () => {
+		expect(() => parseState("x".repeat(1024 * 1024 + 1))).toThrow(StateError);
+	});
 });
 
 describe("loadStateResult fail-closed", () => {

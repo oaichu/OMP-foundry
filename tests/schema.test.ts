@@ -25,4 +25,8 @@ describe("state schema migration", () => {
 		const again = parseState(serializeState(state)); expect(again.aatp.manifest_sha256).toBe("manifest"); expect(again.tickets["AATP-1"]?.review_by).toBe("reviewer"); expect(again.tickets["AATP-1"]?.review_evidence_sha256).toBe("review");
 	});
 	test("newer schema and corrupt state fail closed", () => { const newer = serializeState(defaultState()).replace(`schema_version: ${CURRENT_STATE_SCHEMA}`, "schema_version: 99"); expect(() => migrateToCurrent(newer)).toThrow(SchemaTooNewError); expect(() => detectSchemaVersion("")).toThrow(StateError); const dir = tmpProject(), file = join(dir, ".omp", "foundry-state.yml"); writeFileSync(file, "phase: nope\n"); expect(loadStateResult(dir).ok).toBe(false); });
+	test("unknown ticket risk fails closed instead of downgrading routing", () => {
+		const state = serializeState(defaultState()).replace("tickets: {}", "tickets:\n  AATP-1:\n    status: ready\n    allowed_files: [\"src/a\"]\n    forbidden_files: []\n    risk: mystery\n    review: none");
+		expect(() => parseState(state)).toThrow("invalid tickets.AATP-1.risk");
+	});
 });

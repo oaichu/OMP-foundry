@@ -1,7 +1,8 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { safeRepoPath } from "../paths";
 
-export interface VerifyStep { id: string; command: string; cwd?: string; }
+export interface VerifyStep { id: string; command: string; executable: string; args: string[]; cwd?: string; }
 export interface RepoFacts {
 	languages: string[];
 	frameworks: string[];
@@ -12,25 +13,60 @@ export interface RepoFacts {
 	verify: VerifyStep[];
 }
 
-function readText(file: string): string { try { return readFileSync(file, "utf8"); } catch { return ""; } }
-function readJson(cwd: string, name: string): Record<string, unknown> | null { try { return JSON.parse(readFileSync(join(cwd, name), "utf8")) as Record<string, unknown>; } catch { return null; } }
-function present(cwd: string, names: string[]): string[] { return names.filter((name) => existsSync(join(cwd, name))); }
+const MAX_DETECT_FILE_BYTES = 512 * 1024;
+const MAX_DIR_ENTRIES = 2048;
+
+function readText(file: string): string {
+	try {
+		const stat = lstatSync(file);
+		if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_DETECT_FILE_BYTES) return "";
+		return readFileSync(file, "utf8");
+	} catch { return ""; }
+}
+function repoText(cwd: string, rel: string): string {
+	const path = safeRepoPath(cwd, rel);
+	return path ? readText(path) : "";
+}
+function regularFile(cwd: string, rel: string): boolean {
+	const path = safeRepoPath(cwd, rel);
+	if (!path) return false;
+	try { const stat = lstatSync(path); return stat.isFile() && !stat.isSymbolicLink(); } catch { return false; }
+}
+function readJson(cwd: string, name: string): Record<string, unknown> | null { const path = safeRepoPath(cwd, name); if (!path) return null; try { return JSON.parse(readText(path)) as Record<string, unknown>; } catch { return null; } }
+function present(cwd: string, names: string[]): string[] { return names.filter((name) => regularFile(cwd, name)); }
 function pkgDeps(cwd: string): string[] {
 	const pkg = readJson(cwd, "package.json");
 	return [...Object.keys((pkg?.dependencies as Record<string, string> | undefined) ?? {}), ...Object.keys((pkg?.devDependencies as Record<string, string> | undefined) ?? {})];
 }
-function rootEntries(cwd: string): string[] { try { return readdirSync(cwd); } catch { return []; } }
+function rootEntries(cwd: string): string[] {
+	const root = safeRepoPath(cwd, ".");
+	if (!root) return [];
+	try {
+		const stat = lstatSync(root);
+		return stat.isDirectory() && !stat.isSymbolicLink() ? readdirSync(root).slice(0, MAX_DIR_ENTRIES) : [];
+	} catch { return []; }
+}
 function projectFiles(cwd: string, suffix: string): string[] {
 	const out: string[] = [];
-	for (const dir of [cwd, join(cwd, "src"), join(cwd, "app")]) {
-		try { for (const name of readdirSync(dir)) if (name.toLowerCase().endsWith(suffix)) out.push(join(dir, name)); } catch { /* absent */ }
+	for (const rel of [".", "src", "app"]) {
+		const dir = safeRepoPath(cwd, rel);
+		if (!dir) continue;
+		try {
+			const stat = lstatSync(dir);
+			if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+			for (const name of readdirSync(dir).slice(0, MAX_DIR_ENTRIES)) {
+				const child = join(dir, name);
+				const childStat = lstatSync(child);
+				if (name.toLowerCase().endsWith(suffix) && childStat.isFile() && !childStat.isSymbolicLink()) out.push(child);
+			}
+		} catch { /* absent or unreadable */ }
 	}
 	return [...new Set(out)];
 }
 function looksAndroid(cwd: string): boolean {
-	if (existsSync(join(cwd, "app", "src", "main", "AndroidManifest.xml"))) return true;
+	if (regularFile(cwd, "app/src/main/AndroidManifest.xml")) return true;
 	for (const name of ["settings.gradle", "settings.gradle.kts", "build.gradle", "build.gradle.kts", "app/build.gradle", "app/build.gradle.kts"]) {
-		if (/com\.android\.(application|library)/.test(readText(join(cwd, name)))) return true;
+		if (/com\.android\.(application|library)/.test(repoText(cwd, name))) return true;
 	}
 	return false;
 }
@@ -47,8 +83,8 @@ export function detectRepo(cwd: string): RepoFacts {
 	const csproj = projectFiles(cwd, ".csproj"), sln = rootEntries(cwd).filter((e) => e.toLowerCase().endsWith(".sln"));
 	if (csproj.length) files.push("*.csproj");
 	if (sln.length) files.push("*.sln");
-	const pyText = `${readText(join(cwd, "requirements.txt"))}\n${readText(join(cwd, "pyproject.toml"))}`.toLowerCase();
-	const goText = readText(join(cwd, "go.mod")).toLowerCase(), cargoText = readText(join(cwd, "Cargo.toml")).toLowerCase();
+	const pyText = `${repoText(cwd, "requirements.txt")}\n${repoText(cwd, "pyproject.toml")}`.toLowerCase();
+	const goText = repoText(cwd, "go.mod").toLowerCase(), cargoText = repoText(cwd, "Cargo.toml").toLowerCase();
 	const android = looksAndroid(cwd), windows = csproj.length > 0 || sln.length > 0, windowsUi = windows && looksWindowsUi(cwd, csproj);
 
 	const languages: string[] = [];
@@ -85,22 +121,26 @@ export function detectRepo(cwd: string): RepoFacts {
 	if (files.includes("Cargo.toml") && !stacks.includes("backend")) stacks.push("systems");
 
 	const verify: VerifyStep[] = [], seen = new Set<string>();
-	const add = (id: string, command: string, stepCwd?: string) => { const key = `${id}:${command}`; if (!seen.has(key)) { seen.add(key); verify.push({ id, command, ...(stepCwd ? { cwd: stepCwd } : {}) }); } };
+	const display = (executable: string, args: string[]) => [executable, ...args].map((part) => /\s/.test(part) ? JSON.stringify(part) : part).join(" ");
+	const add = (id: string, executable: string, args: string[] = [], stepCwd?: string) => {
+		const command = display(executable, args), key = `${id}:${command}`;
+		if (!seen.has(key)) { seen.add(key); verify.push({ id, command, executable, args, ...(stepCwd ? { cwd: stepCwd } : {}) }); }
+	};
 	const pkg = readJson(cwd, "package.json");
 	if (pkg) {
 		const scripts = (pkg.scripts as Record<string, string> | undefined) ?? {};
-		if (existsSync(join(cwd, "biome.json")) || existsSync(join(cwd, "biome.jsonc"))) add("lint", "npx --yes biome check .");
-		if (files.includes("tsconfig.json")) add("typecheck", "npx --yes tsc --noEmit");
-		if (scripts.test) add("unit", "npm test --silent");
-		if (scripts.build) add("build", "npm run build");
+		if (regularFile(cwd, "biome.json") || regularFile(cwd, "biome.jsonc")) add("lint", "npx", ["--no-install", "biome", "check", "."]);
+		if (files.includes("tsconfig.json")) add("typecheck", "npx", ["--no-install", "tsc", "--noEmit"]);
+		if (scripts.test) add("unit", "npm", ["test", "--silent"]);
+		if (scripts.build) add("build", "npm", ["run", "build"]);
 	}
 	if (android) {
-		const gradlew = existsSync(join(cwd, "gradlew.bat")) ? "gradlew.bat" : existsSync(join(cwd, "gradlew")) ? "./gradlew" : "";
-		if (gradlew) { add("android-lint", `${gradlew} lint`); add("android-unit", `${gradlew} test`); add("android-build", `${gradlew} assembleDebug`); }
+		const gradlew = regularFile(cwd, "gradlew.bat") ? "gradlew.bat" : regularFile(cwd, "gradlew") ? "./gradlew" : "";
+		if (gradlew) { add("android-lint", gradlew, ["lint"]); add("android-unit", gradlew, ["test"]); add("android-build", gradlew, ["assembleDebug"]); }
 	}
-	if (files.includes("go.mod") || files.includes("go.work")) { add("go-vet", "go vet ./..."); add("go-test", "go test ./..."); }
-	if (languages.includes("python")) { if (/\bruff\b/.test(pyText)) add("python-lint", "python -m ruff check ."); if (/\bmypy\b/.test(pyText)) add("python-typecheck", "python -m mypy ."); add("python-test", "python -m pytest -q"); }
-	if (files.includes("Cargo.toml")) { add("rust-fmt", "cargo fmt --check"); add("rust-clippy", "cargo clippy --all-targets --all-features -- -D warnings"); add("rust-test", "cargo test"); }
-	if (windows) { add("dotnet-test", "dotnet test --nologo"); add("dotnet-build", "dotnet build --nologo"); }
+	if (files.includes("go.mod") || files.includes("go.work")) { add("go-vet", "go", ["vet", "./..."]); add("go-test", "go", ["test", "./..."]); }
+	if (languages.includes("python")) { if (/\bruff\b/.test(pyText)) add("python-lint", "python", ["-m", "ruff", "check", "."]); if (/\bmypy\b/.test(pyText)) add("python-typecheck", "python", ["-m", "mypy", "."]); add("python-test", "python", ["-m", "pytest", "-q"]); }
+	if (files.includes("Cargo.toml")) { add("rust-fmt", "cargo", ["fmt", "--check"]); add("rust-clippy", "cargo", ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]); add("rust-test", "cargo", ["test"]); }
+	if (windows) { add("dotnet-test", "dotnet", ["test", "--nologo"]); add("dotnet-build", "dotnet", ["build", "--nologo"]); }
 	return { languages, frameworks, stacks: [...new Set(stacks)], dependencies, files: [...new Set(files)], ui: stacks.includes("web") || android || windowsUi, verify };
 }

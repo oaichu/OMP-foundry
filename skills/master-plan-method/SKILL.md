@@ -51,3 +51,9 @@ The synthesis stage is a judge, not an editor. For each blocker or major red-tea
 4. never silently average incompatible recommendations.
 
 The final master plan must be internally consistent and executable without requiring implementation agents to reinterpret architecture. Any unresolved architectural conflict remains explicit for human resolution.
+
+## AATP compilation rubric
+
+After the human locks the plan (and the design when the repository has a UI), the `aatp-compiler` uses the same synthesis/judge capability to compile the authoritative architecture into `docs/AATP/AATP-*.md`. This is a separate authority boundary from `plan-synth`: the compiler may write only AATP artifacts and may not rewrite `MASTER_PLAN` or `DESIGN`.
+
+Each work order must be the smallest independently reviewable unit with a meaningful test cycle. Include exact files, consumed/produced interfaces, explicit dependencies, risk, acceptance criteria, and deterministic verification. Cover every implementation concern in the locked plan/design, batch only genuinely mechanical changes with one review surface, and reject placeholders such as TODO/TBD. Foundry validates uniqueness, scope, dependency existence, acyclicity, and manifest integrity before sealing the DAG.

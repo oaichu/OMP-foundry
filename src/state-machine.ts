@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import {
 	type AatpTicket,
@@ -19,16 +20,32 @@ import {
 	defaultState,
 } from "./types";
 import { backupOnce, migrateToCurrent } from "./schema";
+import { safeRepoPath } from "./paths";
 
 export { StateError };
+
+const MAX_STATE_BYTES = 1024 * 1024;
+const MAX_TICKETS = 256;
+const MAX_LIST_ITEMS = 256;
+const MAX_FIELD_BYTES = 16 * 1024;
+const TICKET_RISKS = new Set(["trivial", "low", "normal", "difficult", "hard", "critical"]);
 
 function pick(block: string, key: string): string | undefined {
 	const match = block.match(new RegExp(`(?:^|\\n)\\s*${key}:\\s*(.*)`));
 	if (!match) return undefined;
-	return match[1].trim().replace(/^["']|["']$/g, "");
+	const raw = match[1].trim();
+	if (raw.startsWith('"') && raw.endsWith('"')) {
+		try {
+			const parsed = JSON.parse(raw) as unknown;
+			if (typeof parsed !== "string") throw new Error("not a string");
+			return parsed;
+		} catch { throw new StateError(`invalid quoted state field ${key}`); }
+	}
+	return raw.replace(/^['"]|['"]$/g, "");
 }
 function pickBlock(yaml: string, name: string): string {
-	const match = yaml.match(new RegExp(`(?:^|\\n)${name}:\\n([\\s\\S]*?)(?=\\n[a-z_]+:|$)`));
+	const normalized = yaml.replace(/\r\n/g, "\n");
+	const match = normalized.match(new RegExp(`(?:^|\\n)${name}:\\n([\\s\\S]*?)(?=\\n[a-z_]+:|$)`));
 	return match?.[1] ?? "";
 }
 function mustEnum<T extends string>(value: string | undefined, allowed: readonly T[], field: string): T {
@@ -37,35 +54,61 @@ function mustEnum<T extends string>(value: string | undefined, allowed: readonly
 }
 function csv(value: string | undefined): string[] {
 	if (!value || value === "[]") return [];
-	return value.split(",").map((part) => part.trim()).filter(Boolean);
+	if (value.length > MAX_FIELD_BYTES) throw new StateError("state list field exceeds the size limit");
+	if (value.trim().startsWith("[")) {
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			if (Array.isArray(parsed) && parsed.length <= MAX_LIST_ITEMS && parsed.every((item) => typeof item === "string" && item.length <= MAX_FIELD_BYTES)) return parsed as string[];
+			if (Array.isArray(parsed)) throw new StateError("state list exceeds the item/field limit");
+		} catch {
+			throw new StateError("invalid list encoding");
+		}
+	}
+	const items = value.split(",").map((part) => part.trim()).filter(Boolean);
+	if (items.length > MAX_LIST_ITEMS || items.some((item) => item.length > MAX_FIELD_BYTES)) throw new StateError("state list exceeds the item/field limit");
+	return items;
 }
 function parseTickets(yaml: string): Record<string, AatpTicket> {
 	const block = pickBlock(yaml, "tickets");
 	if (!block.trim() || block.trim() === "{}") return {};
 	const tickets: Record<string, AatpTicket> = {};
 	const chunks = block.split(/\n(?=\s{2}[A-Za-z0-9_-]+:)/);
+	if (chunks.length > MAX_TICKETS) throw new StateError(`state contains more than ${MAX_TICKETS} tickets`);
 	for (const chunk of chunks) {
 		const idMatch = chunk.match(/^\s{2}([A-Za-z0-9_-]+):/);
 		if (!idMatch) continue;
 		const id = idMatch[1];
+		if (tickets[id]) throw new StateError(`duplicate tickets.${id}`);
+		const allowedFiles = csv(pick(chunk, "allowed_files"));
+		const forbiddenFiles = csv(pick(chunk, "forbidden_files"));
+		if ([...allowedFiles, ...forbiddenFiles].some((path) => /[\u0000-\u001f\u007f]/.test(path))) throw new StateError(`invalid control character in tickets.${id} path`);
+		const risk = pick(chunk, "risk") || "normal";
+		if (!TICKET_RISKS.has(risk.toLowerCase())) throw new StateError(`invalid tickets.${id}.risk: ${risk}`);
+		const agent = pick(chunk, "agent") || undefined;
+		const reviewBy = pick(chunk, "review_by") || undefined;
+		const reviewEvidence = pick(chunk, "review_evidence_sha256") || undefined;
+		const implementationEvidence = pick(chunk, "implementation_evidence_sha256") || undefined;
+		for (const value of [agent, reviewBy, reviewEvidence, implementationEvidence]) if (value && value.length > MAX_FIELD_BYTES) throw new StateError(`state field in tickets.${id} exceeds the size limit`);
 		tickets[id] = {
 			id,
 			status: mustEnum(pick(chunk, "status"), TICKET_STATUSES, `tickets.${id}.status`),
-			allowed_files: csv(pick(chunk, "allowed_files")),
-			forbidden_files: csv(pick(chunk, "forbidden_files")),
-			risk: pick(chunk, "risk") || "normal",
-			agent: pick(chunk, "agent") || undefined,
+			allowed_files: allowedFiles,
+			forbidden_files: forbiddenFiles,
+			risk,
+			agent,
 			review: mustEnum(pick(chunk, "review") ?? "none", REVIEW_VERDICTS, `tickets.${id}.review`),
-			review_by: pick(chunk, "review_by") || undefined,
-			review_evidence_sha256: pick(chunk, "review_evidence_sha256") || undefined,
-			implementation_evidence_sha256: pick(chunk, "implementation_evidence_sha256") || undefined,
+			review_by: reviewBy,
+			review_evidence_sha256: reviewEvidence,
+			implementation_evidence_sha256: implementationEvidence,
 		};
 	}
 	return tickets;
 }
 
 export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): CompanyState {
+	if (typeof yaml !== "string" || Buffer.byteLength(yaml, "utf8") > MAX_STATE_BYTES) throw new StateError(`state exceeds the ${MAX_STATE_BYTES}-byte limit`);
 	if (!yaml.trim()) throw new StateError("empty state");
+	yaml = yaml.replace(/\r\n/g, "\n");
 	const base = defaultState();
 	const rawVersion = yaml.match(/(?:^|\n)schema_version:\s*(\S+)/);
 	if (rawVersion) {
@@ -99,7 +142,7 @@ export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): 
 		const raw = pick(aatp, key);
 		if (raw !== undefined && raw !== "") {
 			const n = Number(raw);
-			if (!Number.isSafeInteger(n) || n < 0) throw new StateError(`invalid aatp.${key}`);
+			if (!Number.isSafeInteger(n) || n < 0 || n > MAX_TICKETS) throw new StateError(`invalid aatp.${key}`);
 			base.aatp[key] = n;
 		}
 	}
@@ -110,6 +153,9 @@ export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): 
 	base.release.tree_sha = pick(release, "tree_sha") ?? "";
 	base.conflict.kind = mustEnum(pick(conflict, "kind") ?? "none", CONFLICT_KINDS, "conflict.kind");
 	base.conflict.reason = pick(conflict, "reason") ?? "";
+	for (const value of [base.created_by, base.last_written_by, base.planning.draft_sha256, base.planning.review_sha256, base.planning.final_sha256, base.product.sha256, base.master_plan.sha256, base.design.sha256, base.aatp.manifest_sha256, base.qa.tree_sha, base.release.tree_sha, base.conflict.reason]) {
+		if (value.length > MAX_FIELD_BYTES) throw new StateError("state field exceeds the size limit");
+	}
 	return base;
 }
 
@@ -119,27 +165,28 @@ function serializeTickets(tickets: Record<string, AatpTicket>): string[] {
 	const lines = ["tickets:"];
 	for (const id of ids) {
 		const t = tickets[id];
-		lines.push(`  ${id}:`, `    status: ${t.status}`, `    allowed_files: ${t.allowed_files.join(",")}`, `    forbidden_files: ${t.forbidden_files.join(",")}`, `    risk: ${t.risk}`);
-		if (t.agent) lines.push(`    agent: ${t.agent}`);
+		lines.push(`  ${id}:`, `    status: ${t.status}`, `    allowed_files: ${JSON.stringify(t.allowed_files)}`, `    forbidden_files: ${JSON.stringify(t.forbidden_files)}`, `    risk: ${t.risk}`);
+		if (t.agent) lines.push(`    agent: ${JSON.stringify(t.agent)}`);
 		lines.push(`    review: ${t.review ?? "none"}`);
-		if (t.review_by) lines.push(`    review_by: ${t.review_by}`);
-		if (t.review_evidence_sha256) lines.push(`    review_evidence_sha256: ${t.review_evidence_sha256}`);
-		if (t.implementation_evidence_sha256) lines.push(`    implementation_evidence_sha256: ${t.implementation_evidence_sha256}`);
+		if (t.review_by) lines.push(`    review_by: ${JSON.stringify(t.review_by)}`);
+		if (t.review_evidence_sha256) lines.push(`    review_evidence_sha256: ${JSON.stringify(t.review_evidence_sha256)}`);
+		if (t.implementation_evidence_sha256) lines.push(`    implementation_evidence_sha256: ${JSON.stringify(t.implementation_evidence_sha256)}`);
 	}
 	return lines;
 }
 
 export function serializeState(state: CompanyState): string {
+	if (Object.keys(state.tickets).length > MAX_TICKETS) throw new StateError(`state contains more than ${MAX_TICKETS} tickets`);
 	return [
-		`schema_version: ${state.schema_version}`, `created_by: "${state.created_by}"`, `last_written_by: "${state.last_written_by}"`, `mode: ${state.mode}`, `phase: ${state.phase}`,
-		"planning:", `  stage: ${state.planning.stage}`, `  draft_sha256: "${state.planning.draft_sha256}"`, `  review_sha256: "${state.planning.review_sha256}"`, `  final_sha256: "${state.planning.final_sha256}"`,
-		"product:", `  status: ${state.product.status}`, `  sha256: "${state.product.sha256}"`,
-		"master_plan:", `  version: "${state.master_plan.version}"`, `  status: ${state.master_plan.status}`, `  sha256: "${state.master_plan.sha256}"`,
-		"design:", `  required: ${state.design.required}`, `  version: "${state.design.version}"`, `  status: ${state.design.status}`, `  sha256: "${state.design.sha256}"`,
+		`schema_version: ${state.schema_version}`, `created_by: ${JSON.stringify(state.created_by)}`, `last_written_by: ${JSON.stringify(state.last_written_by)}`, `mode: ${state.mode}`, `phase: ${state.phase}`,
+		"planning:", `  stage: ${state.planning.stage}`, `  draft_sha256: ${JSON.stringify(state.planning.draft_sha256)}`, `  review_sha256: ${JSON.stringify(state.planning.review_sha256)}`, `  final_sha256: ${JSON.stringify(state.planning.final_sha256)}`,
+		"product:", `  status: ${state.product.status}`, `  sha256: ${JSON.stringify(state.product.sha256)}`,
+		"master_plan:", `  version: ${JSON.stringify(state.master_plan.version)}`, `  status: ${state.master_plan.status}`, `  sha256: ${JSON.stringify(state.master_plan.sha256)}`,
+		"design:", `  required: ${state.design.required}`, `  version: ${JSON.stringify(state.design.version)}`, `  status: ${state.design.status}`, `  sha256: ${JSON.stringify(state.design.sha256)}`,
 		...serializeTickets(state.tickets),
-		"aatp:", `  total: ${state.aatp.total}`, `  ready: ${state.aatp.ready}`, `  active: ${state.aatp.active}`, `  completed: ${state.aatp.completed}`, `  blocked: ${state.aatp.blocked}`, `  manifest_sha256: "${state.aatp.manifest_sha256}"`,
-		"qa:", `  status: ${state.qa.status}`, `  tree_sha: "${state.qa.tree_sha}"`,
-		"release:", `  ready: ${state.release.ready}`, `  tree_sha: "${state.release.tree_sha}"`,
+		"aatp:", `  total: ${state.aatp.total}`, `  ready: ${state.aatp.ready}`, `  active: ${state.aatp.active}`, `  completed: ${state.aatp.completed}`, `  blocked: ${state.aatp.blocked}`, `  manifest_sha256: ${JSON.stringify(state.aatp.manifest_sha256)}`,
+		"qa:", `  status: ${state.qa.status}`, `  tree_sha: ${JSON.stringify(state.qa.tree_sha)}`,
+		"release:", `  ready: ${state.release.ready}`, `  tree_sha: ${JSON.stringify(state.release.tree_sha)}`,
 		"conflict:", `  kind: ${state.conflict.kind}`, `  reason: ${JSON.stringify(state.conflict.reason)}`, "",
 	].join("\n");
 }
@@ -148,9 +195,16 @@ export function statePath(cwd: string): string { return join(cwd, STATE_REL); }
 export type LoadedState = { ok: true; state: CompanyState; path: string } | { ok: false; reason: string };
 export function loadStateResult(cwd: string): LoadedState {
 	for (const rel of STATE_PATHS) {
-		const file = join(cwd, rel);
+		const file = safeRepoPath(cwd, rel);
+		if (!file) return { ok: false, reason: `STATE_PATH_GATE: refusing ${rel} through a symlink or outside the repository` };
 		let text: string;
-		try { text = readFileSync(file, "utf8"); }
+		try {
+			const stat = lstatSync(file);
+			if (stat.isSymbolicLink()) return { ok: false, reason: `STATE_PATH_GATE: ${rel} must not be a symlink.` };
+			if (!stat.isFile()) return { ok: false, reason: `STATE_IO_ERROR: ${rel} is not a regular file.` };
+			if (stat.size > MAX_STATE_BYTES) return { ok: false, reason: `STATE_RESOURCE_GATE: ${rel} exceeds the ${MAX_STATE_BYTES}-byte limit.` };
+			text = readFileSync(file, "utf8");
+		}
 		catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code === "ENOENT") continue;
@@ -173,11 +227,19 @@ export function saveState(cwd: string, state: CompanyState): void {
 	state.schema_version = CURRENT_STATE_SCHEMA;
 	state.last_written_by = FOUNDRY_VERSION;
 	if (!state.created_by) state.created_by = FOUNDRY_VERSION;
-	const file = statePath(cwd);
+	const file = safeRepoPath(cwd, STATE_REL);
+	if (!file) throw new StateError(`STATE_PATH_GATE: refusing ${STATE_REL} through a symlink or outside the repository`);
 	mkdirSync(dirname(file), { recursive: true });
-	const tmp = `${file}.${process.pid}.tmp`;
-	writeFileSync(tmp, serializeState(state), "utf8");
-	renameSync(tmp, file);
+	const serialized = serializeState(state);
+	if (Buffer.byteLength(serialized, "utf8") > MAX_STATE_BYTES) throw new StateError(`STATE_RESOURCE_GATE: serialized state exceeds the ${MAX_STATE_BYTES}-byte limit.`);
+	const tmp = `${file}.${randomUUID()}.tmp`;
+	try {
+		writeFileSync(tmp, serialized, { encoding: "utf8", flag: "wx" });
+		renameSync(tmp, file);
+	} catch (error) {
+		try { unlinkSync(tmp); } catch { /* best effort cleanup */ }
+		throw error;
+	}
 }
 export function planLocked(state: CompanyState): boolean { return state.master_plan.status === "locked"; }
 export function productReady(state: CompanyState): boolean { return state.product.status === "approved" || state.product.status === "locked"; }
@@ -188,7 +250,14 @@ export function recountTickets(state: CompanyState): void {
 }
 export function stateFileExists(cwd: string): boolean {
 	for (const rel of STATE_PATHS) {
-		try { readFileSync(join(cwd, rel)); return true; }
+		const file = safeRepoPath(cwd, rel);
+		if (!file) throw new StateError(`STATE_PATH_GATE: refusing ${rel} through a symlink or outside the repository`);
+		try {
+			const stat = lstatSync(file);
+			if (stat.isSymbolicLink() || !stat.isFile()) throw new StateError(`STATE_PATH_GATE: ${rel} must be a regular file.`);
+			if (stat.size > MAX_STATE_BYTES) throw new StateError(`STATE_RESOURCE_GATE: ${rel} exceeds the ${MAX_STATE_BYTES}-byte limit.`);
+			readFileSync(file); return true;
+		}
 		catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code === "ENOENT") continue;

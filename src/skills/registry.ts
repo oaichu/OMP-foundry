@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { LAYERS, PHASES, ROLES, type SkillLayer, type SkillManifest, type SkillPhase, type SkillRole } from "./manifest-schema";
 
@@ -30,15 +30,20 @@ function parseFrontmatter(text: string): { fields: Record<string, string>; body:
 	return { fields, body: match[2].trim() };
 }
 
-function walk(dir: string, acc: string[]): void {
-	let entries: string[] = [];
-	try { entries = readdirSync(dir); } catch { return; }
-	for (const name of entries) {
-		const full = join(dir, name);
-		let stat;
-		try { stat = statSync(full); } catch { continue; }
-		if (stat.isDirectory()) walk(full, acc);
-		else if (name === "SKILL.md") acc.push(full);
+const MAX_SKILL_FILES = 256;
+const MAX_SKILL_DEPTH = 32;
+const MAX_SKILL_BYTES = 512 * 1024;
+
+function walk(dir: string, acc: string[], depth = 0): void {
+	if (depth > MAX_SKILL_DEPTH || acc.length >= MAX_SKILL_FILES) return;
+	let entries: import("node:fs").Dirent[] = [];
+	try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+	for (const entry of entries) {
+		if (entry.isSymbolicLink()) continue;
+		const full = join(dir, entry.name);
+		if (entry.isDirectory()) walk(full, acc, depth + 1);
+		else if (entry.isFile() && entry.name === "SKILL.md") acc.push(full);
+		if (acc.length >= MAX_SKILL_FILES) return;
 	}
 }
 
@@ -82,7 +87,13 @@ export function loadRegistry(root: string): SkillManifest[] {
 	walk(root, files);
 	const out: SkillManifest[] = [];
 	for (const file of files) {
-		const parsed = parseManifest(file, readFileSync(file, "utf8"));
+		let text = "";
+		try {
+			const stat = lstatSync(file);
+			if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_SKILL_BYTES) continue;
+			text = readFileSync(file, "utf8");
+		} catch { continue; }
+		const parsed = parseManifest(file, text);
 		if (parsed) out.push(parsed);
 	}
 	return out;

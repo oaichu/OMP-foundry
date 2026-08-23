@@ -6,6 +6,13 @@ import { loadRegistry } from "../src/skills/registry";
 const root = join(import.meta.dir, "..");
 
 describe("agent skill dependencies", () => {
+	test("AATP compiler is an authority alias, not a new model role", () => {
+		const text = readFileSync(join(root, "agents", "aatp-compiler.md"), "utf8");
+		expect(text).toContain("name: aatp-compiler");
+		expect(text).toContain('model: "@foundry_synth"');
+		expect(text).toContain("foundry_aatp_write");
+		expect(text).not.toContain('model: "@foundry_aatp"');
+	});
 	test("every autoloadSkills id is packaged by Foundry", () => {
 		const packaged = new Set(loadRegistry(join(root, "skills")).map((skill) => skill.id));
 		const missing: string[] = [];

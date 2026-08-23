@@ -48,6 +48,13 @@ describe("Plan3 governed mode", () => {
 		expect(plan3ArtifactsMatch(cwd, state)).toBe(false);
 	});
 
+	test("stage completion rechecks the artifact hash at the lock boundary", () => {
+		const cwd = project(), state = defaultState(); enterPlan3(state);
+		writeFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "draft\n");
+		expect(completePlan3Stage(cwd, state, "draft", "stale-hash").ok).toBe(false);
+		expect(state.planning.stage).toBe("draft");
+	});
+
 	test("abort clears stale stage evidence", () => {
 		const state = defaultState();
 		enterPlan3(state);
@@ -61,12 +68,12 @@ describe("Plan3 governed mode", () => {
 	test("write authority follows only the active planning artifact", () => {
 		const state = defaultState(); state.product.status = "approved"; enterPlan3(state);
 		const canonicalize = (raw: string) => raw.toLowerCase();
-		expect(denyToolCall("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md" }, state, { canonicalize })).toBeUndefined();
-		expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, state, { canonicalize })?.reason).toContain("PLAN_GATE");
+		expect(denyToolCall("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md" }, state, { canonicalize })?.reason).toContain("foundry_plan_write");
+		expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, state, { canonicalize })?.reason).toContain("foundry_plan_write");
 		state.planning.stage = "redteam";
-		expect(denyToolCall("write", { path: "docs/planning/PLAN_REVIEW.md" }, state, { canonicalize })).toBeUndefined();
+		expect(denyToolCall("write", { path: "docs/planning/PLAN_REVIEW.md" }, state, { canonicalize })?.reason).toContain("foundry_plan_write");
 		state.planning.stage = "synth";
-		expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, state, { canonicalize })).toBeUndefined();
+		expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, state, { canonicalize })?.reason).toContain("foundry_plan_write");
 		state.planning.stage = "awaiting_lock";
 		expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, state, { canonicalize })?.reason).toContain("PLAN_GATE");
 	});

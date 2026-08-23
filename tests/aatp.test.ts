@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { aatpManifestHash, beginTicket, completeTicket, hydrateAatp, readyIndependent, reviewTicket, routeAgent, validateAatpSpecs } from "../src/aatp";
+import { aatpManifestHash, archiveAatpSpecs, beginTicket, completeTicket, hydrateAatp, listAatpSpecs, readyIndependent, reviewTicket, routeAgent, validateAatpSpecs } from "../src/aatp";
 import { defaultState } from "../src/types";
 const spec = (id: string, deps: string[] = []) => ({ id, objective: "x", dependencies: deps, allowed_files: [`src/${id.toLowerCase()}`], forbidden_files: [], risk: "normal", path: `docs/AATP/${id}.md` });
 
 describe("aatp authority and sealing", () => {
-	test("routes risk to governed workers", () => { expect(routeAgent("low")).toBe("smol-implementer"); expect(routeAgent("hard")).toBe("hard-implementer"); expect(routeAgent("normal")).toBe("implementer"); });
+	test("routes risk to governed workers and fails unknown risk closed", () => { expect(routeAgent("low")).toBe("smol-implementer"); expect(routeAgent("hard")).toBe("hard-implementer"); expect(routeAgent("normal")).toBe("implementer"); expect(routeAgent("unknown")).toBe("hard-implementer"); });
 	test("status comes from state, not markdown", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-")); mkdirSync(join(dir, "docs", "AATP"), { recursive: true });
 		writeFileSync(join(dir, "docs", "AATP", "AATP-001.md"), "---\nid: AATP-001\nobjective: x\nstatus: ready\nrisk: low\ndependencies:\n  - none\nallowed_files:\n  - src/a\n---\n");
@@ -25,6 +25,37 @@ describe("aatp authority and sealing", () => {
 		expect(validateAatpSpecs([spec("AATP-1", ["AATP-1"])]).join(" ")).toContain("self dependency");
 		const cycle = validateAatpSpecs([spec("AATP-1", ["AATP-2"]), spec("AATP-2", ["AATP-3"]), spec("AATP-3", ["AATP-1"])]).join(" ");
 		expect(cycle).toContain("dependency cycle");
+	});
+	test("strict compiler validation requires complete work-order evidence", () => {
+		const valid = { ...spec("AATP-100"), forbidden_files: ["docs/MASTER_PLAN.md"], acceptance: ["the change is observable"], verification: ["bun test"] };
+		expect(validateAatpSpecs([valid], { strict: true })).toEqual([]);
+		expect(validateAatpSpecs([{ ...valid, acceptance: [] }], { strict: true }).join(" ")).toContain("acceptance");
+		expect(validateAatpSpecs([{ ...valid, verification: [], risk: "unknown" }], { strict: true }).join(" ")).toContain("verification");
+		expect(validateAatpSpecs([{ ...valid, allowed_files: ["../outside"] }], { strict: true }).join(" ")).toContain("repository-relative exact path");
+		expect(validateAatpSpecs([{ ...valid, allowed_files: ["src/**/*.ts"] }], { strict: true }).join(" ")).toContain("repository-relative exact path");
+		expect(validateAatpSpecs([{ ...valid, allowed_files: [".omp/company-state.yaml"] }], { strict: true }).join(" ")).toContain("allowed_files includes a Foundry governance artifact");
+	});
+	test("malformed inline lists fail closed", () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-malformed-list-")); mkdirSync(join(dir, "docs", "AATP"), { recursive: true });
+		writeFileSync(join(dir, "docs", "AATP", "AATP-102.md"), "id: AATP-102\nobjective: x\ndependencies: [AATP-001\nallowed_files:\n  - src/a\n");
+		expect(() => listAatpSpecs(dir)).toThrow("malformed inline list");
+		writeFileSync(join(dir, "docs", "AATP", "AATP-102.md"), "id: AATP-102\nobjective: x\ndependencies: [1]\nallowed_files:\n  - src/a\n");
+		expect(() => listAatpSpecs(dir)).toThrow("invalid or oversized list item");
+	});
+	test("AATP lists parse on Windows line endings", () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-crlf-")); mkdirSync(join(dir, "docs", "AATP"), { recursive: true });
+		writeFileSync(join(dir, "docs", "AATP", "AATP-101.md"), "---\r\nid: AATP-101\r\nobjective: x\r\ndependencies:\r\n  - none\r\nallowed_files:\r\n  - src/a\r\nforbidden_files:\r\n  - docs/MASTER_PLAN.md\r\nrisk: low\r\nacceptance:\r\n  - works\r\nverification:\r\n  - typecheck\r\n---\r\n");
+		const parsed = listAatpSpecs(dir)[0];
+		expect(parsed?.acceptance).toEqual(["works"]);
+		expect(parsed?.verification).toEqual(["typecheck"]);
+		expect(validateAatpSpecs([parsed!], { strict: true })).toEqual([]);
+	});
+	test("recompile archives the previous generated DAG", () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-aatp-archive-")); mkdirSync(join(dir, "docs", "AATP"), { recursive: true });
+		writeFileSync(join(dir, "docs", "AATP", "AATP-001.md"), "old\n");
+		writeFileSync(join(dir, "docs", "AATP", "INDEX.md"), "old index\n");
+		expect(archiveAatpSpecs(dir)).toBe(2);
+		expect(listAatpSpecs(dir)).toEqual([]);
 	});
 });
 

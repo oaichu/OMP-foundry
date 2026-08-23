@@ -37,6 +37,13 @@ describe("exact governed bindings", () => {
 
 describe("pre-apply patch gate", () => {
 	test("parses both sides of unified diff", () => expect(parsePatchPaths("diff --git a/src/auth/a.ts b/src/auth/a.ts\n--- a/src/auth/a.ts\n+++ b/src/auth/a.ts\n")).toContain("src/auth/a.ts"));
+	test("rejects oversized patch artifacts before git sees them", () => {
+		const dir = gitRepo(), patchPath = join(dir, "oversized.patch");
+		writeFileSync(patchPath, "x".repeat(8 * 1024 * 1024 + 1));
+		const checked = validatePatchArtifact(dir, patchPath, ticket, "implementation");
+		expect(checked.ok).toBe(false);
+		if (!checked.ok) expect(checked.reason).toContain("exceeds");
+	});
 	test("implementation patch is default-deny outside exact scope", () => {
 		const dir = gitRepo();
 		expect(validatePatchPaths(dir, ["src/auth/a.ts", "package.json"], ticket, "implementation").rejected).toEqual([]);
@@ -55,6 +62,14 @@ describe("pre-apply patch gate", () => {
 		expect(readFileSync(join(dir, "src", "auth", "a.ts"), "utf8")).toBe("2\n");
 		expect(commitAppliedPatch(dir, ticket.id, "implementation").ok).toBe(true);
 	});
+	test("validated patch bytes cannot be swapped before apply", () => {
+		const dir = gitRepo(), patchPath = patchFor(dir, "src/auth/a.ts", "safe\n");
+		const checked = validatePatchArtifact(dir, patchPath, ticket, "implementation");
+		expect(checked.ok).toBe(true);
+		writeFileSync(patchPath, "diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n@@ -1 +1 @@\n-{}\n+{\"pwned\":true}\n");
+		if (checked.ok) expect(applyPatchArtifact(dir, patchPath, checked.patch, checked.paths).ok).toBe(false);
+		expect(readFileSync(join(dir, "src", "auth", "a.ts"), "utf8")).toBe("1\n");
+	});
 	test("rollback reverses only Foundry patch and preserves unrelated user file", () => {
 		const dir = gitRepo(), patchPath = patchFor(dir, "src/auth/a.ts", "worker\n");
 		expect(applyPatchArtifact(dir, patchPath).ok).toBe(true);
@@ -63,6 +78,13 @@ describe("pre-apply patch gate", () => {
 		expect(readFileSync(join(dir, "src", "auth", "a.ts"), "utf8")).toBe("1\n");
 		expect(existsSync(join(dir, "user-notes.txt"))).toBe(true);
 		expect(readFileSync(join(dir, "user-notes.txt"), "utf8")).toBe("preserve me\n");
+	});
+	test("rollback preserves a concurrent edit to the patched file", () => {
+		const dir = gitRepo(), patchPath = patchFor(dir, "src/auth/a.ts", "worker\n");
+		expect(applyPatchArtifact(dir, patchPath).ok).toBe(true);
+		writeFileSync(join(dir, "src", "auth", "a.ts"), "user\n");
+		restoreCleanHead(dir);
+		expect(readFileSync(join(dir, "src", "auth", "a.ts"), "utf8")).toBe("user\n");
 	});
 });
 

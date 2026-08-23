@@ -6,6 +6,7 @@ import { FOUNDRY_VERSION } from "./types";
 export const LATEST_RELEASE = "https://github.com/oaichu/omp-foundry/releases/latest";
 const TTL_MS = 24 * 60 * 60 * 1000;
 const FAIL_TTL_MS = 60 * 60 * 1000;
+const MAX_CACHE_BYTES = 16 * 1024;
 
 export interface UpdateCache { checkedAt: number; latest: string; fetchFailed?: boolean; }
 export interface UpdateResult { installed: string; omp: string; latest?: string; newer: boolean; notify?: string; }
@@ -59,16 +60,27 @@ async function xdgCachePath(): Promise<string> {
 	catch { return defaultCachePath(); }
 }
 export function readCache(path: string): UpdateCache | undefined {
-	try { const raw = JSON.parse(readFileSync(path, "utf8")) as UpdateCache; return typeof raw.checkedAt === "number" && typeof raw.latest === "string" ? raw : undefined; }
+	try {
+		const text = readFileSync(path, "utf8");
+		if (Buffer.byteLength(text, "utf8") > MAX_CACHE_BYTES) return undefined;
+		const raw = JSON.parse(text) as UpdateCache;
+		return typeof raw.checkedAt === "number" && Number.isFinite(raw.checkedAt) && typeof raw.latest === "string" && raw.latest.length <= 128 ? raw : undefined;
+	}
 	catch { return undefined; }
 }
 export function writeCache(path: string, cache: UpdateCache): boolean {
-	try { mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, `${JSON.stringify(cache)}\n`, "utf8"); return true; }
+	try { const text = `${JSON.stringify(cache)}\n`; if (Buffer.byteLength(text, "utf8") > MAX_CACHE_BYTES) return false; mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text, "utf8"); return true; }
 	catch { return false; }
 }
 export async function fetchLatestTag(): Promise<string | undefined> {
 	const response = await fetch(LATEST_RELEASE, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(4000), headers: { Accept: "text/html" } });
-	return parseTagFromUrl(response.url);
+	if (!response.ok) return undefined;
+	try {
+		const finalUrl = new URL(response.url);
+		if (finalUrl.protocol !== "https:" || finalUrl.hostname.toLowerCase() !== "github.com") return undefined;
+		if (!/^\/oaichu\/omp-foundry\/releases\/tag\/v?\d+\.\d+\.\d+(?:[-.][\w.]+)?\/?$/i.test(finalUrl.pathname)) return undefined;
+		return parseTagFromUrl(finalUrl.toString());
+	} catch { return undefined; }
 }
 function notifyText(installed: string, latest: string): string { return `Foundry ${latest} available. Installed: ${installed}. Update to release tag v${latest} and restart OMP.`; }
 export async function checkForUpdate(deps: UpdateCheckDeps = {}): Promise<UpdateResult> {

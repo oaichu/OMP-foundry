@@ -14,7 +14,7 @@ export function roleOf(agent?: string): SkillRole | undefined {
 	if (agent === "design-foundation") return "designer";
 	if (agent === "implementer" || agent === "hard-implementer" || agent === "smol-implementer") return "implementer";
 	if (agent === "reviewer" || agent === "security-reviewer") return "reviewer";
-	if (agent === "plan-drafter" || agent === "plan-redteam" || agent === "plan-synth" || agent === "product-analyst") return "planner";
+	if (agent === "plan-drafter" || agent === "plan-redteam" || agent === "plan-synth" || agent === "product-analyst" || agent === "aatp-compiler") return "planner";
 	return undefined;
 }
 

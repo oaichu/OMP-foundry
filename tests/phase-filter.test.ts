@@ -7,6 +7,7 @@ describe("role-aware skill routing", () => {
 		expect(roleOf("plan-drafter")).toBe("planner");
 		expect(roleOf("plan-redteam")).toBe("planner");
 		expect(roleOf("plan-synth")).toBe("planner");
+		expect(roleOf("aatp-compiler")).toBe("planner");
 		expect(roleOf("product-analyst")).toBe("planner");
 		expect(roleOf("implementer")).toBe("implementer");
 		expect(roleOf("hard-implementer")).toBe("implementer");

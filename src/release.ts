@@ -1,19 +1,27 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { lstatSync, readFileSync } from "node:fs";
 import { aatpManifestHash } from "./aatp";
 import { designAllowsUi, planLocked, productReady, recountTickets } from "./state-machine";
+import { safeRepoPath } from "./paths";
 import type { CompanyState } from "./types";
+import { gitCall } from "./git-runtime";
 
 export function sha256File(cwd: string, rel: string): string {
-	const file = join(cwd, rel);
-	if (!existsSync(file)) return "";
-	return createHash("sha256").update(readFileSync(file)).digest("hex");
+	const file = safeRepoPath(cwd, rel);
+	if (!file) return "";
+	try {
+		const stat = lstatSync(file);
+		// Locked evidence is intentionally bounded.  A malformed repository
+		// must not make every gate read an unbounded artifact into memory.
+		if (!stat.isFile() || stat.isSymbolicLink() || stat.size === 0 || stat.size > 4 * 1024 * 1024) return "";
+		return createHash("sha256").update(readFileSync(file)).digest("hex");
+	} catch {
+		return "";
+	}
 }
 
 export function gitHead(cwd: string): string {
-	const result = spawnSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8" });
+	const result = gitCall(cwd, ["rev-parse", "HEAD"], { encoding: "utf8" });
 	return result.status === 0 ? result.stdout.trim() : "";
 }
 
@@ -23,31 +31,41 @@ export function isFoundryOwned(rel: string): boolean {
 	return FOUNDRY_OWNED.some((re) => re.test(normalized));
 }
 
+function safeOwnedArtifact(cwd: string, rel: string): boolean {
+	if (!isFoundryOwned(rel)) return false;
+	const file = safeRepoPath(cwd, rel);
+	if (!file) return false;
+	try { return lstatSync(file).isFile(); } catch { return false; }
+}
+
 export function workingTreeClean(cwd: string): boolean {
-	const result = spawnSync("git", ["status", "--porcelain", "-uall"], { cwd, encoding: "utf8" });
+	const result = gitCall(cwd, ["status", "--porcelain", "-uall"], { encoding: "utf8", maxBuffer: 512 * 1024 });
 	if (result.status !== 0) return false;
 	for (const line of result.stdout.split("\n")) {
 		if (line.length < 4) continue;
 		const rest = line.slice(3).replace(/^"|"$/g, "");
 		const rel = (rest.split(" -> ").pop() ?? rest).trim();
-		if (rel && !isFoundryOwned(rel)) return false;
+		if (rel && !safeOwnedArtifact(cwd, rel)) return false;
 	}
 	return true;
 }
 
 export type ArtifactKey = "product" | "master_plan" | "design";
-export function lockArtifactHash(cwd: string, state: CompanyState, which: ArtifactKey): void {
+export function lockArtifactHash(cwd: string, state: CompanyState, which: ArtifactKey): boolean {
 	const rel = which === "product" ? "docs/PRODUCT.md" : which === "master_plan" ? "docs/MASTER_PLAN.md" : "docs/DESIGN.md";
 	const sha = sha256File(cwd, rel);
+	if (!sha) return false;
 	if (which === "product") state.product.sha256 = sha;
 	else if (which === "master_plan") state.master_plan.sha256 = sha;
 	else state.design.sha256 = sha;
+	return true;
 }
 
 export function artifactsMatch(cwd: string, state: CompanyState): boolean {
-	if (state.product.sha256 && sha256File(cwd, "docs/PRODUCT.md") !== state.product.sha256) return false;
-	if (state.master_plan.sha256 && sha256File(cwd, "docs/MASTER_PLAN.md") !== state.master_plan.sha256) return false;
-	if (state.design.status === "locked" && state.design.sha256 && sha256File(cwd, "docs/DESIGN.md") !== state.design.sha256) return false;
+	if (!productReady(state) || !state.product.sha256 || sha256File(cwd, "docs/PRODUCT.md") !== state.product.sha256) return false;
+	if (!planLocked(state) || !state.master_plan.sha256 || sha256File(cwd, "docs/MASTER_PLAN.md") !== state.master_plan.sha256) return false;
+	if (state.design.status === "locked" && (!state.design.sha256 || sha256File(cwd, "docs/DESIGN.md") !== state.design.sha256)) return false;
+	if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") return false;
 	if (!state.aatp.manifest_sha256 || aatpManifestHash(cwd) !== state.aatp.manifest_sha256) return false;
 	return true;
 }

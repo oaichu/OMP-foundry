@@ -1,7 +1,8 @@
 import { detectRepo } from "./skills/detector";
+import type { VerifyStep } from "./skills/detector";
 
 export type StackId = "web" | "saas" | "android" | "windows" | "cloudflare" | "unknown";
-export interface DetectedStack { ids: StackId[]; ui: boolean; verify: Array<{ id: string; command: string; cwd?: string }>; }
+export interface DetectedStack { ids: StackId[]; ui: boolean; verify: VerifyStep[]; }
 
 /** Compatibility adapter. RepoFacts is the single detector/verification source. */
 export function detectStack(cwd: string): DetectedStack {

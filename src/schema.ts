@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync } from "node:fs";
+import { constants, copyFileSync, lstatSync } from "node:fs";
 import { CURRENT_STATE_SCHEMA, FOUNDRY_VERSION, StateError, type CompanyState } from "./types";
 import { parseState, serializeState } from "./state-machine";
 
@@ -71,7 +71,15 @@ export function migrateToCurrent(yaml: string): { yaml: string; state: CompanySt
 export function backupPath(file: string, from: number): string { return `${file}.pre-v${from + 1}.bak`; }
 export function backupOnce(file: string, from: number): string | undefined {
 	const dest = backupPath(file, from);
-	if (existsSync(dest)) return dest;
-	copyFileSync(file, dest);
+	try {
+		const existing = lstatSync(dest);
+		if (existing.isSymbolicLink() || !existing.isFile()) throw new StateError("STATE_BACKUP_GATE: migration backup is not a regular file.");
+		return dest;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+	const source = lstatSync(file);
+	if (source.isSymbolicLink() || !source.isFile()) throw new StateError("STATE_BACKUP_GATE: state source is not a regular file.");
+	copyFileSync(file, dest, constants.COPYFILE_EXCL);
 	return dest;
 }
