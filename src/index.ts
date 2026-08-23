@@ -66,7 +66,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CUSTOM = "com.omp.foundry.state";
 const MARKER = "docs/.foundry-governed";
 const LIFECYCLE_TOOLS = new Set(["aatp_begin", "aatp_complete", "aatp_block", "aatp_review"]);
-const PLAN_AGENTS = new Set(["plan-drafter", "plan-redteam", "plan-synth", "plan-critic", "plan-finalizer"]);
+const PLAN_AGENTS = new Set(["plan-drafter", "plan-redteam", "plan-synth"]);
 
 type PendingRun = { bindings: TaskBinding[]; startedClean: boolean };
 type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
@@ -100,7 +100,7 @@ function plan3PriorEvidenceMatches(cwd: string, state: CompanyState): boolean {
 }
 function enterOrResumePlan3(pi: ExtensionAPI, cwd: string, state: CompanyState, restart = false): void {
 	const modelGate = plan3ModelsReady(cwd);
-	if (modelGate) { orchestrate(pi, "Plan3 model roles are not ready.", `${modelGate}\nOpen /model → Roles in this project and assign the foundry_* roles.`); return; }
+	if (modelGate) { orchestrate(pi, "Plan3 model roles are not ready.", `${modelGate}\nConfigure modelRoles in ~/.omp/agent/config.yml or this project's .omp/config.yml.`); return; }
 	enterPlan3(state, restart);
 	persist(cwd, state);
 	orchestrate(pi, plan3Status(state), plan3Instruction(state));
@@ -114,7 +114,6 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 		const boot = bootstrapFoundryProject(cwd, ROOT);
 		orchestrate(pi, "Foundry enabled for this project.", [
 			`stack=${boot.stackIds.join(",") || "unknown"} ui=${boot.ui}`,
-			`project model roles bootstrapped=${boot.rolesBootstrapped.length}`,
 			idea ? `User idea: ${idea}` : "If the user has not described the product, ask one short question.",
 			"Spawn blocking product-analyst. Then wait for /foundry-approve product.",
 		].join("\n"));
@@ -278,8 +277,6 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 			const isolated = forceIsolatedTaskInput(raw);
 			if (isolated) return { input: isolated };
 		}
-		const toolName = String(event.toolName);
-		if (toolName.startsWith("foundry_") || toolName.startsWith("company_")) return;
 		const loaded = safeState(ctx.cwd), activeTickets = Object.values(loaded.state.tickets).filter((t) => t.status === "active"), isolatedWithoutState = loaded.missing && existsSync(join(ctx.cwd, MARKER));
 		return denyToolCall(event.toolName, (event.input ?? {}) as ToolInput, loaded.state, { stateBroken: loaded.broken, activeTickets, cwd: ctx.cwd, isolatedWithoutState, canonicalize: (raw) => canonicalRepoPath(ctx.cwd, raw) });
 	});
@@ -320,7 +317,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.registerTool({ name: "foundry_init", label: "Foundry Init", description: "Advanced/manual bootstrap. /foundry auto-bootstraps new projects using this same project-local path.", loadMode: "essential", approval: "write", parameters: z.object({ name: z.string().optional() }), async execute(_id, params, _session, _user, ctx) {
 		const boot = bootstrapFoundryProject(ctx.cwd, ROOT);
 		ctx.ui.setStatus("foundry", statusOf(boot.state));
-		return { content: [{ type: "text", text: `${boot.existed ? "Kept" : "Initialized"} Foundry. stack=${boot.stackIds.join(",")} ui=${boot.ui} project_config=${boot.configCreated ? "created" : "updated-without-global-mutation"} foundry_roles=${boot.rolesBootstrapped.length} name=${params.name ?? ""}` }], details: boot.state };
+		return { content: [{ type: "text", text: `${boot.existed ? "Kept" : "Initialized"} Foundry. stack=${boot.stackIds.join(",")} ui=${boot.ui} project_config=${boot.configCreated ? "created" : "updated-without-model-overrides"} name=${params.name ?? ""}` }], details: boot.state };
 	} });
 
 	pi.registerTool({ name: "foundry_exec", label: "Foundry Design Verify", description: "Run one detected verification command during unlocked design only; no arbitrary command input.", loadMode: "essential", approval: "write", parameters: z.object({ id: z.string() }), async execute(_id, params, _session, _user, ctx) {
@@ -340,10 +337,10 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("foundry", { description: "Auto-bootstrap this repo if needed, then run the next legal Foundry step", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
 	const initHandler = async (_args: string, ctx: { cwd: string; waitForIdle: () => Promise<void> }) => { await ctx.waitForIdle(); const boot = bootstrapFoundryProject(ctx.cwd, ROOT); orchestrate(pi, boot.existed ? "Foundry already initialized." : "Foundry initialized manually.", "Use /foundry as the normal entrypoint. /foundry-doctor is available for diagnostics."); };
 	pi.registerCommand("foundry-init", { description: "Advanced/manual project bootstrap; normal users can just run /foundry", handler: initHandler });
-	pi.registerCommand("foundry-doctor", { description: "Check OMP isolation and project-scoped Foundry model roles", handler: async (_args, ctx) => {
+	pi.registerCommand("foundry-doctor", { description: "Check OMP isolation and Foundry model-role availability", handler: async (_args, ctx) => {
 		const isolation = checkIsolationContract(ctx.cwd), roles = checkFoundryProjectRoles(ctx.cwd);
 		const ok = isolation.ok && roles.ok;
-		orchestrate(pi, ok ? "Foundry runtime contract OK." : "Foundry runtime contract BLOCKED.", [isolation.ok ? `isolation=${isolation.mode} apply=${isolation.apply}` : isolation.reason, roles.ok ? "modelRoleStorage=project; all foundry_* roles mapped" : roles.reason].filter(Boolean).join("\n"));
+		orchestrate(pi, ok ? "Foundry runtime contract OK." : "Foundry runtime contract BLOCKED.", [isolation.ok ? `isolation=${isolation.mode} apply=${isolation.apply}` : isolation.reason, roles.ok ? "Foundry model roles available (global defaults with optional project overrides)" : roles.reason].filter(Boolean).join("\n"));
 	} });
 	pi.registerCommand("foundry-version", { description: "Show Foundry/OMP versions and latest stable tag", handler: async (_args, ctx) => { const result = await checkForUpdate({ force: true }); if (result.notify) ctx.ui.notify(result.notify, "info"); orchestrate(pi, "Foundry version", versionReport(result)); } });
 
@@ -371,7 +368,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	} });
 	pi.registerCommand("foundry-approve", { description: "Human gate: product | plan", handler: async (args, ctx) => {
 		const which = args.trim().toLowerCase(), state = loadState(ctx.cwd);
-		if (which === "product" || which === "approve-product") { state.product.status = "approved"; state.phase = "planning"; lockArtifactHash(ctx.cwd, state, "product"); invalidateQa(state); persist(ctx.cwd, state); orchestrate(pi, "PRODUCT approved by user.", "Run /plan3 or /foundry. Plan3 uses project-scoped @foundry_plan/@foundry_redteam/@foundry_synth roles."); return; }
+		if (which === "product" || which === "approve-product") { state.product.status = "approved"; state.phase = "planning"; lockArtifactHash(ctx.cwd, state, "product"); invalidateQa(state); persist(ctx.cwd, state); orchestrate(pi, "PRODUCT approved by user.", "Run /plan3 or /foundry. Plan3 uses @foundry_plan/@foundry_redteam/@foundry_synth model roles."); return; }
 		if (which === "plan" || which === "approve-plan") {
 			if (state.mode !== "plan3" || state.planning.stage !== "awaiting_lock") { ctx.ui.notify("PLAN3_GATE: plan approval requires a completed Draft → Redteam → Synth cycle.", "warning"); return; }
 			if (!plan3ArtifactsMatch(ctx.cwd, state)) { ctx.ui.notify("PLAN3_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan3 or restore the accepted artifacts.", "error"); return; }
