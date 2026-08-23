@@ -2,7 +2,7 @@
 name: design-foundation
 description: "Company /design. Tokens + primitives + runnable preview. No MASTER_PLAN edits."
 tools: read, grep, glob, write, edit, lsp, foundry_exec, ask
-model: "@designer"
+model: "@foundry_design"
 thinking-level: high
 blocking: true
 read-summarize: true
