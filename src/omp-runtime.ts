@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 
 export interface IsolationContract {
@@ -138,6 +139,49 @@ export function ensureProjectFoundryConfig(cwd: string): { created: boolean; pat
 	return { created, path, rolesBootstrapped: FOUNDRY_MODEL_ROLES.filter((role) => Boolean(defaults[role])) };
 }
 
+export function userConfigPath(): string {
+	return join(homedir(), ".omp", "agent", "config.yml");
+}
+
+function missingRoleKeys(text: string): string[] {
+	if (!text.trim()) return [...FOUNDRY_MODEL_ROLES];
+	const block = topLevelBlock(text, "modelRoles");
+	const present = new Set<string>();
+	if (block) {
+		for (let i = block.start + 1; i < block.end; i++) {
+			const match = block.lines[i].match(/^\s{2}([A-Za-z0-9_.-]+):/);
+			if (match) present.add(match[1]);
+		}
+	}
+	return FOUNDRY_MODEL_ROLES.filter((role) => !present.has(role));
+}
+
+/**
+ * Register the foundry_* roles at user level so they show up in /models
+ * everywhere as soon as the plugin runs. Only missing keys are inserted,
+ * as @aliases that follow the user's own roles; nothing existing is ever
+ * modified or removed. This is the plugin's one deliberate global write.
+ */
+export function ensureGlobalFoundryRoles(options: { path?: string; roles?: Record<string, string> } = {}): {
+	path: string;
+	added: string[];
+	values: Record<string, string>;
+} {
+	const path = options.path ?? userConfigPath();
+	const before = existsSync(path) ? readFileSync(path, "utf8") : "";
+	const added = missingRoleKeys(before);
+	if (added.length === 0) {
+		return { path, added: [], values: {} };
+	}
+	const aliases = aliasRoleMap(options.roles ?? effectiveRoles(process.cwd()));
+	for (const role of FOUNDRY_MODEL_ROLES) if (!aliases[role]) aliases[role] = "@default";
+	mkdirSync(dirname(path), { recursive: true });
+	let text = before;
+	text = ensureModelRoles(text, aliases);
+	writeFileSync(path, text, "utf8");
+	return { path, added, values: aliases };
+}
+
 export function ensureProjectIsolationConfig(cwd: string): { created: boolean; path: string } {
 	const result = ensureProjectFoundryConfig(cwd);
 	return { created: result.created, path: result.path };
@@ -150,12 +194,23 @@ export function checkFoundryProjectRoles(cwd: string): { ok: boolean; missing: s
 		const storageProject = /^modelRoleStorage:\s*project\s*$/m.test(text);
 		const block = topLevelBlock(text, "modelRoles");
 		const present = new Set<string>();
-		if (block) for (let i = block.start + 1; i < block.end; i += 1) {
+		if (block) for (let i = block.start + 1; i < block.end; i++) {
 			const match = block.lines[i].match(/^\s{2}([A-Za-z0-9_.-]+):\s*(\S.+)$/);
 			if (match) present.add(match[1]);
 		}
+		// Roles registered at user level by ensureGlobalFoundryRoles count too:
+		// project scope only needs to override them, not duplicate them.
+		for (const role of missingRoleKeys(text)) {
+			try {
+				const globalText = readFileSync(userConfigPath(), "utf8");
+				const globalBlock = topLevelBlock(globalText, "modelRoles");
+				if (globalBlock && new RegExp(`^\\s{2}${role}:\\s*\\S`, "m").test(globalBlock.lines.join("\n"))) present.add(role);
+			} catch {
+				break;
+			}
+		}
 		const missing = FOUNDRY_MODEL_ROLES.filter((role) => !present.has(role));
-		return { ok: storageProject && missing.length === 0, missing, storageProject, reason: storageProject && missing.length === 0 ? undefined : `FOUNDRY_MODEL_ROLES_REQUIRED: project-scoped roles missing=${missing.join(",") || "none"} modelRoleStorage=${storageProject ? "project" : "not-project"}. Open /model Roles inside this project.` };
+		return { ok: storageProject && missing.length === 0, missing, storageProject, reason: storageProject && missing.length === 0 ? undefined : `FOUNDRY_MODEL_ROLES_REQUIRED: roles missing=${missing.join(",") || "none"} modelRoleStorage=${storageProject ? "project" : "not-project"}. Open /model Roles inside this project.` };
 	} catch (error) {
 		return { ok: false, missing: [...FOUNDRY_MODEL_ROLES], storageProject: false, reason: `FOUNDRY_PROJECT_CONFIG_ERROR: ${error instanceof Error ? error.message : String(error)}` };
 	}

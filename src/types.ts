@@ -17,7 +17,7 @@ export type ReviewVerdict = "none" | "APPROVE" | "REQUEST_CHANGES" | "BLOCK";
 export type ConflictKind = "none" | "PLAN_CONFLICT" | "DESIGN_CONFLICT" | "DEPENDENCY_CONFLICT" | "SCOPE_INSUFFICIENT";
 
 export const CURRENT_STATE_SCHEMA = 3;
-export const FOUNDRY_VERSION = "0.5.1";
+export const FOUNDRY_VERSION = "0.6.0";
 
 export class StateError extends Error {
 	constructor(message: string) { super(message); this.name = "StateError"; }

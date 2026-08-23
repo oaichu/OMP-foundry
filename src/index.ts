@@ -24,7 +24,7 @@ import {
 import { bootstrapFoundryProject } from "./bootstrap";
 import { CONTEXT_POLICY, phasePrompt } from "./context-policy";
 import { requireDesignIfUi, requirePlan, requireProduct } from "./gates";
-import { checkFoundryProjectRoles, checkIsolationContract } from "./omp-runtime";
+import { checkFoundryProjectRoles, checkIsolationContract, ensureGlobalFoundryRoles } from "./omp-runtime";
 import { denyToolCall, forceIsolatedTaskInput, type ToolInput } from "./permissions";
 import {
 	applyPatchArtifact,
@@ -212,7 +212,20 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", async (_event, ctx) => {
 		const { state, broken } = safeState(ctx.cwd);
 		ctx.ui.setStatus("foundry", broken ? "STATE_CORRUPT" : statusOf(state));
-		ctx.setTimeout(() => { void checkForUpdate().then((result) => { if (result.notify) ctx.ui.notify(result.notify, "info"); }).catch(() => undefined); }, 0);
+		ctx.setTimeout(() => {
+			void checkForUpdate().then((result) => { if (result.notify) ctx.ui.notify(result.notify, "info"); }).catch(() => undefined);
+			try {
+				const registered = ensureGlobalFoundryRoles();
+				if (registered.added.length > 0) {
+					ctx.ui.notify(
+						`Foundry added ${registered.added.length} model roles to /models → Roles (aliases to your existing roles; reassign freely).`,
+						"info",
+					);
+				}
+			} catch {
+				/* config write must never block a session */
+			}
+		}, 0);
 	});
 
 	pi.on("before_agent_start", async (event, ctx) => {

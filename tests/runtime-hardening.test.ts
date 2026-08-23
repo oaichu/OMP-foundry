@@ -56,3 +56,40 @@ describe("foundry role aliases", () => {
 		expect(Object.values(map).every((v) => v === "")).toBe(true);
 	});
 });
+
+describe("global role registration", () => {
+	test("registers missing foundry_* roles as @aliases without touching existing keys", () => {
+		const { ensureGlobalFoundryRoles } = require("../src/omp-runtime");
+		const dir = mkdtempSync(join(tmpdir(), "foundry-global-"));
+		const path = join(dir, "config.yml");
+		writeFileSync(path, "shellPath: /bin/bash\nmodelRoles:\n  default: x/a:high\n  foundry_plan: openai/pinned\n");
+		const result = ensureGlobalFoundryRoles({ path, roles: { default: "x/a:high", slow: "x/c:max", task: "x/d:high" } });
+		expect(result.added.length).toBe(9); // foundry_plan already present
+		expect(result.added).not.toContain("foundry_plan");
+		const text = readFileSync(path, "utf8");
+		expect(text).toContain("shellPath: /bin/bash");
+		expect(text).toContain("foundry_plan: openai/pinned"); // never overwritten
+		expect(text).toContain("foundry_redteam: @slow");
+		expect(text).toContain("foundry_impl: @task");
+		expect(text).toContain("foundry_review: @default");
+	});
+	test("idempotent: second run adds nothing", () => {
+		const { ensureGlobalFoundryRoles } = require("../src/omp-runtime");
+		const dir = mkdtempSync(join(tmpdir(), "foundry-global2-"));
+		const path = join(dir, "config.yml");
+		ensureGlobalFoundryRoles({ path, roles: { default: "x/a" } });
+		const before = readFileSync(path, "utf8");
+		const second = ensureGlobalFoundryRoles({ path, roles: { default: "x/a" } });
+		expect(second.added).toEqual([]);
+		expect(readFileSync(path, "utf8")).toBe(before);
+	});
+	test("empty roleset still writes @default for every foundry role", () => {
+		const { ensureGlobalFoundryRoles } = require("../src/omp-runtime");
+		const dir = mkdtempSync(join(tmpdir(), "foundry-global3-"));
+		const path = join(dir, "config.yml");
+		const result = ensureGlobalFoundryRoles({ path, roles: {} });
+		expect(result.added.length).toBe(10);
+		const text = readFileSync(path, "utf8");
+		expect((text.match(/: @default/g) ?? []).length).toBe(10);
+	});
+});
