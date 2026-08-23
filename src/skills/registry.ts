@@ -53,8 +53,7 @@ export function parseManifest(path: string, text: string): SkillManifest | null 
 	const rawRoles = csv(fields.roles);
 	const phases = rawPhases.filter((p): p is SkillPhase => PHASES.includes(p as SkillPhase));
 	const roles = rawRoles.filter((r): r is SkillRole => ROLES.includes(r as SkillRole));
-	if (fields.phases !== undefined && rawPhases.length > 0 && phases.length === 0) return null;
-	if (fields.roles !== undefined && rawRoles.length > 0 && roles.length === 0) return null;
+	if (rawPhases.length !== phases.length || rawRoles.length !== roles.length) return null;
 
 	return {
 		id,
