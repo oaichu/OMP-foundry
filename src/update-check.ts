@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { FOUNDRY_VERSION } from "./types";
@@ -86,4 +86,3 @@ export async function checkForUpdate(deps: UpdateCheckDeps = {}): Promise<Update
 export function versionReport(result: UpdateResult): string {
 	return [`Foundry: ${result.installed}`, `OMP: ${result.omp}`, `Latest stable: ${result.latest ?? "(unknown)"}`, result.newer ? `Update (stable): git fetch --tags && git checkout v${result.latest} then restart OMP.` : "Installed Foundry is current or newer than the latest release tag."].join("\n");
 }
-export function cacheExists(path: string): boolean { return existsSync(path); }
