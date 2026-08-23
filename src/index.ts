@@ -52,8 +52,8 @@ import {
 	plan3Status,
 } from "./plan3";
 import { deriveRelease, invalidateQa, lockArtifactHash, workingTreeClean } from "./release";
+import { roleOf } from "./skills/phase-filter";
 import { loadRegistry } from "./skills/registry";
-import type { SkillRole } from "./skills/manifest-schema";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
 import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
@@ -228,7 +228,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.on("before_agent_start", async (event, ctx) => {
 		const { state, broken } = safeState(ctx.cwd);
 		const agentName = String((event as { agent?: { name?: string }; agentName?: string }).agent?.name ?? (event as { agentName?: string }).agentName ?? "").toLowerCase();
-		const role: SkillRole | undefined = agentName.includes("plan") ? "planner" : agentName.includes("design") ? "designer" : agentName.includes("review") ? "reviewer" : agentName.includes("implement") ? "implementer" : undefined;
+		const role = roleOf(agentName);
 		const pack = broken ? [] : resolveSkillManifests(ctx.cwd, state, role ? { role } : undefined);
 		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, state.phase)}`, display: true, details: { ...state, skills: pack.map((s) => s.id) } } };
 	});
