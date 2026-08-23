@@ -5,7 +5,6 @@ import {
 	LOCKED_DESIGN_PATHS,
 	LOCKED_PLAN_PATHS,
 	LOCKED_PRODUCT_PATHS,
-	PRIVILEGED_TOOLS,
 	STATE_PATHS,
 	type AatpTicket,
 	type CompanyState,
@@ -34,7 +33,7 @@ export interface ToolInput {
 	action?: unknown; apply?: unknown; agent?: unknown; task?: unknown; tasks?: unknown; isolated?: unknown;
 }
 export interface DenyContext {
-	activeTicket?: AatpTicket; activeTickets?: AatpTicket[]; stateBroken?: string; cwd?: string;
+	activeTickets?: AatpTicket[]; stateBroken?: string; cwd?: string;
 	canonicalize?: (raw: string) => string | null; isolatedWithoutState?: boolean;
 }
 
@@ -47,11 +46,6 @@ export function collectPaths(input: ToolInput): string[] {
 		for (const match of input.input.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)) add(match[1]);
 	}
 	return out;
-}
-export function looksLikeImpl(rel: string): boolean {
-	if (rel.startsWith("docs/") || rel.endsWith(".md")) return false;
-	if (/\.(ts|tsx|js|jsx|mjs|cjs|vue|svelte|kt|kts|java|cs|xaml|py|go|rs|swift|dart|php|rb|c|cc|cpp|h|hpp|m|mm)$/i.test(rel)) return true;
-	return /^(src|app|lib|cmd|pkg|internal|android|ios|windows|server|backend|frontend)\//.test(rel);
 }
 function matchesAny(rel: string, needles: string[]): boolean { return needles.some((needle) => underPrefix(rel, needle)); }
 export function pathAllowed(rel: string, ticket: AatpTicket): boolean {
@@ -88,7 +82,7 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 		return;
 	}
 	if (!FILE_MUTATING.has(toolName)) return;
-	if (ctx.stateBroken && !PRIVILEGED_TOOLS.has(toolName)) return { block: true, reason: `STATE_CORRUPT: ${ctx.stateBroken}. Fix .omp/foundry-state.yml.` };
+	if (ctx.stateBroken) return { block: true, reason: `STATE_CORRUPT: ${ctx.stateBroken}. Fix .omp/foundry-state.yml.` };
 	const rawPaths = collectPaths(input);
 	if (rawPaths.length === 0) return { block: true, reason: `PATH_GATE: ${toolName} did not expose a verifiable target path.` };
 	const rels: string[] = [];
@@ -130,7 +124,7 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 		return;
 	}
 	if (state.design.required && !designAllowsUi(state)) return { block: true, reason: "DESIGN_GATE: implementation denied until /design approve or skip." };
-	const tickets = ctx.activeTickets ?? (ctx.activeTicket ? [ctx.activeTicket] : []);
+	const tickets = ctx.activeTickets ?? [];
 	if (tickets.length === 0) return { block: true, reason: "AATP_SCOPE: no active ticket." };
 	const bad = rels.filter((p) => !tickets.some((t) => pathAllowed(p, t)));
 	if (bad.length) return { block: true, reason: `AATP_SCOPE: no active ticket allows ${bad.join(", ")}.` };
