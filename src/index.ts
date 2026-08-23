@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -21,9 +21,10 @@ import {
 	validateAatpSpecs,
 	writeAatpIndex,
 } from "./aatp";
+import { bootstrapFoundryProject } from "./bootstrap";
 import { CONTEXT_POLICY, phasePrompt } from "./context-policy";
 import { requireDesignIfUi, requirePlan, requireProduct } from "./gates";
-import { checkFoundryProjectRoles, checkIsolationContract, ensureProjectFoundryConfig, narrowFoundryGitignore } from "./omp-runtime";
+import { checkFoundryProjectRoles, checkIsolationContract } from "./omp-runtime";
 import { denyToolCall, forceIsolatedTaskInput, type ToolInput } from "./permissions";
 import {
 	applyPatchArtifact,
@@ -72,13 +73,6 @@ type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
 type PendingPlanRun = { stage: ActivePlanStage; agent: string; index: number };
 
 function token(): string { return randomBytes(16).toString("hex"); }
-function copyTemplate(cwd: string, name: string): void {
-	const dest = join(cwd, "docs", name);
-	if (existsSync(dest)) return;
-	mkdirSync(dirname(dest), { recursive: true });
-	const src = join(ROOT, "templates", name);
-	if (existsSync(src)) writeFileSync(dest, readFileSync(src, "utf8"), "utf8");
-}
 function persist(cwd: string, state: CompanyState): CompanyState { saveState(cwd, state); return state; }
 function orchestrate(pi: ExtensionAPI, title: string, body: string): void { pi.sendUserMessage([title, "", body, "", CONTEXT_POLICY].join("\n")); }
 function productOk(state: CompanyState): boolean { return state.product.status === "approved" || state.product.status === "locked"; }
@@ -115,12 +109,18 @@ function enterOrResumePlan3(pi: ExtensionAPI, cwd: string, state: CompanyState, 
 function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 	const loaded = safeState(cwd);
 	if (loaded.broken) { orchestrate(pi, "Foundry state blocked.", loaded.broken); return; }
-	const state = loaded.state;
 	const idea = args.trim();
 	if (loaded.missing) {
-		orchestrate(pi, "Start the foundry.", ["Call company_init.", idea ? `User idea: ${idea}` : "If the user has not described the product, ask one short question then spawn product-analyst.", "Then wait for /foundry-approve product."].join("\n"));
+		const boot = bootstrapFoundryProject(cwd, ROOT);
+		orchestrate(pi, "Foundry enabled for this project.", [
+			`stack=${boot.stackIds.join(",") || "unknown"} ui=${boot.ui}`,
+			`project model roles bootstrapped=${boot.rolesBootstrapped.length}`,
+			idea ? `User idea: ${idea}` : "If the user has not described the product, ask one short question.",
+			"Spawn blocking product-analyst. Then wait for /foundry-approve product.",
+		].join("\n"));
 		return;
 	}
+	const state = loaded.state;
 	if (!productOk(state)) { orchestrate(pi, "Finish the product.", "Spawn blocking product-analyst. Wait for /foundry-approve product. Do not plan or code."); return; }
 	if (state.master_plan.status !== "locked") { enterOrResumePlan3(pi, cwd, state); return; }
 	if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") { orchestrate(pi, "Design is required.", "Spawn blocking design-foundation, build a real preview, then wait for /design approve or /design skip."); return; }
@@ -303,15 +303,10 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		return { content: [{ type: "text", text: JSON.stringify(publicState, null, 2) }], details: publicState };
 	} });
 
-	pi.registerTool({ name: "company_init", label: "Foundry Init", description: "Create Foundry docs/state and project-scoped OMP defaults without mutating global OMP configuration.", loadMode: "essential", approval: "write", parameters: z.object({ name: z.string().optional() }), async execute(_id, params, _session, _user, ctx) {
-		mkdirSync(join(ctx.cwd, "docs", "planning"), { recursive: true }); mkdirSync(join(ctx.cwd, "docs", "AATP"), { recursive: true }); mkdirSync(join(ctx.cwd, "docs", "reports"), { recursive: true });
-		for (const name of ["PRODUCT.md", "MASTER_PLAN.md", "DESIGN.md", "SECURITY.md", "ARCHITECTURE.md", "AATP.md", "RELEASE_REPORT.md"]) copyTemplate(ctx.cwd, name);
-		if (!existsSync(join(ctx.cwd, MARKER))) writeFileSync(join(ctx.cwd, MARKER), "OMP Foundry governed repository.\n", "utf8");
-		narrowFoundryGitignore(ctx.cwd); const config = ensureProjectFoundryConfig(ctx.cwd);
-		const existed = stateFileExists(ctx.cwd), state = existed ? loadState(ctx.cwd) : defaultState(), stack = detectStack(ctx.cwd);
-		if (!existed) { state.design.required = stack.ui; state.phase = "discovery"; persist(ctx.cwd, state); }
-		ctx.ui.setStatus("foundry", statusOf(state));
-		return { content: [{ type: "text", text: `${existed ? "Kept" : "Initialized"} Foundry. stack=${stack.ids.join(",")} ui=${stack.ui} project_config=${config.created ? "created" : "updated-without-global-mutation"} foundry_roles=${config.rolesBootstrapped.length} name=${params.name ?? ""}` }], details: state };
+	pi.registerTool({ name: "company_init", label: "Foundry Init", description: "Advanced/manual bootstrap. /foundry auto-bootstraps new projects using this same project-local path.", loadMode: "essential", approval: "write", parameters: z.object({ name: z.string().optional() }), async execute(_id, params, _session, _user, ctx) {
+		const boot = bootstrapFoundryProject(ctx.cwd, ROOT);
+		ctx.ui.setStatus("foundry", statusOf(boot.state));
+		return { content: [{ type: "text", text: `${boot.existed ? "Kept" : "Initialized"} Foundry. stack=${boot.stackIds.join(",")} ui=${boot.ui} project_config=${boot.configCreated ? "created" : "updated-without-global-mutation"} foundry_roles=${boot.rolesBootstrapped.length} name=${params.name ?? ""}` }], details: boot.state };
 	} });
 
 	pi.registerTool({ name: "foundry_exec", label: "Foundry Design Verify", description: "Run one detected verification command during unlocked design only; no arbitrary command input.", loadMode: "essential", approval: "write", parameters: z.object({ id: z.string() }), async execute(_id, params, _session, _user, ctx) {
@@ -328,10 +323,10 @@ export default function ompCompanyWorkflow(pi: ExtensionAPI): void {
 		return { content: [{ type: "text", text: bodies.join("\n\n") }], details: { ids: wanted } };
 	} });
 
-	pi.registerCommand("foundry", { description: "Next legal Foundry step", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
+	pi.registerCommand("foundry", { description: "Auto-bootstrap this repo if needed, then run the next legal Foundry step", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
 	pi.registerCommand("company", { description: "Alias of /foundry", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
-	const initHandler = async (args: string, ctx: { cwd: string; waitForIdle: () => Promise<void> }) => { await ctx.waitForIdle(); orchestrate(pi, "Bootstrap Foundry.", ["Call company_init.", "Then run /foundry-doctor. Foundry model roles are project-scoped and may be adjusted in /model → Roles.", "If docs/PRODUCT.md is still a stub, spawn blocking product-analyst.", "Then wait for /foundry-approve product.", args.trim() ? `Project: ${args.trim()}` : ""].filter(Boolean).join("\n")); };
-	pi.registerCommand("foundry-init", { description: "Bootstrap PRODUCT/docs + Foundry project config/state", handler: initHandler });
+	const initHandler = async (_args: string, ctx: { cwd: string; waitForIdle: () => Promise<void> }) => { await ctx.waitForIdle(); const boot = bootstrapFoundryProject(ctx.cwd, ROOT); orchestrate(pi, boot.existed ? "Foundry already initialized." : "Foundry initialized manually.", "Use /foundry as the normal entrypoint. /foundry-doctor is available for diagnostics."); };
+	pi.registerCommand("foundry-init", { description: "Advanced/manual project bootstrap; normal users can just run /foundry", handler: initHandler });
 	pi.registerCommand("company-init", { description: "Alias of /foundry-init", handler: initHandler });
 	pi.registerCommand("foundry-doctor", { description: "Check OMP isolation and project-scoped Foundry model roles", handler: async (_args, ctx) => {
 		const isolation = checkIsolationContract(ctx.cwd), roles = checkFoundryProjectRoles(ctx.cwd);
