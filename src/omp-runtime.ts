@@ -55,9 +55,15 @@ function effectiveRoles(cwd: string): Record<string, string> {
 	}
 }
 
-function fallbackRoleMap(cwd: string): Record<(typeof FOUNDRY_MODEL_ROLES)[number], string> {
-	const roles = effectiveRoles(cwd);
-	const pick = (...names: string[]) => names.map((name) => roles[name]).find((value) => typeof value === "string" && value.trim()) || "";
+export function aliasRoleMap(roles: Record<string, string>): Record<(typeof FOUNDRY_MODEL_ROLES)[number], string> {
+	// Bootstrap writes cross-role aliases (e.g. "@slow"), not concrete model
+	// ids: the role keeps following the user's own OMP roles when they
+	// reassign them in /models, and never goes stale. Users who want a
+	// specific model overwrite the alias with a model id.
+	const pick = (...names: string[]) => {
+		const role = names.find((name) => typeof roles[name] === "string" && roles[name].trim());
+		return role ? `@${role}` : "";
+	};
 	return {
 		foundry_product: pick("default", "task", "slow"),
 		foundry_plan: pick("plan", "slow", "default", "task"),
@@ -70,6 +76,10 @@ function fallbackRoleMap(cwd: string): Record<(typeof FOUNDRY_MODEL_ROLES)[numbe
 		foundry_review: pick("review", "default", "slow"),
 		foundry_security: pick("slow", "advisor", "review", "default"),
 	};
+}
+
+function fallbackRoleMap(cwd: string): Record<(typeof FOUNDRY_MODEL_ROLES)[number], string> {
+	return aliasRoleMap(effectiveRoles(cwd));
 }
 
 function topLevelBlock(text: string, key: string): { start: number; end: number; lines: string[] } | undefined {

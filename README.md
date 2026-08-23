@@ -168,7 +168,7 @@ docs/reports/QA.md              real command output
 
 ### Roles — pour your own metals
 
-On `/foundry-init`, Foundry bootstraps its own **project-local model roles** in `.omp/config.yml` — `foundry_plan` (draft), `foundry_redteam` (attack the draft), `foundry_synth` (write the locked plan) — mapped onto the OMP roles you already have. Your global OMP config is never touched, and existing config is never overwritten (`roles.example.yml` is a manual starting skeleton if you want full control).
+On `/foundry-init`, Foundry bootstraps its own **project-local model roles** in `.omp/config.yml` — `foundry_plan` (draft), `foundry_redteam` (attack the draft), `foundry_synth` (write the locked plan) and friends. Each is written as a **cross-role alias** (`foundry_redteam: "@slow"`), so it keeps following your OMP roles when you reassign them in `/models` — and never goes stale. Want a specific model for one stage? Overwrite the alias with any model id (`provider/model:level`). Your global OMP config is never touched, and existing config is never overwritten (`roles.example.yml` is a manual starting skeleton if you want full control).
 
 | Foundry role | Maps onto | Typical OMP role |
 | --- | --- | --- |
