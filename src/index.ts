@@ -79,19 +79,24 @@ const LIFECYCLE_TOOLS = new Set(["aatp_begin", "aatp_complete", "aatp_block", "a
 const PLAN_AGENTS = new Set(["plan-drafter", "plan-redteam", "plan-synth"]);
 const AATP_COMPILER = "aatp-compiler";
 const TASK_AGENTS = new Set([
-	"product-analyst", "design-foundation", "scout", ...PLAN_AGENTS, AATP_COMPILER,
+	"product-analyst", "design-foundation", ...PLAN_AGENTS, AATP_COMPILER,
 	"implementer", "hard-implementer", "smol-implementer", "reviewer", "security-reviewer",
 ]);
 const MUTATING_TASK_TOOLS = new Set(["task", "write", "edit", "ast_edit", "apply_patch", "foundry_init", "foundry_exec"]);
 const CAPABILITY_FAILURE_LIMIT = 3;
 const CAPABILITY_TTL_MS = 30 * 60 * 1000;
+const DEFAULT_STAGE_TIMEOUT_MS = 6 * 60 * 1000;
+const MIN_STAGE_TIMEOUT_MS = 2 * 60 * 1000;
+const MAX_STAGE_TIMEOUT_MS = 30 * 60 * 1000;
 const CAPABILITY_BROKER_SYMBOL = Symbol.for("omp-foundry.capability-broker");
 
 type PendingRun = { bindings: TaskBinding[]; startedClean: boolean; headAtDispatch: string };
 type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
-type CapabilityRun = { epoch: string; index: number; cwd: string; capability: string; createdAt: number; sessionId?: string; invalidAttempts: number; revoked: boolean; writeHashes?: Map<string, string> };
+type CapabilityRun = { epoch: string; index: number; cwd: string; capability: string; createdAt: number; sessionId?: string; invalidAttempts: number; revoked: boolean; timedOut?: boolean; writeHashes?: Map<string, string> };
 type PendingPlanRun = CapabilityRun & { stage: ActivePlanStage; agent: string; beforeHash?: string };
 type PendingAatpRun = CapabilityRun & { agent: typeof AATP_COMPILER };
+type ManagedStageContext = { setTimeout(callback: () => void, ms: number): unknown; clearTimer(timer: unknown): void; abort?: () => void };
+type StageWatchdog = { context: ManagedStageContext; timer: unknown };
 type CapabilityGuard = { attempts: number; tripped: boolean; updatedAt: number };
 type CapabilityBroker = {
 	pendingPlan: Map<string, PendingPlanRun>;
@@ -107,6 +112,12 @@ function capabilityBroker(): CapabilityBroker {
 	const created: CapabilityBroker = { pendingPlan: new Map(), pendingAatp: new Map(), failures: new Map() };
 	globals[CAPABILITY_BROKER_SYMBOL] = created;
 	return created;
+}
+
+function stageTimeoutMs(): number {
+	const configured = Number(process.env.FOUNDRY_STAGE_TIMEOUT_MS ?? "");
+	if (!Number.isFinite(configured) || configured <= 0) return DEFAULT_STAGE_TIMEOUT_MS;
+	return Math.min(MAX_STAGE_TIMEOUT_MS, Math.max(MIN_STAGE_TIMEOUT_MS, Math.trunc(configured)));
 }
 
 function capabilitySessionId(ctx: unknown): string | undefined {
@@ -438,6 +449,23 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	const broker = capabilityBroker();
 	const pendingPlan = broker.pendingPlan;
 	const pendingAatp = broker.pendingAatp;
+	const stageWatchdogs = new Map<CapabilityRun, StageWatchdog>();
+	const clearStageWatchdog = (run: CapabilityRun): void => {
+		const watchdog = stageWatchdogs.get(run);
+		if (!watchdog) return;
+		try { watchdog.context.clearTimer(watchdog.timer); } catch { /* the OMP session may already be disposed */ }
+		stageWatchdogs.delete(run);
+	};
+	const armStageWatchdog = (run: CapabilityRun, ctx: unknown): void => {
+		if (stageWatchdogs.has(run)) return;
+		const context = ctx as ManagedStageContext;
+		const timeout = stageTimeoutMs();
+		const timer = context.setTimeout(() => {
+			run.timedOut = true;
+			try { context.abort?.(); } catch { /* the result handler remains authoritative */ }
+		}, timeout);
+		stageWatchdogs.set(run, { context, timer });
+	};
 	const capabilityFailure = (key: string, active?: CapabilityRun, revokeActive = true): CapabilityGuard => {
 		const now = Date.now();
 		const current = broker.failures.get(key) ?? { attempts: 0, tripped: false, updatedAt: now };
@@ -580,6 +608,8 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const planRun = PLAN_AGENTS.has(agentName) ? [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.agent === agentName && candidate.epoch === state.planning.epoch && candidate.stage === state.planning.stage) : undefined;
 		if (compiler && sessionId) compiler.sessionId ??= sessionId;
 		if (planRun && sessionId) planRun.sessionId ??= sessionId;
+		if (compiler) armStageWatchdog(compiler, ctx);
+		if (planRun) armStageWatchdog(planRun, ctx);
 		const capabilityHint = compiler ? `\nCompiler capability (use only with foundry_aatp_write): ${compiler.capability}` : planRun ? `\nPlan3 capability (use only with foundry_plan_write): ${planRun.capability}` : "";
 		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, skillState.phase)}${capabilityHint}`, display: true, details: { ...state, skills: pack.map((s) => s.id) } } };
 	});
@@ -626,7 +656,6 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				}
 			}
 			if (items.some((item) => item.agent === AATP_COMPILER || PLAN_AGENTS.has(item.agent)) && loaded.state.mode !== "plan3" && !(loaded.state.phase === "aatp" && !loaded.state.aatp.manifest_sha256)) return { block: true, reason: "TASK_GATE: planning/compiler agents are only legal in their owning phase." };
-			if (items.some((item) => item.agent === "scout") && !(loaded.state.mode === "plan3" && loaded.state.planning.stage === "draft")) return { block: true, reason: "TASK_GATE: scout is only legal as a draft-stage evidence helper." };
 			if (items.some((item) => item.agent === "product-analyst") && loaded.state.phase !== "discovery") return { block: true, reason: "TASK_GATE: product-analyst is only legal during discovery." };
 			if (items.some((item) => item.agent === "design-foundation") && (loaded.state.phase !== "design" || loaded.state.design.status === "locked")) return { block: true, reason: "TASK_GATE: design-foundation is only legal while design is unlocked." };
 			if (governedTask(raw)) {
@@ -677,6 +706,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (!key) return;
 		const planRun = pendingPlan.get(key);
 		if (planRun) {
+			clearStageWatchdog(planRun);
 			pendingPlan.delete(key);
 			if (planRun.revoked) return capabilityCircuit("PLAN3");
 			const currentPlanState = loadState(ctx.cwd);
@@ -684,7 +714,10 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 			const result = resultForPlan(extractTaskResults(event.details), planRun);
 			const taskFailed = !result || result.exitCode !== 0 || Boolean(result.error) || result.aborted === true;
 			const terminalWrite = capabilityWriteMatches(ctx.cwd, planRun, PLAN3_ARTIFACTS[planRun.stage]);
-			if (taskFailed && !terminalWrite) return { isError: true, content: [{ type: "text" as const, text: `PLAN3_STAGE_FAILED: ${planRun.stage} did not complete; stage remains unchanged.` }] };
+			if (taskFailed && !terminalWrite) {
+				const prefix = planRun.timedOut ? `PLAN3_STAGE_TIMEOUT: ${planRun.stage} exceeded ${Math.round(stageTimeoutMs() / 60000)} minutes` : `PLAN3_STAGE_FAILED: ${planRun.stage} did not complete`;
+				return { isError: true, content: [{ type: "text" as const, text: `${prefix}; stage remains unchanged. Respawn the same stage once with a fresh child context; do not restart completed stages or guess a capability.` }] };
+			}
 			const artifactHash = hashPlan3Artifact(ctx.cwd, planRun.stage);
 			if (!artifactHash || artifactHash === planRun.beforeHash) return { isError: true, content: [{ type: "text" as const, text: `PLAN3_ARTIFACT_GATE: ${planRun.stage} artifact was not newly produced by the task.` }] };
 			const state = loadState(ctx.cwd), completed = completePlan3Stage(ctx.cwd, state, planRun.stage, artifactHash);
@@ -695,6 +728,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		}
 		const aatpRun = pendingAatp.get(key);
 		if (aatpRun) {
+			clearStageWatchdog(aatpRun);
 			pendingAatp.delete(key);
 			if (aatpRun.revoked) return capabilityCircuit("AATP");
 			if (aatpRun.cwd !== ctx.cwd) return { isError: true, content: [{ type: "text" as const, text: "AATP_COMPILER_GATE: compiler result arrived for a different project context." }] };
@@ -712,7 +746,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 					terminalWrites = indexWritten && specsWritten;
 				} catch { terminalWrites = false; }
 			}
-			if (taskFailed && !terminalWrites) return aatpCompilerError(ctx.cwd, "AATP_COMPILER_FAILED: compiler did not complete; the manifest remains unsealed.");
+			if (taskFailed && !terminalWrites) return aatpCompilerError(ctx.cwd, aatpRun.timedOut ? `AATP_COMPILER_TIMEOUT: compiler exceeded ${Math.round(stageTimeoutMs() / 60000)} minutes; the manifest remains unsealed. Respawn the compiler once with a fresh context.` : "AATP_COMPILER_FAILED: compiler did not complete; the manifest remains unsealed. Respawn it once with a fresh context.");
 			try {
 				const state = loadState(ctx.cwd), specs = listAatpSpecs(ctx.cwd), sourceManifest = aatpManifestHash(ctx.cwd);
 				if (state.master_plan.status !== "locked" || (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required")) return aatpCompilerError(ctx.cwd, "AATP_COMPILER_GATE: plan/design must remain locked while compiling AATP.");

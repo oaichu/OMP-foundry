@@ -13,6 +13,15 @@ describe("agent skill dependencies", () => {
 		expect(text).toContain("foundry_aatp_write");
 		expect(text).not.toContain('model: "@foundry_aatp"');
 	});
+	test("all Master Plan stages keep max reasoning without nested context expansion", () => {
+		for (const file of ["plan-drafter.md", "plan-redteam.md", "plan-synth.md"]) {
+			const text = readFileSync(join(root, "agents", file), "utf8");
+			expect(text).toContain("thinking-level: max");
+			expect(text).not.toContain("web_search");
+			expect(text).not.toContain("spawns:");
+			expect(text).not.toContain(", task,");
+		}
+	});
 	test("every autoloadSkills id is packaged by Foundry", () => {
 		const packaged = new Set(loadRegistry(join(root, "skills")).map((skill) => skill.id));
 		const missing: string[] = [];

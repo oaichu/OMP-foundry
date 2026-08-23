@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.4 — reliable bounded Plan3 stages
+
+- keep Draft, Redteam, and Synth at maximum reasoning while removing nested planning helpers and broad tool expansion;
+- add a managed six-minute stage watchdog with configurable bounds so stalled provider streams abort instead of hanging indefinitely;
+- preserve fail-closed stage state and require a fresh-context retry of the same stage when no terminal artifact was written;
+- document bounded evidence reads and add regression coverage for stalled stages and max-reasoning agent configuration.
+
 ## 0.7.3 — terminal capability completion
 
 - synchronize the runtime version with the package/release version;

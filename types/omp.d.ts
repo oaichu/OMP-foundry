@@ -5,7 +5,9 @@ declare module "@oh-my-pi/pi-coding-agent" {
 			notify(message: string, level?: "info" | "warning" | "error"): void;
 			setStatus(key: string, value: string): void;
 		};
-		setTimeout(callback: () => void, ms: number): void;
+		setTimeout(callback: () => void, ms: number): unknown;
+		clearTimer(timer: unknown): void;
+		abort(): void;
 		waitForIdle(): Promise<void>;
 	}
 

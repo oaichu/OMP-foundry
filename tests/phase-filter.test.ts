@@ -23,7 +23,7 @@ describe("role-aware skill routing", () => {
 	});
 
 	test("unknown agents have no role", () => {
-		expect(roleOf("scout")).toBeUndefined();
+		expect(roleOf("retired-helper")).toBeUndefined();
 		expect(roleOf(undefined)).toBeUndefined();
 	});
 

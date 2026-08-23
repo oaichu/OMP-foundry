@@ -36,8 +36,22 @@ function ctx(cwd: string, sessionId = "test-session", agent?: string) {
 		sessionManager: { getSessionId: () => sessionId, getEntries: () => agent ? [{ type: "session_init", agent }] : [] },
 		ui: { notify() {}, setStatus() {} },
 		setTimeout() {},
+		clearTimer() {},
 		abort() {},
 		async waitForIdle() {},
+	};
+}
+
+function watchdogCtx(cwd: string, sessionId: string, agent: string) {
+	let timeoutCallback: (() => void) | undefined;
+	let aborted = false;
+	return {
+		...ctx(cwd, sessionId, agent),
+		setTimeout(callback: () => void) { timeoutCallback = callback; return "stage-watchdog"; },
+		clearTimer() {},
+		abort() { aborted = true; },
+		triggerTimeout() { timeoutCallback?.(); },
+		wasAborted() { return aborted; },
 	};
 }
 
@@ -104,16 +118,6 @@ describe("extension integration smoke", () => {
 		const blocked = await taskHook({ toolName: "write", input: { path: "src/x.ts" } }, ctx(markerOnly));
 		expect(blocked.block).toBe(true);
 		expect(blocked.reason).toContain("STATE_MISSING_GATE");
-	});
-
-	test("planning scout is scoped to the draft stage", async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "foundry-scout-gate-"));
-		const state = defaultState(); state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
-		const { handlers } = harness(); const taskHook = handlers.get("tool_call")![0];
-		expect(await taskHook({ toolName: "task", toolCallId: "scout-draft", input: { agent: "scout", task: "inspect repository evidence" } }, ctx(cwd))).toBeUndefined();
-		state.mode = "normal"; state.phase = "implementation"; saveState(cwd, state);
-		const blocked = await taskHook({ toolName: "task", toolCallId: "scout-normal", input: { agent: "scout", task: "inspect repository evidence" } }, ctx(cwd));
-		expect(blocked.reason).toContain("scout is only legal");
 	});
 
 	test("design approve handler executes and locks without runtime ReferenceError", async () => {
@@ -236,6 +240,24 @@ describe("extension integration smoke", () => {
 		const written = await tools.get("foundry_plan_write")!.execute("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md", content: "# Draft\n", capability }, "session", null, ctx(cwd, "plan-session"));
 		expect(written.isError).not.toBe(true);
 		expect(readFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "utf8")).toContain("Draft");
+	});
+
+	test("Plan3 stage watchdog aborts a stalled stage without advancing state", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-watchdog-"));
+		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
+		const state = defaultState(); state.product.status = "approved"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
+		const { handlers } = harness();
+		const taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
+		await taskHook({ toolName: "task", toolCallId: "stalled-plan", input: { agent: "plan-drafter", task: "draft the plan" } }, ctx(cwd));
+		const stalled = watchdogCtx(cwd, "plan-session", "plan-drafter");
+		await agentHook({}, stalled);
+		stalled.triggerTimeout();
+		expect(stalled.wasAborted()).toBe(true);
+		const failed = await resultHook({ toolName: "task", toolCallId: "stalled-plan", details: { results: [{ index: 0, agent: "plan-drafter", exitCode: 1, aborted: true }] } }, stalled);
+		expect(failed.isError).toBe(true);
+		expect(failed.content[0].text).toContain("PLAN3_STAGE_TIMEOUT");
+		expect(failed.content[0].text).toContain("fresh child context");
+		expect(loadState(cwd).planning.stage).toBe("draft");
 	});
 
 	test("Plan3 advances after a terminal capability write despite a provider post-write failure", async () => {

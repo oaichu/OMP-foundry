@@ -57,7 +57,7 @@ export function plan3Instruction(state: CompanyState): string {
 	if (stage === "idle") return "Plan3 is idle. Run /plan3 to start.";
 	const agent = PLAN3_AGENTS[stage];
 	const artifact = PLAN3_ARTIFACTS[stage];
-	return `Spawn exactly one blocking ${agent}. It owns only ${artifact}. Read skill://master-plan-method. Do not spawn another Plan3 stage until this task settles.`;
+	return `Spawn exactly one blocking ${agent}. It owns only ${artifact}. Read skill://master-plan-method. Use grep/glob first, then bounded reads (path:start-end, max 200 lines); do one evidence pass and write the artifact immediately. Do not spawn another Plan3 stage until this task settles.`;
 }
 
 export function hashPlan3Artifact(cwd: string, stage: Exclude<Plan3Stage, "idle" | "awaiting_lock">): string | undefined {
