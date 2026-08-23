@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -24,12 +24,17 @@ export function trustedExecutable(cwd: string, executable: string): string | und
 	const repoRoot = resolve(cwd);
 	for (const candidate of candidates) {
 		try {
-			const stat = lstatSync(candidate);
-			if (!stat.isFile() || stat.isSymbolicLink()) continue;
-			const rel = relative(repoRoot, resolve(candidate));
-			if (!explicitPath && (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel)))) continue;
+			const linkStat = lstatSync(candidate);
+			const resolvedCandidate = linkStat.isSymbolicLink() ? realpathSync(candidate) : candidate;
+			const stat = lstatSync(resolvedCandidate);
+			if (!stat.isFile()) continue;
+			const rel = relative(repoRoot, resolve(resolvedCandidate));
+			// System shims (notably Linux/macOS npm) may be symlinks, but an
+			// executable whose resolved target is inside the governed repo is
+			// never trusted, even when the caller supplied an explicit path.
+			if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) continue;
 			if (process.platform !== "win32" && (stat.mode & 0o111) === 0) continue;
-			return candidate;
+			return resolvedCandidate;
 		} catch { /* try the next trusted PATH entry */ }
 	}
 	return undefined;

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.1 — verification portability patch
+
+- Resolve trusted system executable shims (including Linux/macOS `npm` symlinks) before verification while continuing to reject targets inside the governed repository.
+
 ## 0.7.0 — security and provenance hardening
 
 - Added schema v6 provenance fields for implementation, verification, review, dependency, manifest, scope evidence, and a bounded baseline/commit ledger.
