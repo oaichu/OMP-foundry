@@ -49,11 +49,6 @@ export function expectedPlan3Agent(state: CompanyState): string | undefined {
 	return stage === "draft" || stage === "redteam" || stage === "synth" ? PLAN3_AGENTS[stage] : undefined;
 }
 
-export function expectedPlan3Artifact(state: CompanyState): string | undefined {
-	const stage = state.planning.stage;
-	return stage === "draft" || stage === "redteam" || stage === "synth" ? PLAN3_ARTIFACTS[stage] : undefined;
-}
-
 export function plan3Instruction(state: CompanyState): string {
 	const stage = state.planning.stage;
 	if (stage === "awaiting_lock") return "Plan3 synthesis is complete. Do not edit planning artifacts. Human must run /foundry-approve plan.";
