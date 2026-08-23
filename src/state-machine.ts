@@ -6,8 +6,10 @@ import {
 	type CompanyState,
 	CONFLICT_KINDS,
 	CURRENT_STATE_SCHEMA,
+	FOUNDRY_MODES,
 	FOUNDRY_VERSION,
 	PHASES,
+	PLAN3_STAGES,
 	QA_STATUSES,
 	REVIEW_VERDICTS,
 	STATE_PATHS,
@@ -74,8 +76,13 @@ export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): 
 	else base.schema_version = 0;
 	base.created_by = pick(yaml, "created_by") ?? (opts.allowLegacy ? "" : base.created_by);
 	base.last_written_by = pick(yaml, "last_written_by") ?? (opts.allowLegacy ? "" : base.last_written_by);
+	base.mode = mustEnum(pick(yaml, "mode") ?? "normal", FOUNDRY_MODES, "mode");
 	base.phase = mustEnum(pick(yaml, "phase"), PHASES, "phase");
-	const product = pickBlock(yaml, "product"), plan = pickBlock(yaml, "master_plan"), design = pickBlock(yaml, "design"), aatp = pickBlock(yaml, "aatp"), qa = pickBlock(yaml, "qa"), release = pickBlock(yaml, "release"), conflict = pickBlock(yaml, "conflict");
+	const planning = pickBlock(yaml, "planning"), product = pickBlock(yaml, "product"), plan = pickBlock(yaml, "master_plan"), design = pickBlock(yaml, "design"), aatp = pickBlock(yaml, "aatp"), qa = pickBlock(yaml, "qa"), release = pickBlock(yaml, "release"), conflict = pickBlock(yaml, "conflict");
+	base.planning.stage = mustEnum(pick(planning, "stage") ?? "idle", PLAN3_STAGES, "planning.stage");
+	base.planning.draft_sha256 = pick(planning, "draft_sha256") ?? "";
+	base.planning.review_sha256 = pick(planning, "review_sha256") ?? "";
+	base.planning.final_sha256 = pick(planning, "final_sha256") ?? "";
 	base.product.status = mustEnum(pick(product, "status"), ARTIFACT_STATUSES, "product.status");
 	base.product.sha256 = pick(product, "sha256") ?? "";
 	base.master_plan.status = mustEnum(pick(plan, "status"), ARTIFACT_STATUSES, "master_plan.status");
@@ -125,7 +132,8 @@ function serializeTickets(tickets: Record<string, AatpTicket>): string[] {
 
 export function serializeState(state: CompanyState): string {
 	return [
-		`schema_version: ${state.schema_version}`, `created_by: "${state.created_by}"`, `last_written_by: "${state.last_written_by}"`, `phase: ${state.phase}`,
+		`schema_version: ${state.schema_version}`, `created_by: "${state.created_by}"`, `last_written_by: "${state.last_written_by}"`, `mode: ${state.mode}`, `phase: ${state.phase}`,
+		"planning:", `  stage: ${state.planning.stage}`, `  draft_sha256: "${state.planning.draft_sha256}"`, `  review_sha256: "${state.planning.review_sha256}"`, `  final_sha256: "${state.planning.final_sha256}"`,
 		"product:", `  status: ${state.product.status}`, `  sha256: "${state.product.sha256}"`,
 		"master_plan:", `  version: "${state.master_plan.version}"`, `  status: ${state.master_plan.status}`, `  sha256: "${state.master_plan.sha256}"`,
 		"design:", `  required: ${state.design.required}`, `  version: "${state.design.version}"`, `  status: ${state.design.status}`, `  sha256: "${state.design.sha256}"`,
