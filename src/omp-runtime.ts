@@ -193,7 +193,10 @@ export function ensureProjectIsolationConfig(cwd: string): { created: boolean; p
 	return { created: result.created, path: result.path };
 }
 
-export function checkFoundryProjectRoles(cwd: string): { ok: boolean; missing: string[]; storageProject: boolean; reason?: string } {
+export function checkFoundryProjectRoles(
+	cwd: string,
+	userConfig: string = userConfigPath(),
+): { ok: boolean; missing: string[]; storageProject: boolean; reason?: string } {
 	try {
 		const path = join(cwd, ".omp", "config.yml");
 		const text = readFileSync(path, "utf8");
@@ -208,7 +211,7 @@ export function checkFoundryProjectRoles(cwd: string): { ok: boolean; missing: s
 		// project scope only needs to override them, not duplicate them.
 		for (const role of missingRoleKeys(text)) {
 			try {
-				const globalText = readFileSync(userConfigPath(), "utf8");
+				const globalText = readFileSync(userConfig, "utf8");
 				const globalBlock = topLevelBlock(globalText, "modelRoles");
 				if (globalBlock && new RegExp(`^\\s{2}${role}:\\s*\\S`, "m").test(globalBlock.lines.join("\n"))) present.add(role);
 			} catch {

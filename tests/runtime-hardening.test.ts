@@ -28,9 +28,20 @@ describe("OMP isolation + project scope contract", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-role-doctor-"));
 		const made = ensureProjectFoundryConfig(dir);
 		writeFileSync(made.path, "modelRoleStorage: project\nmodelRoles:\n  foundry_plan: openai/example\n");
-		const result = checkFoundryProjectRoles(dir);
+		// hermetic: point the user-level lookup at a file that does not exist
+		const result = checkFoundryProjectRoles(dir, join(dir, "no-user-config.yml"));
 		expect(result.ok).toBe(false);
 		expect(result.missing).toContain("foundry_redteam");
+	});
+	test("doctor accepts roles satisfied at user level", () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-role-doctor-global-"));
+		const made = ensureProjectFoundryConfig(dir);
+		writeFileSync(made.path, "modelRoleStorage: project\n");
+		const userConfig = join(dir, "user-config.yml");
+		writeFileSync(userConfig, 'modelRoles:\n  foundry_redteam: "@slow"\n  foundry_plan: openai/example\n');
+		const result = checkFoundryProjectRoles(dir, userConfig);
+		expect(result.missing).not.toContain("foundry_redteam");
+		expect(result.missing).not.toContain("foundry_plan");
 	});
 	test("narrows legacy .omp ignore without hiding project config", () => { const dir = mkdtempSync(join(tmpdir(), "foundry-ignore-")); writeFileSync(join(dir, ".gitignore"), "node_modules/\n.omp/\n"); narrowFoundryGitignore(dir); const text = readFileSync(join(dir, ".gitignore"), "utf8"); expect(text).not.toMatch(/^\.omp\/$/m); expect(text).toContain(".omp/foundry-state.yml"); expect(text).not.toContain(".omp/config.yml"); });
 });
