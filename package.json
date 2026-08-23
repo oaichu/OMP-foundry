@@ -1,6 +1,6 @@
 {
   "name": "omp-foundry",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Lock the plan. Then pour the code. Governed AI foundry for Oh My Pi.",
   "license": "MIT",
   "scripts": {
