@@ -166,6 +166,28 @@ docs/reports/QA.md              real command output
 .omp/foundry-state.yml          the state machine
 ```
 
+### Uninstall — everything it touched, in order
+
+```bash
+# 1. the plugin itself
+omp plugin uninstall omp-foundry
+rm -f ~/.omp/plugins/node_modules/omp-foundry      # junction/symlink leftover (Windows)
+```
+
+If you linked a checkout with `omp plugin link .`, delete the checkout too. If you added the path under `extensions:` in `~/.omp/agent/config.yml`, remove that entry and restart OMP.
+
+```bash
+# 2. the global model roles (the plugin's only user-level write)
+sed -i '/^  foundry_/d' ~/.omp/agent/config.yml     # or delete the ten foundry_* lines in /models → Roles
+```
+
+```bash
+# 3. per governed project
+rm -rf .omp docs/.foundry-governed docs/planning docs/AATP docs/reports
+```
+
+`docs/PRODUCT.md`, `MASTER_PLAN.md`, `DESIGN.md` and the Foundry lines in `.gitignore` can go the same way; committed history is never rewritten. Nothing else in your OMP setup — providers, auth, other plugins — is affected.
+
 ### Roles — pour your own metals
 
 When the plugin first runs, it registers its **ten `foundry_*` model roles at user level** — they appear in `/models → Roles` everywhere, ready to assign. Each is written as a **cross-role alias** (`foundry_redteam: "@slow"`), so it keeps following your OMP roles when you reassign them; give one a specific model (`provider/model:level`) to pin a stage. Only missing keys are ever inserted — values you set yourself are never modified or removed. Per-project, `/foundry-init` additionally sets `modelRoleStorage: project` so `/models` edits inside a governed repo stay local (`roles.example.yml` is a manual skeleton if you want full control).
