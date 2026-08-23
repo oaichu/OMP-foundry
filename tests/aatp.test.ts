@@ -46,6 +46,13 @@ describe("aatp authority and sealing", () => {
 		expect(validateAatpCoverage(dir, [spec("AATP-1")]).join(" ")).toContain("REQ-1");
 		expect(validateAatpCoverage(dir, [{ ...spec("AATP-1"), covers: ["REQ-1", "SEC-A"] }])).toEqual([]);
 	});
+	test("covers accepts bounded model annotations while preserving concern IDs", () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-aatp-covers-")); mkdirSync(join(dir, "docs", "AATP"), { recursive: true });
+		writeFileSync(join(dir, "docs", "AATP", "AATP-101.md"), "---\nid: AATP-101\nobjective: x\ndependencies:\n  - none\nallowed_files:\n  - src/a\nforbidden_files:\n  - docs/MASTER_PLAN.md\nrisk: normal\nsecurity_sensitive: false\ncovers:\n  - REQ-1: add the command\n  - SEC-A: preserve storage\nacceptance:\n  - works\nverification:\n  - typecheck\n---\n");
+		const parsed = listAatpSpecs(dir)[0];
+		expect(parsed?.covers).toEqual(["REQ-1", "SEC-A"]);
+		expect(validateAatpSpecs([parsed!], { strict: true })).toEqual([]);
+	});
 	test("malformed inline lists fail closed", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-malformed-list-")); mkdirSync(join(dir, "docs", "AATP"), { recursive: true });
 		writeFileSync(join(dir, "docs", "AATP", "AATP-102.md"), "id: AATP-102\nobjective: x\ndependencies: [AATP-001\nallowed_files:\n  - src/a\n");

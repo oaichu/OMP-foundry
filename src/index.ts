@@ -1,6 +1,6 @@
 import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { randomBytes, randomUUID } from "node:crypto";
-import { dirname, join } from "node:path";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import {
@@ -89,7 +89,7 @@ const CAPABILITY_BROKER_SYMBOL = Symbol.for("omp-foundry.capability-broker");
 
 type PendingRun = { bindings: TaskBinding[]; startedClean: boolean; headAtDispatch: string };
 type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
-type CapabilityRun = { epoch: string; index: number; cwd: string; capability: string; createdAt: number; sessionId?: string; invalidAttempts: number; revoked: boolean };
+type CapabilityRun = { epoch: string; index: number; cwd: string; capability: string; createdAt: number; sessionId?: string; invalidAttempts: number; revoked: boolean; writeHashes?: Map<string, string> };
 type PendingPlanRun = CapabilityRun & { stage: ActivePlanStage; agent: string; beforeHash?: string };
 type PendingAatpRun = CapabilityRun & { agent: typeof AATP_COMPILER };
 type CapabilityGuard = { attempts: number; tripped: boolean; updatedAt: number };
@@ -138,6 +138,42 @@ function capabilityKey(kind: "PLAN3" | "AATP", cwd: string, epoch: string, stage
 
 function capabilityAttemptKey(base: string, sessionId?: string): string {
 	return `${base}\u0000${sessionId ?? "unknown"}`;
+}
+
+function capabilityContentHash(content: string): string {
+	return createHash("sha256").update(content, "utf8").digest("hex");
+}
+
+function recordCapabilityWrite(run: CapabilityRun, rel: string, content: string): void {
+	(run.writeHashes ??= new Map()).set(rel.toLowerCase(), capabilityContentHash(content));
+}
+
+function canonicalCapabilityPath(cwd: string, raw: string): string | null {
+	const direct = canonicalRepoPath(cwd, raw);
+	if (direct) return direct;
+	if (!isAbsolute(raw)) return null;
+	const root = safeRepoPath(cwd, ".");
+	if (!root) return null;
+	const rel = relative(root, raw);
+	if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
+	return canonicalRepoPath(cwd, rel);
+}
+
+/** Prove that a terminal artifact is the exact bytes written through this run's capability. */
+function capabilityWriteMatches(cwd: string, run: CapabilityRun, rel: string): boolean {
+	const canonical = canonicalCapabilityPath(cwd, rel);
+	const expected = run.writeHashes?.get((canonical ?? rel).toLowerCase());
+	if (!expected) return false;
+	const target = canonical ? safeRepoPath(cwd, canonical) : null;
+	if (!target) return false;
+	try {
+		const stat = lstatSync(target);
+		return stat.isFile() && !stat.isSymbolicLink() && capabilityContentHash(readFileSync(target, "utf8")) === expected;
+	} catch { return false; }
+}
+
+function abortAfterTerminalCapabilityWrite(ctx: unknown): void {
+	try { (ctx as { abort?: () => void } | undefined)?.abort?.(); } catch { /* best effort; the writer evidence remains authoritative */ }
 }
 
 function persist(cwd: string, state: CompanyState): CompanyState { saveState(cwd, state); return state; }
@@ -475,6 +511,15 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		mkdirSync(dirname(target), { recursive: true });
 		const writeError = atomicGovernedWrite(target, params.content);
 		if (writeError) return { isError: true, content: [{ type: "text", text: `AATP_WRITE_FAILED: ${writeError}` }] };
+		recordCapabilityWrite(run, rel, params.content);
+		// INDEX.md is the compiler's terminal artifact.  Once at least one
+		// work order and the index are durably written, stop the child agent so
+		// provider-specific post-tool loops cannot turn a valid DAG into a task
+		// failure.  The parent still validates every byte before sealing.
+		const writes = run.writeHashes ?? new Map<string, string>();
+		const hasIndex = writes.has("docs/aatp/index.md");
+		const hasWorkOrder = [...writes.keys()].some((path) => /^docs\/aatp\/aatp-[^/]+\.md$/i.test(path));
+		if (hasIndex && hasWorkOrder) abortAfterTerminalCapabilityWrite(ctx);
 		return { content: [{ type: "text", text: `AATP_WRITE_OK: ${rel}` }] };
 	} });
 	pi.registerTool({ name: "foundry_plan_write", label: "Foundry Plan Write", description: "Active Plan3-stage atomic writer; explicitly listed only for the spawned planning stage agent.", hidden: true, loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
@@ -497,6 +542,11 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (!target) return { isError: true, content: [{ type: "text", text: "PLAN3_PATH_GATE: planning target crosses a symlink or leaves the repository." }] };
 		const writeError = atomicGovernedWrite(target, params.content);
 		if (writeError) return { isError: true, content: [{ type: "text", text: `PLAN3_WRITE_FAILED: ${writeError}` }] };
+		recordCapabilityWrite(run, rel, params.content);
+		// Each Plan3 stage has exactly one terminal artifact.  Abort after the
+		// capability write so a provider cannot issue another tool turn after
+		// the stage is already complete.
+		abortAfterTerminalCapabilityWrite(ctx);
 		return { content: [{ type: "text", text: `PLAN3_WRITE_OK: ${rel}` }] };
 	} });
 
@@ -557,7 +607,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				if (pendingAatp.has(key)) return { block: true, reason: "AATP_COMPILER_GATE: duplicate compiler task id is not replayable." };
 				if (compilerActiveFor(pendingAatp, ctx.cwd)) return { block: true, reason: "AATP_COMPILER_GATE: a project-wide compiler is already running for this project." };
 				resetCapabilityFailure(capabilityKey("AATP", ctx.cwd, loaded.state.aatp.epoch));
-				pendingAatp.set(key, { agent: AATP_COMPILER, index: compilerItems[0].index, cwd: ctx.cwd, epoch: loaded.state.aatp.epoch, capability: randomBytes(32).toString("hex"), createdAt: Date.now(), invalidAttempts: 0, revoked: false });
+				pendingAatp.set(key, { agent: AATP_COMPILER, index: compilerItems[0].index, cwd: ctx.cwd, epoch: loaded.state.aatp.epoch, capability: randomBytes(32).toString("hex"), createdAt: Date.now(), invalidAttempts: 0, revoked: false, writeHashes: new Map() });
 			}
 			if (loaded.state.mode === "plan3") {
 				const planItems = items.filter((item) => PLAN_AGENTS.has(item.agent));
@@ -572,7 +622,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 					if (planActiveFor(pendingPlan, ctx.cwd)) return { block: true, reason: "PLAN3_GATE: one blocking Plan3 stage task may run per project." };
 					const stage = loaded.state.planning.stage as ActivePlanStage;
 					resetCapabilityFailure(capabilityKey("PLAN3", ctx.cwd, loaded.state.planning.epoch, stage));
-					pendingPlan.set(key, { stage, epoch: loaded.state.planning.epoch, agent: expected, index: planItems[0].index, cwd: ctx.cwd, beforeHash: hashPlan3Artifact(ctx.cwd, stage), capability: randomBytes(32).toString("hex"), createdAt: Date.now(), invalidAttempts: 0, revoked: false });
+					pendingPlan.set(key, { stage, epoch: loaded.state.planning.epoch, agent: expected, index: planItems[0].index, cwd: ctx.cwd, beforeHash: hashPlan3Artifact(ctx.cwd, stage), capability: randomBytes(32).toString("hex"), createdAt: Date.now(), invalidAttempts: 0, revoked: false, writeHashes: new Map() });
 				}
 			}
 			if (items.some((item) => item.agent === AATP_COMPILER || PLAN_AGENTS.has(item.agent)) && loaded.state.mode !== "plan3" && !(loaded.state.phase === "aatp" && !loaded.state.aatp.manifest_sha256)) return { block: true, reason: "TASK_GATE: planning/compiler agents are only legal in their owning phase." };
@@ -632,13 +682,16 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 			const currentPlanState = loadState(ctx.cwd);
 			if (currentPlanState.planning.epoch !== planRun.epoch || currentPlanState.planning.stage !== planRun.stage) return { isError: true, content: [{ type: "text" as const, text: "PLAN3_EPOCH_GATE: stale planning capability result rejected; restart the current Plan3 stage." }] };
 			const result = resultForPlan(extractTaskResults(event.details), planRun);
-			if (!result || result.exitCode !== 0 || result.error || result.aborted) return { isError: true, content: [{ type: "text" as const, text: `PLAN3_STAGE_FAILED: ${planRun.stage} did not complete; stage remains unchanged.` }] };
+			const taskFailed = !result || result.exitCode !== 0 || Boolean(result.error) || result.aborted === true;
+			const terminalWrite = capabilityWriteMatches(ctx.cwd, planRun, PLAN3_ARTIFACTS[planRun.stage]);
+			if (taskFailed && !terminalWrite) return { isError: true, content: [{ type: "text" as const, text: `PLAN3_STAGE_FAILED: ${planRun.stage} did not complete; stage remains unchanged.` }] };
 			const artifactHash = hashPlan3Artifact(ctx.cwd, planRun.stage);
 			if (!artifactHash || artifactHash === planRun.beforeHash) return { isError: true, content: [{ type: "text" as const, text: `PLAN3_ARTIFACT_GATE: ${planRun.stage} artifact was not newly produced by the task.` }] };
 			const state = loadState(ctx.cwd), completed = completePlan3Stage(ctx.cwd, state, planRun.stage, artifactHash);
 			if (!completed.ok) return { isError: true, content: [{ type: "text" as const, text: completed.reason ?? "PLAN3_STAGE_GATE" }] };
 			persist(ctx.cwd, state); ctx.ui.setStatus("foundry", statusOf(state));
-			return { content: [{ type: "text" as const, text: `${plan3Status(state)}\n${plan3Instruction(state)}` }] };
+			const recovery = taskFailed ? "PLAN3_STAGE_RECOVERED: terminal artifact was written through the stage capability before the provider task stopped.\n" : "";
+			return { content: [{ type: "text" as const, text: `${recovery}${plan3Status(state)}\n${plan3Instruction(state)}` }] };
 		}
 		const aatpRun = pendingAatp.get(key);
 		if (aatpRun) {
@@ -647,7 +700,19 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 			if (aatpRun.cwd !== ctx.cwd) return { isError: true, content: [{ type: "text" as const, text: "AATP_COMPILER_GATE: compiler result arrived for a different project context." }] };
 			if (loadState(ctx.cwd).aatp.epoch !== aatpRun.epoch) return { isError: true, content: [{ type: "text" as const, text: "AATP_EPOCH_GATE: stale compiler result rejected; recompile the current locked plan." }] };
 			const result = resultForPlan(extractTaskResults(event.details), { agent: aatpRun.agent, index: aatpRun.index });
-			if (!result || result.exitCode !== 0 || result.error || result.aborted) return aatpCompilerError(ctx.cwd, "AATP_COMPILER_FAILED: compiler did not complete; the manifest remains unsealed.");
+			const taskFailed = !result || result.exitCode !== 0 || Boolean(result.error) || result.aborted === true;
+			let terminalWrites = false;
+			if (taskFailed) {
+				try {
+					const specs = listAatpSpecs(ctx.cwd), indexWritten = capabilityWriteMatches(ctx.cwd, aatpRun, "docs/AATP/INDEX.md");
+					const specsWritten = specs.length > 0 && specs.every((spec) => {
+						const rel = canonicalCapabilityPath(ctx.cwd, spec.path);
+						return rel ? capabilityWriteMatches(ctx.cwd, aatpRun, rel) : false;
+					});
+					terminalWrites = indexWritten && specsWritten;
+				} catch { terminalWrites = false; }
+			}
+			if (taskFailed && !terminalWrites) return aatpCompilerError(ctx.cwd, "AATP_COMPILER_FAILED: compiler did not complete; the manifest remains unsealed.");
 			try {
 				const state = loadState(ctx.cwd), specs = listAatpSpecs(ctx.cwd), sourceManifest = aatpManifestHash(ctx.cwd);
 				if (state.master_plan.status !== "locked" || (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required")) return aatpCompilerError(ctx.cwd, "AATP_COMPILER_GATE: plan/design must remain locked while compiling AATP.");
@@ -662,7 +727,8 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				seedTickets(state, specs);
 				writeAatpIndex(ctx.cwd, hydrateAatp(ctx.cwd, state));
 				recountTickets(state); invalidateQa(state); persist(ctx.cwd, state); ctx.ui.setStatus("foundry", statusOf(state));
-				return { content: [{ type: "text" as const, text: `AATP_COMPILED: ${specs.length} work orders validated and sealed. Run /build for the ready implementation layer.` }] };
+				const recovery = taskFailed ? "AATP_COMPILER_RECOVERED: terminal work orders were written through the compiler capability before the provider task stopped.\n" : "";
+				return { content: [{ type: "text" as const, text: `${recovery}AATP_COMPILED: ${specs.length} work orders validated and sealed. Run /build for the ready implementation layer.` }] };
 			} catch (error) { return aatpCompilerError(ctx.cwd, `AATP_COMPILER_FAILED: ${error instanceof Error ? error.message : String(error)}`); }
 		}
 		const run = pending.get(key);

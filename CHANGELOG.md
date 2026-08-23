@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3 — terminal capability completion
+
+- synchronize the runtime version with the package/release version;
+- stop Plan3/AATP child sessions after their terminal capability writes;
+- recover and validate a terminal artifact when an OMP provider reports a post-write task failure;
+- keep invalid, incomplete, or unproven artifacts fail-closed and unsealed.
+
 ## 0.7.2 — capability handoff and circuit-breaker hardening
 
 - Hide Plan3/AATP capability writers from the default orchestrator tool surface while keeping them explicitly available to their declared stage agents.

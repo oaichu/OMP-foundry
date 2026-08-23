@@ -173,6 +173,30 @@ describe("extension integration smoke", () => {
 		expect(beforeBuild.reason).toContain("AATP_EXECUTION_GATE");
 	});
 
+	test("AATP compiler seals terminal capability output after a provider post-write failure", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-aatp-provider-recovery-"));
+		mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
+		writeFileSync(join(cwd, "docs", "PRODUCT.md"), "# Product\n");
+		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "# Master plan\n");
+		const state = defaultState(); state.product.status = "approved"; state.master_plan.status = "locked"; state.design.status = "not_required"; state.phase = "aatp";
+		expect(lockArtifactHash(cwd, state, "product")).toBe(true); expect(lockArtifactHash(cwd, state, "master_plan")).toBe(true); saveState(cwd, state);
+		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
+		await taskHook({ toolName: "task", toolCallId: "provider-compiler", input: { agent: "aatp-compiler", task: "compile AATP" } }, ctx(cwd));
+		const prompt = await agentHook({}, ctx(cwd, "compiler-session", "aatp-compiler"));
+		const capability = prompt.message.content.match(/Compiler capability .*: ([a-f0-9]{64})/)?.[1];
+		expect(capability).toBeTruthy();
+		const spec = "---\nid: AATP-001\nobjective: Add the first governed slice\ndependencies:\n  - none\nallowed_files:\n  - src/example.ts\nforbidden_files:\n  - docs/MASTER_PLAN.md\nrisk: normal\nsecurity_sensitive: false\nacceptance:\n  - the slice satisfies the locked plan\nverification:\n  - typecheck\n---\n";
+		const specWrite = await tools.get("foundry_aatp_write")!.execute("write", { path: "docs/AATP/AATP-001.md", content: spec, capability }, "session", null, ctx(cwd, "compiler-session"));
+		expect(specWrite.isError).not.toBe(true);
+		const indexWrite = await tools.get("foundry_aatp_write")!.execute("write", { path: "docs/AATP/INDEX.md", content: "# AATP index\n", capability }, "session", null, ctx(cwd, "compiler-session"));
+		expect(indexWrite.isError).not.toBe(true);
+		const recovered = await resultHook({ toolName: "task", toolCallId: "provider-compiler", details: { results: [{ index: 0, agent: "aatp-compiler", id: "compiler-1", exitCode: 1, error: "Tool choice 'required' must be specified with 'tools' parameter.", aborted: true }] } }, ctx(cwd));
+		expect(recovered.isError).not.toBe(true);
+		expect(recovered.content[0].text).toContain("AATP_COMPILER_RECOVERED");
+		expect(loadState(cwd).aatp.manifest_sha256).toMatch(/^[a-f0-9]{64}$/);
+		expect(loadState(cwd).tickets["AATP-001"]?.status).toBe("ready");
+	});
+
 	test("compiler capability writer is scoped and native AATP writes stay denied", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-aatp-capability-"));
 		mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
@@ -212,6 +236,24 @@ describe("extension integration smoke", () => {
 		const written = await tools.get("foundry_plan_write")!.execute("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md", content: "# Draft\n", capability }, "session", null, ctx(cwd, "plan-session"));
 		expect(written.isError).not.toBe(true);
 		expect(readFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "utf8")).toContain("Draft");
+	});
+
+	test("Plan3 advances after a terminal capability write despite a provider post-write failure", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-provider-recovery-"));
+		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
+		const state = defaultState(); state.product.status = "approved"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
+		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
+		await taskHook({ toolName: "task", toolCallId: "provider-plan", input: { agent: "plan-drafter", task: "draft the plan" } }, ctx(cwd));
+		const prompt = await agentHook({}, ctx(cwd, "plan-session", "plan-drafter"));
+		const capability = prompt.message.content.match(/Plan3 capability .*: ([a-f0-9]{64})/)?.[1];
+		expect(capability).toBeTruthy();
+		const written = await tools.get("foundry_plan_write")!.execute("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md", content: "# Draft\n\nComplete planning evidence.\n", capability }, "session", null, ctx(cwd, "plan-session"));
+		expect(written.isError).not.toBe(true);
+		const recovered = await resultHook({ toolName: "task", toolCallId: "provider-plan", details: { results: [{ index: 0, agent: "plan-drafter", id: "plan-1", exitCode: 1, error: "Tool choice 'required' must be specified with 'tools' parameter.", aborted: true }] } }, ctx(cwd));
+		expect(recovered.isError).not.toBe(true);
+		expect(recovered.content[0].text).toContain("PLAN3_STAGE_RECOVERED");
+		expect(loadState(cwd).planning.stage).toBe("redteam");
+		expect(loadState(cwd).planning.draft_sha256).toMatch(/^[a-f0-9]{64}$/);
 	});
 
 	test("capability writers are hidden and stop repeated guessed-token loops", async () => {

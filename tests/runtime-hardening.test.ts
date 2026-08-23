@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkFoundryProjectRoles, ensureProjectFoundryConfig, narrowFoundryGitignore, validateIsolationSettings } from "../src/omp-runtime";
+import { checkFoundryProjectRoles, checkIsolationContract, ensureProjectFoundryConfig, narrowFoundryGitignore, validateIsolationSettings } from "../src/omp-runtime";
 import { reviewsApproved } from "../src/release";
 import { defaultState } from "../src/types";
 
@@ -16,6 +16,13 @@ describe("OMP isolation + project scope contract", () => {
 		expect(text).toContain("modelRoleStorage: project");
 		expect(text).not.toContain("foundry_plan:");
 		expect(text).not.toContain("foundry_impl:");
+	});
+	test("reads the project isolation overlay before legacy OMP config-get output", () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-runtime-isolation-overlay-"));
+		const made = ensureProjectFoundryConfig(dir);
+		expect(checkIsolationContract(dir)).toMatchObject({ ok: true, mode: "auto", apply: false });
+		writeFileSync(made.path, "task:\n  isolation:\n    mode: none\n    apply: false\n");
+		expect(checkIsolationContract(dir).reason).toContain("ISOLATION_REQUIRED");
 	});
 	test("existing project config is preserved while Foundry storage policy is appended", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-runtime-existing-"));

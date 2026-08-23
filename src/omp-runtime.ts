@@ -60,6 +60,30 @@ function readJsonSetting(cwd: string, key: string): unknown {
 	return parsed.value;
 }
 
+/** Read the repository-owned isolation overlay before asking OMP for its
+ * effective global setting. OMP's `config get` command in older hosts only
+ * reports user settings, even though the agent runtime honors `.omp/config.yml`.
+ */
+function projectIsolationSetting(cwd: string, key: "mode" | "apply"): string | undefined {
+	try {
+		const path = safeRepoPath(cwd, ".omp/config.yml");
+		if (!path) return undefined;
+		const text = readBoundedConfig(path).replace(/\r\n/g, "\n");
+		const task = topLevelBlock(text, "task");
+		if (!task) return undefined;
+		const isolation = task.lines.findIndex((line, index) => index > task.start && index < task.end && /^\s*isolation:\s*$/.test(line));
+		if (isolation < 0) return undefined;
+		const isolationIndent = task.lines[isolation].match(/^\s*/)?.[0].length ?? 0;
+		for (let index = isolation + 1; index < task.end; index += 1) {
+			const line = task.lines[index];
+			if (line.trim() && (line.match(/^\s*/)?.[0].length ?? 0) <= isolationIndent) break;
+			const match = line.match(new RegExp(`^\\s+${key}:\\s*(.+?)\\s*$`));
+			if (match) return match[1].replace(/^['"]|['"]$/g, "");
+		}
+		return undefined;
+	} catch { return undefined; }
+}
+
 export function validateIsolationSettings(mode: string, apply: boolean): IsolationContract {
 	const normalized = mode.trim().toLowerCase();
 	if (!ISOLATION_MODES.has(normalized)) return { ok: false, mode, apply, reason: `FOUNDRY_ISOLATION_INVALID: unsupported task.isolation.mode ${mode || "(empty)"}.` };
@@ -70,8 +94,10 @@ export function validateIsolationSettings(mode: string, apply: boolean): Isolati
 
 export function checkIsolationContract(cwd: string): IsolationContract {
 	try {
-		const mode = String(readJsonSetting(cwd, "task.isolation.mode") ?? "none");
-		const rawApply = readJsonSetting(cwd, "task.isolation.apply");
+		const projectMode = projectIsolationSetting(cwd, "mode");
+		const projectApply = projectIsolationSetting(cwd, "apply");
+		const mode = String(projectMode ?? readJsonSetting(cwd, "task.isolation.mode") ?? "none");
+		const rawApply = projectApply ?? readJsonSetting(cwd, "task.isolation.apply");
 		const apply = rawApply === true || rawApply === "true";
 		return validateIsolationSettings(mode, apply);
 	} catch (error) {

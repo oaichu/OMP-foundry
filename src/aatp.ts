@@ -168,7 +168,10 @@ export function listAatpSpecs(cwd: string): AatpSpec[] {
 			acceptance: parseList(body, "acceptance"),
 			verification: parseList(body, "verification"),
 			security_sensitive: parseBoolean(body, "security_sensitive"),
-			covers: parseList(body, "covers").map((value) => value.toUpperCase()),
+			// Models often add a human explanation after a concern ID.  Keep the
+			// machine-readable ID while discarding that bounded annotation; the
+			// strict validator still rejects anything that is not a valid concern.
+			covers: parseList(body, "covers").map((value) => value.split(/\s*:\s*/, 1)[0].trim().toUpperCase()),
 			path,
 		});
 	}
