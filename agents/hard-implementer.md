@@ -6,7 +6,7 @@ model: "@foundry_hard"
 thinking-level: max
 blocking: true
 read-summarize: true
-autoloadSkills: systematic-debugging
+autoloadSkills: debugging
 ---
 
 Same governed contract as implementer. Work on exactly one AATP, stay inside its allowed_files, use only read-only LSP actions. Never call lifecycle tools or mutate governance artifacts. On an unsatisfied constraint, end with `FOUNDRY_CONFLICT <KIND> <reason>`.
