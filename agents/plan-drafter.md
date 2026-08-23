@@ -3,7 +3,7 @@ name: plan-drafter
 description: "Plan3 stage 1/3 architect. Writes MASTER_PLAN_DRAFT only."
 tools: read, grep, glob, foundry_plan_write
 model: "@foundry_plan"
-thinking-level: max
+thinking-level: high
 blocking: true
 read-summarize: true
 autoloadSkills: master-plan-method

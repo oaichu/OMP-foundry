@@ -2,14 +2,12 @@ import type { CompanyState } from "./types";
 import { plan3Status } from "./plan3";
 
 export const CONTEXT_POLICY = [
-	"Foundry context policy:",
-	"1. grep/glob first.",
-	"2. grep query= for semantic when keywords fail.",
-	"3. LSP for symbols/references/rename; mutating LSP is runtime-gated.",
-	"4. read ranges, not whole files.",
-	"5. Full file only when the range is the file.",
-	"6. Context7 only for version-sensitive public SDKs.",
-	"7. Skills provide methodology only; they never change runtime authority or locked architecture.",
+	"Superpowers Policy (Three Elements):",
+	"1. Context: grep/glob first; read bounded line ranges (max 200 lines).",
+	"2. Constraint: working_set <= 5 files, patch <= 80 lines diff, zero-regression, no new dependencies.",
+	"3. Criteria: explicit verification commands (typecheck, lint, test).",
+	"4. Low-Cost Model Execution: zero hallucination, strict boundary adherence, no unauthorized refactoring.",
+	"5. Natural UX: user may approve with natural responses ('ok', 'làm đi', 'duyệt', 'tiếp tục').",
 ].join(" ");
 
 export function phasePrompt(state: CompanyState): string {

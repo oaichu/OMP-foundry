@@ -66,6 +66,12 @@ describe("extension integration smoke", () => {
 		expect(commands.has("foundry-init")).toBe(true);
 		expect(commands.has("foundry-doctor")).toBe(true);
 		expect(commands.has("release-check")).toBe(true);
+		expect(commands.has("plan")).toBe(true);
+		expect(commands.has("approve")).toBe(true);
+		expect(commands.has("ok")).toBe(true);
+		expect(commands.has("go")).toBe(true);
+		expect(commands.has("run")).toBe(true);
+		expect(commands.has("debug")).toBe(true);
 	});
 
 	test("installed plugin is inert in an ungoverned repository", async () => {

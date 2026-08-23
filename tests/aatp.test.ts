@@ -32,7 +32,8 @@ describe("aatp authority and sealing", () => {
 		expect(validateAatpSpecs([{ ...valid, acceptance: [] }], { strict: true }).join(" ")).toContain("acceptance");
 		expect(validateAatpSpecs([{ ...valid, verification: [], risk: "unknown" }], { strict: true }).join(" ")).toContain("verification");
 		expect(validateAatpSpecs([{ ...valid, allowed_files: ["../outside"] }], { strict: true }).join(" ")).toContain("repository-relative exact path");
-		expect(validateAatpSpecs([{ ...valid, allowed_files: ["src/**/*.ts"] }], { strict: true }).join(" ")).toContain("repository-relative exact path");
+		expect(validateAatpSpecs([{ ...valid, allowed_files: ["src/a", "src/b", "src/c", "src/d", "src/e", "src/f"] }], { strict: true }).join(" ")).toContain("5-file limit");
+		expect(validateAatpSpecs([{ ...valid, lineCount: 205 }], { strict: true }).join(" ")).toContain("200-line limit");
 		expect(validateAatpSpecs([{ ...valid, allowed_files: [".omp/company-state.yaml"] }], { strict: true }).join(" ")).toContain("allowed_files includes a Foundry governance artifact");
 	});
 	test("security sensitivity routes independently of implementation difficulty", () => {

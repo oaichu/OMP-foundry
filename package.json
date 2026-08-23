@@ -1,7 +1,7 @@
 {
   "name": "omp-foundry",
-  "version": "0.7.4",
-  "description": "Lock the plan. Then pour the code. Governed AI foundry for Oh My Pi.",
+  "version": "0.8.0",
+  "description": "Unified Superpowers, 3-Stage Master Plan, and Governed AATP for Oh My Pi.",
   "license": "MIT",
   "scripts": {
     "test": "bun test",

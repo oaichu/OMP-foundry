@@ -16,6 +16,7 @@ export interface AatpSpec {
 	security_sensitive?: boolean;
 	covers?: string[];
 	path: string;
+	lineCount?: number;
 }
 
 export interface AatpTask extends AatpSpec {
@@ -173,6 +174,7 @@ export function listAatpSpecs(cwd: string): AatpSpec[] {
 			// strict validator still rejects anything that is not a valid concern.
 			covers: parseList(body, "covers").map((value) => value.split(/\s*:\s*/, 1)[0].trim().toUpperCase()),
 			path,
+			lineCount: text.split("\n").length,
 		});
 	}
 	return tasks;
@@ -225,6 +227,8 @@ export function validateAatpSpecs(specs: AatpSpec[], options: AatpValidationOpti
 		if (!spec.objective) errors.push(`${spec.id}: objective missing`);
 		if (spec.allowed_files.length === 0) errors.push(`${spec.id}: allowed_files must be explicit and non-empty`);
 		if (strict) {
+			if (spec.allowed_files.length > 5) errors.push(`${spec.id}: allowed_files exceeds the 5-file limit for low-cost model execution (found ${spec.allowed_files.length})`);
+			if (spec.lineCount !== undefined && spec.lineCount > 200) errors.push(`${spec.id}: spec exceeds the 200-line limit for low-cost model execution (found ${spec.lineCount} lines)`);
 			for (const path of [...spec.allowed_files, ...spec.forbidden_files]) { const pathError = exactPathError(path); if (pathError) errors.push(`${spec.id}: ${path} ${pathError}`); }
 			if (!risks.has(spec.risk.toLowerCase())) errors.push(`${spec.id}: invalid risk ${spec.risk}`);
 			if (!spec.acceptance?.length) errors.push(`${spec.id}: acceptance must be explicit and non-empty`);
