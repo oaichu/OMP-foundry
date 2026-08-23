@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { aatpManifestHash, beginTicket, completeTicket, hydrateAatp, readyIndependent, reviewTicket, routeAgent, validateAatpSpecs } from "../src/aatp";
 import { defaultState } from "../src/types";
-const spec = (id: string, deps: string[] = []) => ({ id, objective: "x", dependencies: deps, allowed_files: [`src/${id.toLowerCase()}`], forbidden_files: [], risk: "normal", recommended_agent: "implementer", path: `docs/AATP/${id}.md` });
+const spec = (id: string, deps: string[] = []) => ({ id, objective: "x", dependencies: deps, allowed_files: [`src/${id.toLowerCase()}`], forbidden_files: [], risk: "normal", path: `docs/AATP/${id}.md` });
 
 describe("aatp authority and sealing", () => {
 	test("routes risk to governed workers", () => { expect(routeAgent("low")).toBe("smol-implementer"); expect(routeAgent("hard")).toBe("hard-implementer"); expect(routeAgent("normal")).toBe("implementer"); });
@@ -19,9 +19,12 @@ describe("aatp authority and sealing", () => {
 		writeFileSync(file, "---\nid: AATP-001\nobjective: x\ndependencies:\n  - none\nallowed_files:\n  - src/a\n---\n"); const first = aatpManifestHash(dir);
 		writeFileSync(file, "---\nid: AATP-001\nobjective: changed\ndependencies:\n  - none\nallowed_files:\n  - src/a\n---\n"); expect(aatpManifestHash(dir)).not.toBe(first);
 	});
-	test("spec validation requires scope and valid dependencies", () => {
+	test("spec validation requires scope and valid acyclic dependencies", () => {
 		expect(validateAatpSpecs([{ ...spec("AATP-1"), allowed_files: [] }]).join(" ")).toContain("allowed_files");
 		expect(validateAatpSpecs([spec("AATP-2", ["AATP-404"])]).join(" ")).toContain("unknown dependency");
+		expect(validateAatpSpecs([spec("AATP-1", ["AATP-1"])]).join(" ")).toContain("self dependency");
+		const cycle = validateAatpSpecs([spec("AATP-1", ["AATP-2"]), spec("AATP-2", ["AATP-3"]), spec("AATP-3", ["AATP-1"])]).join(" ");
+		expect(cycle).toContain("dependency cycle");
 	});
 });
 
