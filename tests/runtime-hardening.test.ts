@@ -2,38 +2,39 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkFoundryProjectRoles, ensureProjectFoundryConfig, ensureProjectIsolationConfig, narrowFoundryGitignore, validateIsolationSettings } from "../src/omp-runtime";
+import { checkFoundryProjectRoles, ensureProjectFoundryConfig, narrowFoundryGitignore, validateIsolationSettings } from "../src/omp-runtime";
 import { reviewsApproved } from "../src/release";
 import { defaultState } from "../src/types";
 
 describe("OMP isolation + project scope contract", () => {
 	test("requires isolation and apply=false", () => { expect(validateIsolationSettings("none", false).ok).toBe(false); expect(validateIsolationSettings("auto", true).reason).toContain("APPLY_REQUIRED_FALSE"); expect(validateIsolationSettings("auto", false).ok).toBe(true); });
-	test("new config is project-scoped and never requires global mutation", () => {
+	test("new config is project-scoped and does not shadow global Foundry model roles", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-runtime-"));
 		const made = ensureProjectFoundryConfig(dir), text = readFileSync(made.path, "utf8");
 		expect(made.created).toBe(true);
 		expect(text).toContain("apply: false");
 		expect(text).toContain("modelRoleStorage: project");
+		expect(text).not.toContain("foundry_plan:");
+		expect(text).not.toContain("foundry_impl:");
 	});
 	test("existing project config is preserved while Foundry storage policy is appended", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-runtime-existing-"));
-		const made = ensureProjectIsolationConfig(dir);
+		const made = ensureProjectFoundryConfig(dir);
 		writeFileSync(made.path, "custom: true\n");
-		const again = ensureProjectIsolationConfig(dir), text = readFileSync(again.path, "utf8");
+		const again = ensureProjectFoundryConfig(dir), text = readFileSync(again.path, "utf8");
 		expect(again.created).toBe(false);
 		expect(text).toContain("custom: true");
 		expect(text).toContain("modelRoleStorage: project");
 	});
-	test("doctor fails closed when project role mappings are absent", () => {
+	test("doctor fails closed when project and global role mappings are absent", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-role-doctor-"));
 		const made = ensureProjectFoundryConfig(dir);
 		writeFileSync(made.path, "modelRoleStorage: project\nmodelRoles:\n  foundry_plan: openai/example\n");
-		// hermetic: point the user-level lookup at a file that does not exist
 		const result = checkFoundryProjectRoles(dir, join(dir, "no-user-config.yml"));
 		expect(result.ok).toBe(false);
 		expect(result.missing).toContain("foundry_redteam");
 	});
-	test("doctor accepts roles satisfied at user level", () => {
+	test("doctor accepts roles inherited from user config", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-role-doctor-global-"));
 		const made = ensureProjectFoundryConfig(dir);
 		writeFileSync(made.path, "modelRoleStorage: project\n");
@@ -61,7 +62,7 @@ describe("foundry role aliases", () => {
 		expect(map.foundry_smol).toBe("@smol");
 		expect(Object.values(map).every((v) => v === "" || v.startsWith("@"))).toBe(true);
 	});
-	test("roles with no matching OMP role stay empty and are not written", () => {
+	test("roles with no matching OMP role stay empty", () => {
 		const { aliasRoleMap } = require("../src/omp-runtime");
 		const map: Record<string, string> = aliasRoleMap({});
 		expect(Object.values(map).every((v) => v === "")).toBe(true);
@@ -75,11 +76,11 @@ describe("global role registration", () => {
 		const path = join(dir, "config.yml");
 		writeFileSync(path, "shellPath: /bin/bash\nmodelRoles:\n  default: x/a:high\n  foundry_plan: openai/pinned\n");
 		const result = ensureGlobalFoundryRoles({ path, roles: { default: "x/a:high", slow: "x/c:max", task: "x/d:high" } });
-		expect(result.added.length).toBe(9); // foundry_plan already present
+		expect(result.added.length).toBe(9);
 		expect(result.added).not.toContain("foundry_plan");
 		const text = readFileSync(path, "utf8");
 		expect(text).toContain("shellPath: /bin/bash");
-		expect(text).toContain("foundry_plan: openai/pinned"); // never overwritten
+		expect(text).toContain("foundry_plan: openai/pinned");
 		expect(text).toContain(String.raw`foundry_redteam: "@slow"`);
 		expect(text).toContain(String.raw`foundry_impl: "@task"`);
 		expect(text).toContain(String.raw`foundry_review: "@default"`);
