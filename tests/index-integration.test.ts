@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import registerFoundryExtension from "../src/index";
+import { hashPlan3Artifact } from "../src/plan3";
 import { lockArtifactHash } from "../src/release";
 import { loadState, saveState } from "../src/state-machine";
 import { defaultState } from "../src/types";
@@ -342,5 +343,83 @@ describe("extension integration smoke", () => {
 		expect(after.design.required).toBe(true);
 		expect(after.design.sha256).toBe("");
 		expect(after.planning.epoch).not.toBe("");
+	});
+
+	test("smart /approve naturally approves product and plan states", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-smart-approve-"));
+		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
+		writeFileSync(join(cwd, "docs", "PRODUCT.md"), "# Product Specs\n");
+		writeFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "# Draft\n");
+		writeFileSync(join(cwd, "docs", "planning", "PLAN_REVIEW.md"), "# Review\n");
+		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "# Master Plan\n");
+
+		const state = defaultState();
+		state.product.status = "draft";
+		saveState(cwd, state);
+
+		const { commands } = harness();
+		await commands.get("approve")!.handler("", ctx(cwd));
+		const productApproved = loadState(cwd);
+		expect(productApproved.product.status).toBe("approved");
+		expect(productApproved.mode).toBe("plan3");
+
+		// Simulate plan3 reaching awaiting_lock
+		productApproved.planning.stage = "awaiting_lock";
+		productApproved.planning.draft_sha256 = hashPlan3Artifact(cwd, "draft")!;
+		productApproved.planning.review_sha256 = hashPlan3Artifact(cwd, "redteam")!;
+		productApproved.planning.final_sha256 = hashPlan3Artifact(cwd, "synth")!;
+		saveState(cwd, productApproved);
+
+		await commands.get("approve")!.handler("", ctx(cwd));
+		const planApproved = loadState(cwd);
+		expect(planApproved.master_plan.status).toBe("locked");
+	});
+
+	test("plan-synth capability write allows writing both MASTER_PLAN and initial AATP specs", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-synth-aatp-"));
+		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
+		mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
+		writeFileSync(join(cwd, "docs", "PRODUCT.md"), "# Product\n");
+		writeFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "# Draft\n");
+		writeFileSync(join(cwd, "docs", "planning", "PLAN_REVIEW.md"), "# Review\n");
+
+		const state = defaultState();
+		state.product.status = "approved";
+		state.mode = "plan3";
+		state.phase = "planning";
+		state.planning.stage = "synth";
+		state.planning.draft_sha256 = hashPlan3Artifact(cwd, "draft")!;
+		state.planning.review_sha256 = hashPlan3Artifact(cwd, "redteam")!;
+		saveState(cwd, state);
+
+		const { handlers, tools } = harness();
+		const taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
+		await taskHook({ toolName: "task", toolCallId: "synth-run", input: { agent: "plan-synth", task: "synthesize plan and AATP" } }, ctx(cwd));
+		const prompt = await agentHook({}, ctx(cwd, "synth-session", "plan-synth"));
+		const capability = prompt.message.content.match(/Plan3 capability .*: ([a-f0-9]{64})/)?.[1];
+		expect(capability).toBeTruthy();
+
+		// Write initial AATP spec
+		const aatpWrite = await tools.get("foundry_plan_write")!.execute("write", {
+			path: "docs/AATP/AATP-001.md",
+			content: "---\nid: AATP-001\nobjective: init core\ndependencies:\n  - none\nallowed_files:\n  - src/core.ts\nforbidden_files:\n  - docs/MASTER_PLAN.md\nrisk: normal\nacceptance:\n  - compiles\nverification:\n  - bun test\n---\n",
+			capability
+		}, "session", null, ctx(cwd, "synth-session"));
+		expect(aatpWrite.isError).not.toBe(true);
+
+		// Write MASTER_PLAN (terminal artifact)
+		const planWrite = await tools.get("foundry_plan_write")!.execute("write", {
+			path: "docs/MASTER_PLAN.md",
+			content: "# Master Plan\nComplete synthesis.\n",
+			capability
+		}, "session", null, ctx(cwd, "synth-session"));
+		expect(planWrite.isError).not.toBe(true);
+
+		const result = await resultHook({ toolName: "task", toolCallId: "synth-run", details: { results: [{ index: 0, agent: "plan-synth", exitCode: 0 }] } }, ctx(cwd));
+		expect(result.isError).not.toBe(true);
+		const finalState = loadState(cwd);
+		expect(finalState.planning.stage).toBe("awaiting_lock");
+		expect(finalState.aatp.manifest_sha256).toMatch(/^[a-f0-9]{64}$/);
+		expect(finalState.tickets["AATP-001"]).toBeDefined();
 	});
 });

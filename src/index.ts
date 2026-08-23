@@ -876,7 +876,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const which = args.trim().toLowerCase(), state = loadState(ctx.cwd);
 		if (which === "product" || (!which && state.product.status === "draft")) {
 			if (!lockArtifactHash(ctx.cwd, state, "product")) { ctx.ui.notify("PRODUCT_GATE: docs/PRODUCT.md must exist and be non-empty before approval.", "error"); return; }
-			state.product.status = "approved"; state.phase = "planning"; invalidateQa(state); persist(ctx.cwd, state);
+			state.product.status = "approved"; state.phase = "planning"; enterPlan3(state); invalidateQa(state); persist(ctx.cwd, state);
 			orchestrate(pi, "PRODUCT approved.", "Product approved. Running Plan3...");
 			enterOrResumePlan3(pi, ctx.cwd, state);
 			return;
