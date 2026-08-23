@@ -2,7 +2,7 @@ import { designAllowsUi, planLocked, productReady } from "./state-machine";
 import type { CompanyState } from "./types";
 
 export function requireProduct(state: CompanyState): string | undefined {
-	if (!productReady(state)) return "PRODUCT not approved. Run /company-init then finish docs/PRODUCT.md.";
+	if (!productReady(state)) return "PRODUCT not approved. Run /foundry-init then finish docs/PRODUCT.md.";
 	return undefined;
 }
 

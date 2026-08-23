@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import ompCompanyWorkflow from "../src/index";
+import registerFoundryExtension from "../src/index";
 import { loadState, saveState } from "../src/state-machine";
 import { defaultState } from "../src/types";
 
@@ -25,7 +25,7 @@ function harness() {
 		registerTool(tool: any) { tools.set(tool.name, tool); },
 		registerCommand(name: string, config: any) { commands.set(name, config); },
 	};
-	ompCompanyWorkflow(api);
+	registerFoundryExtension(api);
 	return { tools, commands, handlers, messages };
 }
 
@@ -36,7 +36,7 @@ function ctx(cwd: string) {
 describe("extension integration smoke", () => {
 	test("registers canonical tools/commands and no agent-owned lifecycle tools", () => {
 		const { tools, commands } = harness();
-		expect(tools.has("company_status")).toBe(true);
+		expect(tools.has("foundry_status")).toBe(true);
 		expect(tools.has("foundry_skill_read")).toBe(true);
 		expect(tools.has("aatp_begin")).toBe(false);
 		expect(tools.has("aatp_complete")).toBe(false);

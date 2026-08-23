@@ -17,7 +17,7 @@ export type ReviewVerdict = "none" | "APPROVE" | "REQUEST_CHANGES" | "BLOCK";
 export type ConflictKind = "none" | "PLAN_CONFLICT" | "DESIGN_CONFLICT" | "DEPENDENCY_CONFLICT" | "SCOPE_INSUFFICIENT";
 
 export const CURRENT_STATE_SCHEMA = 3;
-export const FOUNDRY_VERSION = "0.4.0";
+export const FOUNDRY_VERSION = "0.5.0";
 
 export class StateError extends Error {
 	constructor(message: string) { super(message); this.name = "StateError"; }
@@ -89,4 +89,4 @@ export const LOCKED_PRODUCT_PATHS = ["docs/product.md"];
 export const LOCKED_DESIGN_PATHS = ["docs/design.md", "src/design-system/", "src/designsystem/"];
 export const LOCKED_AATP_PATHS = ["docs/aatp/"];
 export const STATE_PATHS = [".omp/foundry-state.yml", ".omp/foundry-state.yaml", ".omp/company-state.yml", ".omp/company-state.yaml"];
-export const PRIVILEGED_TOOLS = new Set(["company_init", "company_status", "foundry_skill_read"]);
+export const PRIVILEGED_TOOLS = new Set(["foundry_init", "foundry_status", "foundry_skill_read"]);

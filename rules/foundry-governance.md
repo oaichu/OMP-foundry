@@ -1,5 +1,5 @@
 ---
-name: company-governance
+name: foundry-governance
 description: Foundry workflow gates
 alwaysApply: true
 ---
