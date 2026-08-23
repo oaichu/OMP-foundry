@@ -7,7 +7,7 @@ import { canonicalRepoPath } from "../src/paths";
 describe("canonicalRepoPath", () => {
 	test("keeps normal repo-relative paths", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-"));
-		expect(canonicalRepoPath(cwd, "src/App.tsx")).toBe("src/app.tsx");
+		expect(canonicalRepoPath(cwd, "src/App.tsx")).toBe(process.platform === "win32" ? "src/app.tsx" : "src/App.tsx");
 	});
 
 	test("rejects parent escapes", () => {
