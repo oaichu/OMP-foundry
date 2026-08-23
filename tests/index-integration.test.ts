@@ -30,8 +30,15 @@ function harness() {
 	return { tools, commands, handlers, messages };
 }
 
-function ctx(cwd: string) {
-	return { cwd, ui: { notify() {}, setStatus() {} }, setTimeout() {}, async waitForIdle() {} };
+function ctx(cwd: string, sessionId = "test-session", agent?: string) {
+	return {
+		cwd,
+		sessionManager: { getSessionId: () => sessionId, getEntries: () => agent ? [{ type: "session_init", agent }] : [] },
+		ui: { notify() {}, setStatus() {} },
+		setTimeout() {},
+		abort() {},
+		async waitForIdle() {},
+	};
 }
 
 describe("extension integration smoke", () => {
@@ -175,14 +182,54 @@ describe("extension integration smoke", () => {
 		expect(lockArtifactHash(cwd, state, "product")).toBe(true); expect(lockArtifactHash(cwd, state, "master_plan")).toBe(true); saveState(cwd, state);
 		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0];
 		await taskHook({ toolName: "task", toolCallId: "cap-compiler", input: { agent: "aatp-compiler", task: "compile AATP" } }, ctx(cwd));
-		const prompt = await agentHook({ agentName: "aatp-compiler" }, ctx(cwd));
+		const prompt = await agentHook({}, ctx(cwd, "compiler-session", "aatp-compiler"));
 		const capability = prompt.message.content.match(/Compiler capability .*: ([a-f0-9]{64})/)?.[1];
 		expect(capability).toBeTruthy();
 		const native = await taskHook({ toolName: "write", input: { path: "docs/AATP/AATP-001.md" } }, ctx(cwd));
 		expect(native.block).toBe(true);
-		const written = await tools.get("foundry_aatp_write")!.execute("write", { path: "docs/AATP/AATP-001.md", content: "---\nid: AATP-001\n---\n", capability }, "session", null, ctx(cwd));
+		for (let attempt = 0; attempt < 3; attempt += 1) {
+			const parentAttempt = await tools.get("foundry_aatp_write")!.execute("write", { path: "docs/AATP/AATP-001.md", content: "parent must not write\n", capability }, "session", null, ctx(cwd, "parent-session"));
+			expect(parentAttempt.isError).toBe(true);
+			expect(parentAttempt.content[0].text).toContain(attempt === 2 ? "AATP_COMPILER_CAPABILITY_CIRCUIT_BREAKER" : "AATP_COMPILER_CAPABILITY_DENIED");
+		}
+		const written = await tools.get("foundry_aatp_write")!.execute("write", { path: "docs/AATP/AATP-001.md", content: "---\nid: AATP-001\n---\n", capability }, "session", null, ctx(cwd, "compiler-session"));
 		expect(written.isError).not.toBe(true);
 		expect(readFileSync(join(cwd, "docs", "AATP", "AATP-001.md"), "utf8")).toContain("AATP-001");
+	});
+
+	test("Plan3 capability is delivered from session_init and parent guesses cannot write", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-capability-"));
+		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
+		const state = defaultState(); state.product.status = "approved"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
+		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0];
+		await taskHook({ toolName: "task", toolCallId: "plan-capability", input: { agent: "plan-drafter", task: "draft the locked plan" } }, ctx(cwd));
+		const prompt = await agentHook({}, ctx(cwd, "plan-session", "plan-drafter"));
+		const capability = prompt.message.content.match(/Plan3 capability .*: ([a-f0-9]{64})/)?.[1];
+		expect(capability).toBeTruthy();
+		const denied = await tools.get("foundry_plan_write")!.execute("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md", content: "parent must not write\n", capability }, "session", null, ctx(cwd, "parent-session"));
+		expect(denied.isError).toBe(true);
+		expect(denied.content[0].text).toContain("PLAN3_CAPABILITY_DENIED");
+		const written = await tools.get("foundry_plan_write")!.execute("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md", content: "# Draft\n", capability }, "session", null, ctx(cwd, "plan-session"));
+		expect(written.isError).not.toBe(true);
+		expect(readFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "utf8")).toContain("Draft");
+	});
+
+	test("capability writers are hidden and stop repeated guessed-token loops", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-capability-breaker-"));
+		mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
+		const state = defaultState(); state.product.status = "approved"; state.master_plan.status = "locked"; state.design.status = "not_required"; state.phase = "aatp"; saveState(cwd, state);
+		const { tools } = harness();
+		expect(tools.get("foundry_plan_write")!.hidden).toBe(true);
+		expect(tools.get("foundry_aatp_write")!.hidden).toBe(true);
+		for (let attempt = 0; attempt < 2; attempt += 1) {
+			const denied = await tools.get("foundry_aatp_write")!.execute("guess", { path: "docs/AATP/AATP-001.md", content: "must not write\n", capability: `guess-${attempt}` }, "session", null, ctx(cwd, "orchestrator"));
+			expect(denied.isError).toBe(true);
+			expect(denied.content[0].text).toContain("DO NOT GUESS OR BRUTE-FORCE");
+		}
+		const tripped = await tools.get("foundry_aatp_write")!.execute("guess", { path: "docs/AATP/AATP-001.md", content: "must not write\n", capability: "guess-final" }, "session", null, ctx(cwd, "orchestrator"));
+		expect(tripped.isError).toBe(true);
+		expect(tripped.content[0].text).toContain("AATP_COMPILER_CAPABILITY_CIRCUIT_BREAKER");
+		expect(existsSync(join(cwd, "docs", "AATP", "AATP-001.md"))).toBe(false);
 	});
 
 	test("invalid compiler output stays unsealed and is archived for a clean retry", async () => {

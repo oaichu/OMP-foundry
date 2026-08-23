@@ -154,7 +154,7 @@ Before the first implementation layer, the source tree must be clean (governance
 
 ### Capability writers and cheap-first execution
 
-`foundry_synth` is the single reasoning capability used by Plan3 synthesis and the post-lock `aatp-compiler`; there is **no separate AATP model role**. The compiler and Plan3 stage agents receive short-lived in-memory capabilities and write through `foundry_aatp_write` / `foundry_plan_write`. Native writes to unsealed governance artifacts are denied, so another task cannot impersonate the compiler by merely knowing its agent name.
+`foundry_synth` is the single reasoning capability used by Plan3 synthesis and the post-lock `aatp-compiler`; there is **no separate AATP model role**. The compiler and Plan3 stage agents receive short-lived, session-bound capabilities and write through the explicitly listed (hidden-by-default) `foundry_aatp_write` / `foundry_plan_write` tools. The broker is shared across OMP sub-agent runners, while the parent session and other agents are rejected even if a token is leaked. Invalid calls return a non-retryable instruction to re-spawn the stage agent; after three invalid guesses the run is revoked by a circuit breaker. Native writes to unsealed governance artifacts are denied, so another task cannot impersonate the compiler by merely knowing its agent name.
 
 Normal implementation remains cheap-first: risk routes work to `smol-implementer`, `implementer`, or `hard-implementer`; declared deterministic checks run before review; `security_sensitive` or critical tickets route to the security reviewer. Model names stay in OMP `modelRoles`, not in Foundry's policy.
 

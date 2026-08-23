@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.2 — capability handoff and circuit-breaker hardening
+
+- Hide Plan3/AATP capability writers from the default orchestrator tool surface while keeping them explicitly available to their declared stage agents.
+- Share short-lived capability state across OMP sub-agent runners and bind writes to the spawned session, so a parent cannot use a leaked token.
+- Detect the real OMP `session_init` agent identity, provide actionable non-retryable errors, and abort/revoke a run after repeated invalid capability attempts.
+- Added integration coverage for parent-token misuse, session-bound handoff, hidden tools, and guessed-token circuit breaking.
+
 ## 0.7.1 — verification portability patch
 
 - Resolve trusted system executable shims (including Linux/macOS `npm` symlinks) before verification while continuing to reject targets inside the governed repository.

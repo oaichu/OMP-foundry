@@ -83,12 +83,62 @@ const TASK_AGENTS = new Set([
 	"implementer", "hard-implementer", "smol-implementer", "reviewer", "security-reviewer",
 ]);
 const MUTATING_TASK_TOOLS = new Set(["task", "write", "edit", "ast_edit", "apply_patch", "foundry_init", "foundry_exec"]);
+const CAPABILITY_FAILURE_LIMIT = 3;
+const CAPABILITY_TTL_MS = 30 * 60 * 1000;
+const CAPABILITY_BROKER_SYMBOL = Symbol.for("omp-foundry.capability-broker");
 
 type PendingRun = { bindings: TaskBinding[]; startedClean: boolean; headAtDispatch: string };
 type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
-type PendingPlanRun = { stage: ActivePlanStage; epoch: string; agent: string; index: number; cwd: string; beforeHash?: string; capability: string };
-type PendingAatpRun = { agent: typeof AATP_COMPILER; epoch: string; index: number; cwd: string; capability: string };
+type CapabilityRun = { epoch: string; index: number; cwd: string; capability: string; createdAt: number; sessionId?: string; invalidAttempts: number; revoked: boolean };
+type PendingPlanRun = CapabilityRun & { stage: ActivePlanStage; agent: string; beforeHash?: string };
+type PendingAatpRun = CapabilityRun & { agent: typeof AATP_COMPILER };
+type CapabilityGuard = { attempts: number; tripped: boolean; updatedAt: number };
+type CapabilityBroker = {
+	pendingPlan: Map<string, PendingPlanRun>;
+	pendingAatp: Map<string, PendingAatpRun>;
+	failures: Map<string, CapabilityGuard>;
+};
 type SafeState = { state: CompanyState; broken?: string; missing: boolean };
+
+function capabilityBroker(): CapabilityBroker {
+	const globals = globalThis as unknown as Record<PropertyKey, unknown>;
+	const existing = globals[CAPABILITY_BROKER_SYMBOL];
+	if (existing && typeof existing === "object" && "pendingPlan" in existing && "pendingAatp" in existing && "failures" in existing) return existing as CapabilityBroker;
+	const created: CapabilityBroker = { pendingPlan: new Map(), pendingAatp: new Map(), failures: new Map() };
+	globals[CAPABILITY_BROKER_SYMBOL] = created;
+	return created;
+}
+
+function capabilitySessionId(ctx: unknown): string | undefined {
+	try {
+		const manager = (ctx as { sessionManager?: { getSessionId?: () => unknown } } | undefined)?.sessionManager;
+		const id = manager?.getSessionId?.();
+		return typeof id === "string" && id.trim() ? id : undefined;
+	} catch { return undefined; }
+}
+
+function capabilityAgentName(event: unknown, ctx: unknown): string {
+	const value = event as { agent?: { name?: unknown }; agentName?: unknown } | undefined;
+	const explicit = value?.agent?.name ?? value?.agentName;
+	if (typeof explicit === "string" && explicit.trim()) return explicit.trim().toLowerCase();
+	try {
+		const manager = (ctx as { sessionManager?: { getEntries?: () => unknown[] } } | undefined)?.sessionManager;
+		const entries = manager?.getEntries?.() ?? [];
+		for (let index = entries.length - 1; index >= 0; index -= 1) {
+			const entry = entries[index] as { type?: unknown; agent?: unknown } | undefined;
+			if (entry?.type === "session_init" && typeof entry.agent === "string" && entry.agent.trim()) return entry.agent.trim().toLowerCase();
+		}
+	} catch { /* older OMP hosts may not expose session entries */ }
+	return "";
+}
+
+function capabilityKey(kind: "PLAN3" | "AATP", cwd: string, epoch: string, stage = ""): string {
+	return `${kind}\u0000${cwd}\u0000${epoch}\u0000${stage}`;
+}
+
+function capabilityAttemptKey(base: string, sessionId?: string): string {
+	return `${base}\u0000${sessionId ?? "unknown"}`;
+}
 
 function persist(cwd: string, state: CompanyState): CompanyState { saveState(cwd, state); return state; }
 function orchestrate(pi: ExtensionAPI, title: string, body: string): void { pi.sendUserMessage([title, "", body, "", CONTEXT_POLICY].join("\n")); }
@@ -349,13 +399,61 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	const z = pi.zod;
 	pi.setLabel("OMP Foundry");
 	const pending = new Map<string, PendingRun>();
-	const pendingPlan = new Map<string, PendingPlanRun>();
-	const pendingAatp = new Map<string, PendingAatpRun>();
-	pi.registerTool({ name: "foundry_aatp_write", label: "Foundry AATP Write", description: "Compiler-only atomic writer for unsealed AATP work orders; native file writes remain denied.", loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
+	const broker = capabilityBroker();
+	const pendingPlan = broker.pendingPlan;
+	const pendingAatp = broker.pendingAatp;
+	const capabilityFailure = (key: string, active?: CapabilityRun, revokeActive = true): CapabilityGuard => {
+		const now = Date.now();
+		const current = broker.failures.get(key) ?? { attempts: 0, tripped: false, updatedAt: now };
+		if (!current.tripped) current.attempts += 1;
+		current.updatedAt = now;
+		if (current.attempts >= CAPABILITY_FAILURE_LIMIT) current.tripped = true;
+		broker.failures.set(key, current);
+		if (active && revokeActive) {
+			active.invalidAttempts = current.attempts;
+			if (current.tripped) active.revoked = true;
+		}
+		return current;
+	};
+	const capabilityError = (kind: "PLAN3" | "AATP", key: string, active?: CapabilityRun, revokeActive = true, ctx?: unknown) => {
+		const guard = capabilityFailure(key, active, revokeActive);
+		const prefix = kind === "PLAN3" ? "PLAN3" : "AATP_COMPILER";
+		const restart = kind === "PLAN3" ? "/plan3" : "/aatp";
+		if (guard.tripped || active?.revoked) {
+			try { (ctx as { abort?: () => void } | undefined)?.abort?.(); } catch { /* abort is best-effort; the terminal result remains authoritative */ }
+			return {
+				isError: true,
+				content: [{ type: "text" as const, text: `${prefix}_CAPABILITY_CIRCUIT_BREAKER: repeated invalid capability attempts detected; this run is revoked. Do not retry or guess. Re-run ${restart} to spawn a fresh stage agent and receive a new capability.` }],
+				details: { code: `${prefix}_CAPABILITY_CIRCUIT_BREAKER`, retryable: false, recovery: "respawn_stage_agent", attempts: guard.attempts },
+			};
+		}
+		return {
+			isError: true,
+			content: [{ type: "text" as const, text: `${prefix}_CAPABILITY_DENIED: capability is a cryptographic token issued only to the spawned stage sub-agent and bound to this run. Orchestrators and other agents cannot write governance artifacts directly. DO NOT GUESS OR BRUTE-FORCE CAPABILITIES. Stop and re-spawn the required stage sub-agent with the task tool; a fresh capability will be injected.` }],
+			details: { code: `${prefix}_CAPABILITY_DENIED`, retryable: false, recovery: "respawn_stage_agent", attempts: guard.attempts, remaining: Math.max(0, CAPABILITY_FAILURE_LIMIT - guard.attempts) },
+		};
+	};
+	const capabilityCircuit = (kind: "PLAN3" | "AATP") => {
+		const prefix = kind === "PLAN3" ? "PLAN3" : "AATP_COMPILER";
+		const restart = kind === "PLAN3" ? "/plan3" : "/aatp";
+		return { isError: true, content: [{ type: "text" as const, text: `${prefix}_CAPABILITY_CIRCUIT_BREAKER: this capability run was revoked after invalid attempts or expiry. Do not retry or guess. Re-run ${restart} to spawn a fresh stage agent and receive a new capability.` }], details: { code: `${prefix}_CAPABILITY_CIRCUIT_BREAKER`, retryable: false, recovery: "respawn_stage_agent" } };
+	};
+	const resetCapabilityFailure = (key: string): void => {
+		for (const failureKey of broker.failures.keys()) if (failureKey === key || failureKey.startsWith(`${key}\u0000`)) broker.failures.delete(failureKey);
+	};
+	const expired = (run: CapabilityRun): boolean => Date.now() - run.createdAt > CAPABILITY_TTL_MS;
+	pi.registerTool({ name: "foundry_aatp_write", label: "Foundry AATP Write", description: "Compiler-only atomic writer for unsealed AATP work orders; explicitly listed only for the spawned aatp-compiler.", hidden: true, loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
 		const loaded = safeState(ctx.cwd);
 		if (loaded.broken || loaded.missing || loaded.state.phase !== "aatp" || loaded.state.aatp.manifest_sha256) return { isError: true, content: [{ type: "text", text: "AATP_COMPILER_GATE: compiler writer is available only during an unsealed AATP phase." }] };
+		const baseKey = capabilityKey("AATP", ctx.cwd, loaded.state.aatp.epoch);
+		const active = [...pendingAatp.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.epoch === loaded.state.aatp.epoch);
 		const run = [...pendingAatp.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability === params.capability && candidate.epoch === loaded.state.aatp.epoch);
-		if (!run) return { isError: true, content: [{ type: "text", text: "AATP_COMPILER_GATE: invalid or expired compiler capability." }] };
+		const callerSession = capabilitySessionId(ctx);
+		const attemptKey = capabilityAttemptKey(baseKey, callerSession);
+		const ownerMatches = !active?.sessionId || callerSession === active.sessionId;
+		if (run && expired(run)) run.revoked = true;
+		if (!run || run.revoked || (run.sessionId !== undefined && callerSession !== run.sessionId)) return capabilityError("AATP", attemptKey, active ?? run, ownerMatches, ctx);
+		resetCapabilityFailure(baseKey); run.invalidAttempts = 0;
 		const rel = canonicalRepoPath(ctx.cwd, params.path);
 		if (!rel || !/^docs\/aatp\/(?:aatp-[^/]+\.md|index\.md)$/i.test(rel)) return { isError: true, content: [{ type: "text", text: "AATP_PATH_GATE: compiler may write only docs/AATP/AATP-*.md or INDEX.md." }] };
 		if (typeof params.content !== "string" || Buffer.byteLength(params.content, "utf8") > 256 * 1024) return { isError: true, content: [{ type: "text", text: "AATP_RESOURCE_GATE: one compiler artifact is limited to 256 KiB." }] };
@@ -379,11 +477,19 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (writeError) return { isError: true, content: [{ type: "text", text: `AATP_WRITE_FAILED: ${writeError}` }] };
 		return { content: [{ type: "text", text: `AATP_WRITE_OK: ${rel}` }] };
 	} });
-	pi.registerTool({ name: "foundry_plan_write", label: "Foundry Plan Write", description: "Active Plan3-stage atomic writer; native planning writes remain denied.", loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
+	pi.registerTool({ name: "foundry_plan_write", label: "Foundry Plan Write", description: "Active Plan3-stage atomic writer; explicitly listed only for the spawned planning stage agent.", hidden: true, loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
 		const loaded = safeState(ctx.cwd);
 		if (loaded.broken || loaded.missing || loaded.state.mode !== "plan3" || loaded.state.phase !== "planning") return { isError: true, content: [{ type: "text", text: "PLAN3_GATE: plan writer is available only during an active Plan3 stage." }] };
-		const run = [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability === params.capability && candidate.epoch === loaded.state.planning.epoch && candidate.stage === loaded.state.planning.stage);
-		if (!run) return { isError: true, content: [{ type: "text", text: "PLAN3_GATE: invalid or expired planning capability." }] };
+		const stage = loaded.state.planning.stage as ActivePlanStage;
+		const baseKey = capabilityKey("PLAN3", ctx.cwd, loaded.state.planning.epoch, stage);
+		const active = [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability !== "" && candidate.epoch === loaded.state.planning.epoch && candidate.stage === stage);
+		const run = [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability === params.capability && candidate.epoch === loaded.state.planning.epoch && candidate.stage === stage);
+		const callerSession = capabilitySessionId(ctx);
+		const attemptKey = capabilityAttemptKey(baseKey, callerSession);
+		const ownerMatches = !active?.sessionId || callerSession === active.sessionId;
+		if (run && expired(run)) run.revoked = true;
+		if (!run || run.revoked || (run.sessionId !== undefined && callerSession !== run.sessionId)) return capabilityError("PLAN3", attemptKey, active ?? run, ownerMatches, ctx);
+		resetCapabilityFailure(baseKey); run.invalidAttempts = 0;
 		const expected = PLAN3_ARTIFACTS[run.stage], rel = canonicalRepoPath(ctx.cwd, params.path);
 		if (!rel || rel.toLowerCase() !== expected.toLowerCase()) return { isError: true, content: [{ type: "text", text: `PLAN3_PATH_GATE: active stage may write only ${expected}.` }] };
 		if (typeof params.content !== "string" || Buffer.byteLength(params.content, "utf8") > 256 * 1024) return { isError: true, content: [{ type: "text", text: "PLAN3_RESOURCE_GATE: one planning artifact is limited to 256 KiB." }] };
@@ -415,12 +521,15 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const loaded = safeState(ctx.cwd);
 		if (!governedProject(ctx.cwd, loaded)) return;
 		const { state, broken } = loaded;
-		const agentName = String((event as { agent?: { name?: string }; agentName?: string }).agent?.name ?? (event as { agentName?: string }).agentName ?? "").toLowerCase();
+		const agentName = capabilityAgentName(event, ctx);
+		const sessionId = capabilitySessionId(ctx);
 		const role = roleOf(agentName);
 		const skillState = agentName === AATP_COMPILER && state.phase === "aatp" ? { ...state, phase: "planning" as const } : state;
 		const pack = broken ? [] : resolveSkillManifests(ctx.cwd, skillState, role ? { role } : undefined);
 		const compiler = agentName === AATP_COMPILER ? [...pendingAatp.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.epoch === state.aatp.epoch) : undefined;
 		const planRun = PLAN_AGENTS.has(agentName) ? [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.agent === agentName && candidate.epoch === state.planning.epoch && candidate.stage === state.planning.stage) : undefined;
+		if (compiler && sessionId) compiler.sessionId ??= sessionId;
+		if (planRun && sessionId) planRun.sessionId ??= sessionId;
 		const capabilityHint = compiler ? `\nCompiler capability (use only with foundry_aatp_write): ${compiler.capability}` : planRun ? `\nPlan3 capability (use only with foundry_plan_write): ${planRun.capability}` : "";
 		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, skillState.phase)}${capabilityHint}`, display: true, details: { ...state, skills: pack.map((s) => s.id) } } };
 	});
@@ -447,7 +556,8 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				if (!key) return { block: true, reason: "AATP_COMPILER_GATE: compiler task must expose a unique toolCallId." };
 				if (pendingAatp.has(key)) return { block: true, reason: "AATP_COMPILER_GATE: duplicate compiler task id is not replayable." };
 				if (compilerActiveFor(pendingAatp, ctx.cwd)) return { block: true, reason: "AATP_COMPILER_GATE: a project-wide compiler is already running for this project." };
-				pendingAatp.set(key, { agent: AATP_COMPILER, index: compilerItems[0].index, cwd: ctx.cwd, epoch: loaded.state.aatp.epoch, capability: randomBytes(32).toString("hex") });
+				resetCapabilityFailure(capabilityKey("AATP", ctx.cwd, loaded.state.aatp.epoch));
+				pendingAatp.set(key, { agent: AATP_COMPILER, index: compilerItems[0].index, cwd: ctx.cwd, epoch: loaded.state.aatp.epoch, capability: randomBytes(32).toString("hex"), createdAt: Date.now(), invalidAttempts: 0, revoked: false });
 			}
 			if (loaded.state.mode === "plan3") {
 				const planItems = items.filter((item) => PLAN_AGENTS.has(item.agent));
@@ -460,7 +570,9 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 					if (!key) return { block: true, reason: "PLAN3_GATE: planning task must expose a unique toolCallId." };
 					if (pendingPlan.has(key)) return { block: true, reason: "PLAN3_GATE: duplicate planning task id is not replayable." };
 					if (planActiveFor(pendingPlan, ctx.cwd)) return { block: true, reason: "PLAN3_GATE: one blocking Plan3 stage task may run per project." };
-					pendingPlan.set(key, { stage: loaded.state.planning.stage as ActivePlanStage, epoch: loaded.state.planning.epoch, agent: expected, index: planItems[0].index, cwd: ctx.cwd, beforeHash: hashPlan3Artifact(ctx.cwd, loaded.state.planning.stage as ActivePlanStage), capability: randomBytes(32).toString("hex") });
+					const stage = loaded.state.planning.stage as ActivePlanStage;
+					resetCapabilityFailure(capabilityKey("PLAN3", ctx.cwd, loaded.state.planning.epoch, stage));
+					pendingPlan.set(key, { stage, epoch: loaded.state.planning.epoch, agent: expected, index: planItems[0].index, cwd: ctx.cwd, beforeHash: hashPlan3Artifact(ctx.cwd, stage), capability: randomBytes(32).toString("hex"), createdAt: Date.now(), invalidAttempts: 0, revoked: false });
 				}
 			}
 			if (items.some((item) => item.agent === AATP_COMPILER || PLAN_AGENTS.has(item.agent)) && loaded.state.mode !== "plan3" && !(loaded.state.phase === "aatp" && !loaded.state.aatp.manifest_sha256)) return { block: true, reason: "TASK_GATE: planning/compiler agents are only legal in their owning phase." };
@@ -516,6 +628,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const planRun = pendingPlan.get(key);
 		if (planRun) {
 			pendingPlan.delete(key);
+			if (planRun.revoked) return capabilityCircuit("PLAN3");
 			const currentPlanState = loadState(ctx.cwd);
 			if (currentPlanState.planning.epoch !== planRun.epoch || currentPlanState.planning.stage !== planRun.stage) return { isError: true, content: [{ type: "text" as const, text: "PLAN3_EPOCH_GATE: stale planning capability result rejected; restart the current Plan3 stage." }] };
 			const result = resultForPlan(extractTaskResults(event.details), planRun);
@@ -530,6 +643,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const aatpRun = pendingAatp.get(key);
 		if (aatpRun) {
 			pendingAatp.delete(key);
+			if (aatpRun.revoked) return capabilityCircuit("AATP");
 			if (aatpRun.cwd !== ctx.cwd) return { isError: true, content: [{ type: "text" as const, text: "AATP_COMPILER_GATE: compiler result arrived for a different project context." }] };
 			if (loadState(ctx.cwd).aatp.epoch !== aatpRun.epoch) return { isError: true, content: [{ type: "text" as const, text: "AATP_EPOCH_GATE: stale compiler result rejected; recompile the current locked plan." }] };
 			const result = resultForPlan(extractTaskResults(event.details), { agent: aatpRun.agent, index: aatpRun.index });
