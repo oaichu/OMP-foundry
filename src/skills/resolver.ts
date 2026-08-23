@@ -1,15 +1,13 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CompanyState } from "../types";
-import { missingRequires, respectsConflicts, withRequires } from "./compatibility";
+import { respectsConflicts, withRequires } from "./compatibility";
 import { detectRepo, type RepoFacts } from "./detector";
 import type { SkillManifest, SkillRole } from "./manifest-schema";
 import { filterPhaseRole, phaseOf } from "./phase-filter";
 import { loadRegistry } from "./registry";
 
 const DEFAULT_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
-
-
 const MAX_SKILLS = 12;
 
 export interface ResolveOptions {
@@ -44,9 +42,6 @@ export function resolveSkillManifests(
 	const chosen: SkillManifest[] = [];
 	for (const item of eligible) {
 		if (!respectsConflicts(item, chosen)) continue;
-		if (missingRequires(item, chosen, registry).length && item.layer !== "L1") {
-			/* still try; withRequires fills after */
-		}
 		chosen.push(item);
 		if (chosen.length >= MAX_SKILLS) break;
 	}
