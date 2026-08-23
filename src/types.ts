@@ -89,4 +89,3 @@ export const LOCKED_PRODUCT_PATHS = ["docs/product.md"];
 export const LOCKED_DESIGN_PATHS = ["docs/design.md", "src/design-system/", "src/designsystem/"];
 export const LOCKED_AATP_PATHS = ["docs/aatp/"];
 export const STATE_PATHS = [".omp/foundry-state.yml", ".omp/foundry-state.yaml", ".omp/company-state.yml", ".omp/company-state.yaml"];
-export const PRIVILEGED_TOOLS = new Set(["foundry_init", "foundry_status", "foundry_skill_read"]);
