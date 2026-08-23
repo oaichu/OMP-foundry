@@ -874,18 +874,18 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	} });
 	const approveHandler = async (args: string, ctx: { cwd: string; ui: { notify: (message: string, level?: "error" | "info" | "warning") => void } }) => {
 		const which = args.trim().toLowerCase(), state = loadState(ctx.cwd);
-		if (which === "product" || (!which && state.product.status === "draft")) {
+		if (which === "product" || which === "approve-product" || (!which && state.product.status !== "approved")) {
 			if (!lockArtifactHash(ctx.cwd, state, "product")) { ctx.ui.notify("PRODUCT_GATE: docs/PRODUCT.md must exist and be non-empty before approval.", "error"); return; }
 			state.product.status = "approved"; state.phase = "planning"; enterPlan3(state); invalidateQa(state); persist(ctx.cwd, state);
 			orchestrate(pi, "PRODUCT approved.", "Product approved. Running Plan3...");
 			enterOrResumePlan3(pi, ctx.cwd, state);
 			return;
 		}
-		if (which === "plan" || (!which && (state.mode === "plan3" || state.master_plan.status === "draft"))) {
+		if (which === "plan" || which === "approve-plan" || (!which && state.product.status === "approved")) {
 			if (state.mode === "plan3" && state.planning.stage !== "awaiting_lock") { ctx.ui.notify("PLAN3_GATE: plan approval requires a completed Draft → Redteam → Synth cycle.", "warning"); return; }
 			if (!plan3ArtifactsMatch(ctx.cwd, state)) { ctx.ui.notify("PLAN3_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan3 or restore the accepted artifacts.", "error"); return; }
 			if (!lockArtifactHash(ctx.cwd, state, "master_plan")) { ctx.ui.notify("PLAN_GATE: docs/MASTER_PLAN.md must exist and be non-empty before lock.", "error"); return; }
-			state.master_plan.status = "locked"; state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version; state.conflict = { kind: "none", reason: "" }; state.mode = "normal"; invalidateQa(state);
+			state.master_plan.status = "locked"; state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version; state.conflict = { kind: "none", reason: "" }; state.mode = "normal"; invalidateQa(state); persist(ctx.cwd, state);
 			if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") {
 				state.phase = "design"; resetAatp(state); persist(ctx.cwd, state);
 				orchestrate(pi, "PLAN LOCKED by user.", "Plan3 evidence accepted. Continue with /design; after design gate Foundry runs /build automatically.");
