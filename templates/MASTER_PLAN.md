@@ -13,6 +13,8 @@ risk: ""
 
 ## Task DAG
 
+Use stable concern IDs (`REQ-*`, `ARCH-*`, `SEC-*`, `DES-*`, `OPS-*`) so the AATP compiler can prove coverage.
+
 ## AATP outline
 
 ## Acceptance

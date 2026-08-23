@@ -43,7 +43,7 @@ function migrateV2ToV3(yaml: string): string {
 	const state = parseState(yaml);
 	state.schema_version = 3;
 	state.mode = "normal";
-	state.planning = { stage: "idle", draft_sha256: "", review_sha256: "", final_sha256: "" };
+	state.planning = { stage: "idle", epoch: "", draft_sha256: "", review_sha256: "", final_sha256: "" };
 	state.last_written_by = FOUNDRY_VERSION;
 	return serializeState(state);
 }
@@ -53,7 +53,35 @@ function migrateV3ToV4(yaml: string): string {
 	state.last_written_by = FOUNDRY_VERSION;
 	return serializeState(state);
 }
-const MIGRATIONS: Record<number, (yaml: string) => string> = { 0: migrateV0ToV1, 1: migrateV1ToV2, 2: migrateV2ToV3, 3: migrateV3ToV4 };
+function migrateV4ToV5(yaml: string): string {
+	const state = parseState(yaml);
+	state.schema_version = 5;
+	state.planning.epoch ||= "";
+	state.aatp.epoch ||= "";
+	// A v4 APPROVE is not bound to an implementation/tree revision. Reopen
+	// those tickets instead of silently treating stale work as release-ready.
+	for (const ticket of Object.values(state.tickets)) {
+		if (ticket.status === "completed" || ticket.review === "APPROVE") {
+			ticket.status = "ready";
+			ticket.review = "none";
+			ticket.review_by = undefined;
+			ticket.review_evidence_sha256 = undefined;
+			ticket.implementation_evidence_sha256 = undefined;
+		}
+	}
+	state.aatp.manifest_sha256 = "";
+	state.last_written_by = FOUNDRY_VERSION;
+	return serializeState(state);
+}
+function migrateV5ToV6(yaml: string): string {
+	const state = parseState(yaml);
+	state.schema_version = 6;
+	state.aatp.baseline_sha ||= "";
+	state.aatp.governed_commits = [];
+	state.last_written_by = FOUNDRY_VERSION;
+	return serializeState(state);
+}
+const MIGRATIONS: Record<number, (yaml: string) => string> = { 0: migrateV0ToV1, 1: migrateV1ToV2, 2: migrateV2ToV3, 3: migrateV3ToV4, 4: migrateV4ToV5, 5: migrateV5ToV6 };
 export function migrateToCurrent(yaml: string): { yaml: string; state: CompanyState; from: number; didMigrate: boolean } {
 	const from = detectSchemaVersion(yaml);
 	if (from > CURRENT_STATE_SCHEMA) throw new SchemaTooNewError(from, CURRENT_STATE_SCHEMA);

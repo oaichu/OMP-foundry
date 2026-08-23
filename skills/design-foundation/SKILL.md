@@ -16,4 +16,4 @@ description: "Foundry /design after plan lock."
 
 Use `ui-ux-pro-max` for visual decisions only.
 
-Write `docs/DESIGN.md` + platform design-system sources. Preview must build. User runs `/design approve` to `design_lock`. Backend-only → `/design skip`.
+Write `docs/DESIGN.md` only. Production design-system sources are implemented through a later AATP so they receive scope, verification, independent review, and release provenance. Preview verification is extension-owned. User runs `/design approve` to `design_lock`. Backend-only → `/design skip`.

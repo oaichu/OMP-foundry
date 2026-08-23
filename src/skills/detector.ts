@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { safeRepoPath } from "../paths";
 
 export interface VerifyStep { id: string; command: string; executable: string; args: string[]; cwd?: string; }
+export type UiConfidence = "detected" | "not_detected" | "unknown";
 export interface RepoFacts {
 	languages: string[];
 	frameworks: string[];
@@ -10,6 +11,7 @@ export interface RepoFacts {
 	dependencies: string[];
 	files: string[];
 	ui: boolean;
+	uiConfidence: UiConfidence;
 	verify: VerifyStep[];
 }
 
@@ -48,23 +50,26 @@ function rootEntries(cwd: string): string[] {
 }
 function projectFiles(cwd: string, suffix: string): string[] {
 	const out: string[] = [];
-	for (const rel of [".", "src", "app"]) {
-		const dir = safeRepoPath(cwd, rel);
-		if (!dir) continue;
-		try {
-			const stat = lstatSync(dir);
-			if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
-			for (const name of readdirSync(dir).slice(0, MAX_DIR_ENTRIES)) {
-				const child = join(dir, name);
-				const childStat = lstatSync(child);
-				if (name.toLowerCase().endsWith(suffix) && childStat.isFile() && !childStat.isSymbolicLink()) out.push(child);
-			}
-		} catch { /* absent or unreadable */ }
-	}
+	const root = safeRepoPath(cwd, ".");
+	if (!root) return out;
+	const skip = new Set([".git", ".omp", "node_modules", "vendor", "dist", "build"]);
+	const walk = (dir: string, depth: number): void => {
+		if (depth > 3 || out.length >= MAX_DIR_ENTRIES) return;
+		let entries: import("node:fs").Dirent[] = [];
+		try { entries = readdirSync(dir, { withFileTypes: true }).slice(0, MAX_DIR_ENTRIES); } catch { return; }
+		for (const entry of entries) {
+			if (entry.isSymbolicLink() || skip.has(entry.name)) continue;
+			const child = join(dir, entry.name);
+			if (entry.isDirectory()) walk(child, depth + 1);
+			else if (entry.isFile() && entry.name.toLowerCase().endsWith(suffix)) out.push(child);
+			if (out.length >= MAX_DIR_ENTRIES) return;
+		}
+	};
+	walk(root, 0);
 	return [...new Set(out)];
 }
 function looksAndroid(cwd: string): boolean {
-	if (regularFile(cwd, "app/src/main/AndroidManifest.xml")) return true;
+	if (projectFiles(cwd, "androidmanifest.xml").some((file) => /[\\/]src[\\/]main[\\/]androidmanifest\.xml$/i.test(file))) return true;
 	for (const name of ["settings.gradle", "settings.gradle.kts", "build.gradle", "build.gradle.kts", "app/build.gradle", "app/build.gradle.kts"]) {
 		if (/com\.android\.(application|library)/.test(repoText(cwd, name))) return true;
 	}
@@ -86,6 +91,7 @@ export function detectRepo(cwd: string): RepoFacts {
 	const pyText = `${repoText(cwd, "requirements.txt")}\n${repoText(cwd, "pyproject.toml")}`.toLowerCase();
 	const goText = repoText(cwd, "go.mod").toLowerCase(), cargoText = repoText(cwd, "Cargo.toml").toLowerCase();
 	const android = looksAndroid(cwd), windows = csproj.length > 0 || sln.length > 0, windowsUi = windows && looksWindowsUi(cwd, csproj);
+	const workspaceMarkers = rootEntries(cwd).some((entry) => /^(?:apps?|packages?|frontend|web|mobile|workspace|clients?)$/i.test(entry));
 
 	const languages: string[] = [];
 	if (has("typescript") || files.includes("tsconfig.json")) languages.push("typescript");
@@ -142,5 +148,7 @@ export function detectRepo(cwd: string): RepoFacts {
 	if (languages.includes("python")) { if (/\bruff\b/.test(pyText)) add("python-lint", "python", ["-m", "ruff", "check", "."]); if (/\bmypy\b/.test(pyText)) add("python-typecheck", "python", ["-m", "mypy", "."]); add("python-test", "python", ["-m", "pytest", "-q"]); }
 	if (files.includes("Cargo.toml")) { add("rust-fmt", "cargo", ["fmt", "--check"]); add("rust-clippy", "cargo", ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]); add("rust-test", "cargo", ["test"]); }
 	if (windows) { add("dotnet-test", "dotnet", ["test", "--nologo"]); add("dotnet-build", "dotnet", ["build", "--nologo"]); }
-	return { languages, frameworks, stacks: [...new Set(stacks)], dependencies, files: [...new Set(files)], ui: stacks.includes("web") || android || windowsUi, verify };
+	const ui = stacks.includes("web") || android || windowsUi;
+	const uiConfidence = ui ? "detected" : workspaceMarkers ? "unknown" : "not_detected";
+	return { languages, frameworks, stacks: [...new Set(stacks)], dependencies, files: [...new Set(files)], ui, uiConfidence, verify };
 }

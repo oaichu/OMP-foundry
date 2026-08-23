@@ -9,4 +9,4 @@ read-summarize: true
 autoloadSkills: design-foundation
 ---
 
-After PLAN lock. WRITE only `docs/DESIGN.md` and the approved design-system path. Use `foundry_exec` only for a detected build/verification step when a runnable preview needs it; arbitrary shell is unavailable. Never edit MASTER_PLAN/PRODUCT. User alone locks with `/design approve`.
+After PLAN lock. WRITE only `docs/DESIGN.md` (the design gate has no production-source write path). Do not write production `src/design-system/*` sources; those belong in a later AATP with explicit verification and review. Use `foundry_exec` only for a detected build/verification step when a runnable preview needs it; arbitrary shell is unavailable. Never edit MASTER_PLAN/PRODUCT. User alone locks with `/design approve`.

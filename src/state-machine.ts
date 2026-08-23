@@ -79,27 +79,44 @@ function parseTickets(yaml: string): Record<string, AatpTicket> {
 		if (!idMatch) continue;
 		const id = idMatch[1];
 		if (tickets[id]) throw new StateError(`duplicate tickets.${id}`);
+		const dependencies = csv(pick(chunk, "dependencies"));
 		const allowedFiles = csv(pick(chunk, "allowed_files"));
 		const forbiddenFiles = csv(pick(chunk, "forbidden_files"));
 		if ([...allowedFiles, ...forbiddenFiles].some((path) => /[\u0000-\u001f\u007f]/.test(path))) throw new StateError(`invalid control character in tickets.${id} path`);
 		const risk = pick(chunk, "risk") || "normal";
 		if (!TICKET_RISKS.has(risk.toLowerCase())) throw new StateError(`invalid tickets.${id}.risk: ${risk}`);
 		const agent = pick(chunk, "agent") || undefined;
+		const securityRaw = pick(chunk, "security_sensitive");
+		if (securityRaw !== undefined && securityRaw !== "true" && securityRaw !== "false") throw new StateError(`invalid tickets.${id}.security_sensitive`);
 		const reviewBy = pick(chunk, "review_by") || undefined;
 		const reviewEvidence = pick(chunk, "review_evidence_sha256") || undefined;
 		const implementationEvidence = pick(chunk, "implementation_evidence_sha256") || undefined;
-		for (const value of [agent, reviewBy, reviewEvidence, implementationEvidence]) if (value && value.length > MAX_FIELD_BYTES) throw new StateError(`state field in tickets.${id} exceeds the size limit`);
+		const provenance = {
+			implementation_parent_sha: pick(chunk, "implementation_parent_sha") || undefined,
+			implementation_commit_sha: pick(chunk, "implementation_commit_sha") || undefined,
+			implementation_scope_sha256: pick(chunk, "implementation_scope_sha256") || undefined,
+			verification_evidence_sha256: pick(chunk, "verification_evidence_sha256") || undefined,
+			review_parent_sha: pick(chunk, "review_parent_sha") || undefined,
+			review_commit_sha: pick(chunk, "review_commit_sha") || undefined,
+			reviewed_scope_sha256: pick(chunk, "reviewed_scope_sha256") || undefined,
+			reviewed_dependency_sha256: pick(chunk, "reviewed_dependency_sha256") || undefined,
+			reviewed_manifest_sha256: pick(chunk, "reviewed_manifest_sha256") || undefined,
+		};
+		for (const value of [agent, reviewBy, reviewEvidence, implementationEvidence, ...Object.values(provenance)]) if (value && value.length > MAX_FIELD_BYTES) throw new StateError(`state field in tickets.${id} exceeds the size limit`);
 		tickets[id] = {
 			id,
 			status: mustEnum(pick(chunk, "status"), TICKET_STATUSES, `tickets.${id}.status`),
+			dependencies,
 			allowed_files: allowedFiles,
 			forbidden_files: forbiddenFiles,
 			risk,
+			security_sensitive: securityRaw === "true",
 			agent,
 			review: mustEnum(pick(chunk, "review") ?? "none", REVIEW_VERDICTS, `tickets.${id}.review`),
 			review_by: reviewBy,
 			review_evidence_sha256: reviewEvidence,
 			implementation_evidence_sha256: implementationEvidence,
+			...provenance,
 		};
 	}
 	return tickets;
@@ -123,6 +140,7 @@ export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): 
 	base.phase = mustEnum(pick(yaml, "phase"), PHASES, "phase");
 	const planning = pickBlock(yaml, "planning"), product = pickBlock(yaml, "product"), plan = pickBlock(yaml, "master_plan"), design = pickBlock(yaml, "design"), aatp = pickBlock(yaml, "aatp"), qa = pickBlock(yaml, "qa"), release = pickBlock(yaml, "release"), conflict = pickBlock(yaml, "conflict");
 	base.planning.stage = mustEnum(pick(planning, "stage") ?? "idle", PLAN3_STAGES, "planning.stage");
+	base.planning.epoch = pick(planning, "epoch") ?? "";
 	base.planning.draft_sha256 = pick(planning, "draft_sha256") ?? "";
 	base.planning.review_sha256 = pick(planning, "review_sha256") ?? "";
 	base.planning.final_sha256 = pick(planning, "final_sha256") ?? "";
@@ -147,13 +165,18 @@ export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): 
 		}
 	}
 	base.aatp.manifest_sha256 = pick(aatp, "manifest_sha256") ?? "";
+	base.aatp.epoch = pick(aatp, "epoch") ?? "";
+	base.aatp.baseline_sha = pick(aatp, "baseline_sha") ?? "";
+	base.aatp.governed_commits = csv(pick(aatp, "governed_commits"));
+	if (base.aatp.governed_commits.length > 4096 || base.aatp.governed_commits.some((sha) => !/^[a-f0-9]{40,128}$/i.test(sha))) throw new StateError("invalid aatp.governed_commits");
+	if (base.aatp.baseline_sha && !/^[a-f0-9]{40,128}$/i.test(base.aatp.baseline_sha)) throw new StateError("invalid aatp.baseline_sha");
 	base.qa.status = mustEnum(pick(qa, "status") ?? "pending", QA_STATUSES, "qa.status");
 	base.qa.tree_sha = pick(qa, "tree_sha") ?? "";
 	base.release.ready = pick(release, "ready") === "true";
 	base.release.tree_sha = pick(release, "tree_sha") ?? "";
 	base.conflict.kind = mustEnum(pick(conflict, "kind") ?? "none", CONFLICT_KINDS, "conflict.kind");
 	base.conflict.reason = pick(conflict, "reason") ?? "";
-	for (const value of [base.created_by, base.last_written_by, base.planning.draft_sha256, base.planning.review_sha256, base.planning.final_sha256, base.product.sha256, base.master_plan.sha256, base.design.sha256, base.aatp.manifest_sha256, base.qa.tree_sha, base.release.tree_sha, base.conflict.reason]) {
+	for (const value of [base.created_by, base.last_written_by, base.planning.epoch, base.planning.draft_sha256, base.planning.review_sha256, base.planning.final_sha256, base.product.sha256, base.master_plan.sha256, base.design.sha256, base.aatp.manifest_sha256, base.aatp.epoch, base.aatp.baseline_sha, base.qa.tree_sha, base.release.tree_sha, base.conflict.reason, ...base.aatp.governed_commits]) {
 		if (value.length > MAX_FIELD_BYTES) throw new StateError("state field exceeds the size limit");
 	}
 	return base;
@@ -165,12 +188,14 @@ function serializeTickets(tickets: Record<string, AatpTicket>): string[] {
 	const lines = ["tickets:"];
 	for (const id of ids) {
 		const t = tickets[id];
-		lines.push(`  ${id}:`, `    status: ${t.status}`, `    allowed_files: ${JSON.stringify(t.allowed_files)}`, `    forbidden_files: ${JSON.stringify(t.forbidden_files)}`, `    risk: ${t.risk}`);
+		lines.push(`  ${id}:`, `    status: ${t.status}`, `    dependencies: ${JSON.stringify(t.dependencies ?? [])}`, `    allowed_files: ${JSON.stringify(t.allowed_files)}`, `    forbidden_files: ${JSON.stringify(t.forbidden_files)}`, `    risk: ${t.risk}`);
+		if (t.security_sensitive) lines.push("    security_sensitive: true");
 		if (t.agent) lines.push(`    agent: ${JSON.stringify(t.agent)}`);
 		lines.push(`    review: ${t.review ?? "none"}`);
 		if (t.review_by) lines.push(`    review_by: ${JSON.stringify(t.review_by)}`);
 		if (t.review_evidence_sha256) lines.push(`    review_evidence_sha256: ${JSON.stringify(t.review_evidence_sha256)}`);
 		if (t.implementation_evidence_sha256) lines.push(`    implementation_evidence_sha256: ${JSON.stringify(t.implementation_evidence_sha256)}`);
+		for (const key of ["implementation_parent_sha", "implementation_commit_sha", "implementation_scope_sha256", "verification_evidence_sha256", "review_parent_sha", "review_commit_sha", "reviewed_scope_sha256", "reviewed_dependency_sha256", "reviewed_manifest_sha256"] as const) if (t[key]) lines.push(`    ${key}: ${JSON.stringify(t[key])}`);
 	}
 	return lines;
 }
@@ -179,12 +204,12 @@ export function serializeState(state: CompanyState): string {
 	if (Object.keys(state.tickets).length > MAX_TICKETS) throw new StateError(`state contains more than ${MAX_TICKETS} tickets`);
 	return [
 		`schema_version: ${state.schema_version}`, `created_by: ${JSON.stringify(state.created_by)}`, `last_written_by: ${JSON.stringify(state.last_written_by)}`, `mode: ${state.mode}`, `phase: ${state.phase}`,
-		"planning:", `  stage: ${state.planning.stage}`, `  draft_sha256: ${JSON.stringify(state.planning.draft_sha256)}`, `  review_sha256: ${JSON.stringify(state.planning.review_sha256)}`, `  final_sha256: ${JSON.stringify(state.planning.final_sha256)}`,
+		"planning:", `  stage: ${state.planning.stage}`, `  epoch: ${JSON.stringify(state.planning.epoch)}`, `  draft_sha256: ${JSON.stringify(state.planning.draft_sha256)}`, `  review_sha256: ${JSON.stringify(state.planning.review_sha256)}`, `  final_sha256: ${JSON.stringify(state.planning.final_sha256)}`,
 		"product:", `  status: ${state.product.status}`, `  sha256: ${JSON.stringify(state.product.sha256)}`,
 		"master_plan:", `  version: ${JSON.stringify(state.master_plan.version)}`, `  status: ${state.master_plan.status}`, `  sha256: ${JSON.stringify(state.master_plan.sha256)}`,
 		"design:", `  required: ${state.design.required}`, `  version: ${JSON.stringify(state.design.version)}`, `  status: ${state.design.status}`, `  sha256: ${JSON.stringify(state.design.sha256)}`,
 		...serializeTickets(state.tickets),
-		"aatp:", `  total: ${state.aatp.total}`, `  ready: ${state.aatp.ready}`, `  active: ${state.aatp.active}`, `  completed: ${state.aatp.completed}`, `  blocked: ${state.aatp.blocked}`, `  manifest_sha256: ${JSON.stringify(state.aatp.manifest_sha256)}`,
+		"aatp:", `  total: ${state.aatp.total}`, `  ready: ${state.aatp.ready}`, `  active: ${state.aatp.active}`, `  completed: ${state.aatp.completed}`, `  blocked: ${state.aatp.blocked}`, `  manifest_sha256: ${JSON.stringify(state.aatp.manifest_sha256)}`, `  epoch: ${JSON.stringify(state.aatp.epoch)}`, `  baseline_sha: ${JSON.stringify(state.aatp.baseline_sha)}`, `  governed_commits: ${JSON.stringify(state.aatp.governed_commits)}`,
 		"qa:", `  status: ${state.qa.status}`, `  tree_sha: ${JSON.stringify(state.qa.tree_sha)}`,
 		"release:", `  ready: ${state.release.ready}`, `  tree_sha: ${JSON.stringify(state.release.tree_sha)}`,
 		"conflict:", `  kind: ${state.conflict.kind}`, `  reason: ${JSON.stringify(state.conflict.reason)}`, "",
@@ -246,7 +271,7 @@ export function productReady(state: CompanyState): boolean { return state.produc
 export function designAllowsUi(state: CompanyState): boolean { return !state.design.required || state.design.status === "locked" || state.design.status === "not_required"; }
 export function recountTickets(state: CompanyState): void {
 	const list = Object.values(state.tickets), manifest = state.aatp.manifest_sha256;
-	state.aatp = { total: list.length, ready: list.filter((t) => t.status === "ready").length, active: list.filter((t) => t.status === "active").length, completed: list.filter((t) => t.status === "completed").length, blocked: list.filter((t) => t.status === "blocked").length, manifest_sha256: manifest };
+	state.aatp = { total: list.length, ready: list.filter((t) => t.status === "ready").length, active: list.filter((t) => t.status === "active").length, completed: list.filter((t) => t.status === "completed").length, blocked: list.filter((t) => t.status === "blocked").length, manifest_sha256: manifest, epoch: state.aatp.epoch, baseline_sha: state.aatp.baseline_sha, governed_commits: state.aatp.governed_commits };
 }
 export function stateFileExists(cwd: string): boolean {
 	for (const rel of STATE_PATHS) {

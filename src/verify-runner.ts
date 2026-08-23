@@ -1,11 +1,13 @@
-import { lstatSync, writeFileSync, mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { detectStack } from "./stack-detector";
 import { gitHead, workingTreeClean } from "./release";
 import { safeRepoPath } from "./paths";
 import type { VerifyStep } from "./skills/detector";
 import type { CompanyState } from "./types";
+import { provenanceEvidence } from "./provenance";
 
 export function trustedExecutable(cwd: string, executable: string): string | undefined {
 	const value = executable.trim();
@@ -41,23 +43,135 @@ export interface VerifyRow {
 }
 export type VerifyRows = VerifyRow[] & { headBefore?: string; headAfter?: string };
 
+const VERIFY_ENV_ALLOWLIST = ["PATH", "Path", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COMSPEC", "PATHEXT", "LANG", "LC_ALL", "TZ"];
+const VERIFY_STEP_TIMEOUT = 5 * 60 * 1000;
+const VERIFY_TOTAL_TIMEOUT = 15 * 60 * 1000;
+const MAX_VERIFY_STEPS = 32;
+const MAX_TICKET_VERIFY_STEPS = 8;
+
+function verificationEnv(executable: string, sandboxHome: string): NodeJS.ProcessEnv {
+	const env: NodeJS.ProcessEnv = {};
+	for (const key of VERIFY_ENV_ALLOWLIST) if (process.env[key]) env[key] = process.env[key];
+	const executableDir = dirname(executable);
+	const pathKey = process.platform === "win32" && env.Path !== undefined ? "Path" : "PATH";
+	const existingPath = env[pathKey] ?? "";
+	env[pathKey] = [executableDir, existingPath].filter(Boolean).join(delimiter);
+	// Project code must not inherit operator credentials/configuration. These
+	// directories are disposable and removed immediately after the step.
+	env.HOME = sandboxHome;
+	env.USERPROFILE = sandboxHome;
+	env.APPDATA = join(sandboxHome, "AppData", "Roaming");
+	env.LOCALAPPDATA = join(sandboxHome, "AppData", "Local");
+	env.XDG_CONFIG_HOME = join(sandboxHome, ".config");
+	env.XDG_CACHE_HOME = join(sandboxHome, ".cache");
+	env.TMPDIR = join(sandboxHome, "tmp");
+	env.TMP = join(sandboxHome, "tmp");
+	env.TEMP = join(sandboxHome, "tmp");
+	env.CI = "1";
+	env.FOUNDRY_VERIFY = "1";
+	env.GIT_CONFIG_NOSYSTEM = "1";
+	env.GIT_TERMINAL_PROMPT = "0";
+	env.NO_COLOR = "1";
+	return env;
+}
+
+function terminateProcessTree(pid: number | undefined): void {
+	if (!pid) return;
+	try {
+		if (process.platform === "win32") spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], { encoding: "utf8", shell: false, windowsHide: true, timeout: 5000 });
+		else process.kill(-pid, "SIGKILL");
+	} catch {
+		try { process.kill(pid, "SIGKILL"); } catch { /* best effort; the parent timeout remains a hard failure */ }
+	}
+}
+
 export function executeVerifyStep(cwd: string, step: VerifyStep, timeout = 10 * 60 * 1000): VerifyRow {
 	const stepCwd = step.cwd ? safeRepoPath(cwd, step.cwd) : safeRepoPath(cwd, ".");
 	if (!stepCwd) return { id: step.id, command: step.command, exitCode: 1, output: "PATH_GATE: verification cwd escapes the repository." };
 	const executable = trustedExecutable(cwd, step.executable);
 	if (!executable) return { id: step.id, command: step.command, exitCode: 1, output: `VERIFY_EXECUTABLE_GATE: ${step.executable} is not a trusted executable outside the repository.` };
-	const result = spawnSync(executable, step.args, { cwd: stepCwd, encoding: "utf8", shell: false, timeout, maxBuffer: 256 * 1024 });
-	return {
-		id: step.id,
-		command: step.command,
-		exitCode: result.status ?? 1,
-		output: `${result.stdout ?? ""}${result.stderr ?? ""}${result.error ? `\n${result.error.message}` : ""}`.slice(0, 4000),
-	};
+	let command = executable;
+	let args = [...step.args];
+	if (process.env.FOUNDRY_VERIFY_REQUIRE_SANDBOX === "1") {
+		const wrapperName = process.env.FOUNDRY_VERIFY_SANDBOX_EXECUTABLE?.trim() ?? "";
+		const wrapper = wrapperName ? trustedExecutable(cwd, wrapperName) : undefined;
+		if (!wrapper) return { id: step.id, command: step.command, exitCode: 1, output: "VERIFY_SANDBOX_GATE: an external OS sandbox wrapper is required. Set FOUNDRY_VERIFY_SANDBOX_EXECUTABLE to a trusted wrapper or use a trusted repository mode." };
+		command = wrapper;
+		args = [executable, ...args];
+	}
+	let sandboxHome = "";
+	try {
+		sandboxHome = mkdtempSync(join(tmpdir(), "omp-foundry-verify-"));
+		mkdirSync(join(sandboxHome, "tmp"), { recursive: true });
+		const result = spawnSync(command, args, {
+			cwd: stepCwd,
+			encoding: "utf8",
+			shell: false,
+			timeout: Math.max(1, Math.min(timeout, VERIFY_STEP_TIMEOUT)),
+			killSignal: "SIGKILL",
+			windowsHide: true,
+			maxBuffer: 256 * 1024,
+			env: verificationEnv(executable, sandboxHome),
+		});
+		if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ETIMEDOUT") terminateProcessTree((result as { pid?: number }).pid);
+		return {
+			id: step.id,
+			command: step.command,
+			exitCode: result.status ?? 1,
+			output: `${result.stdout ?? ""}${result.stderr ?? ""}${result.error ? `\n${result.error.message}` : ""}`.slice(0, 4000),
+		};
+	} catch (error) {
+		return { id: step.id, command: step.command, exitCode: 1, output: `VERIFY_RUNTIME_GATE: ${error instanceof Error ? error.message : String(error)}` };
+	} finally {
+		if (sandboxHome) {
+			try { rmSync(sandboxHome, { recursive: true, force: true }); } catch { /* best effort cleanup */ }
+		}
+	}
 }
 
-const VERIFY_STEP_TIMEOUT = 5 * 60 * 1000;
-const VERIFY_TOTAL_TIMEOUT = 15 * 60 * 1000;
-const MAX_VERIFY_STEPS = 32;
+function declaredStep(cwd: string, token: string, available: VerifyStep[]): VerifyStep | undefined {
+	const wanted = token.trim();
+	if (!wanted) return undefined;
+	if (!/^[A-Za-z0-9_.:@/-]+$/.test(wanted) && !/^(?:bun|npm)\s+test(?:\s+--silent)?$/i.test(wanted)) return undefined;
+	const exact = available.find((step) => step.id.toLowerCase() === wanted.toLowerCase() || step.command.toLowerCase() === wanted.toLowerCase());
+	if (exact) return exact;
+	let scripts: Record<string, string> = {};
+	try {
+		const packagePath = safeRepoPath(cwd, "package.json");
+		if (packagePath) scripts = (JSON.parse(readFileSync(packagePath, "utf8")) as { scripts?: Record<string, string> }).scripts ?? {};
+	} catch { /* malformed package metadata is reported as an unresolved declaration */ }
+	const script = wanted.replace(/^test:/i, "");
+	if (scripts[script]) return { id: `script:${script}`, command: `npm run ${script} --silent`, executable: "npm", args: ["run", script, "--silent"] };
+	if (/^(?:bun\s+test|npm\s+test)$/i.test(wanted) && scripts.test) return { id: "unit", command: "npm test --silent", executable: "npm", args: ["test", "--silent"] };
+	return undefined;
+}
+
+/** Run only the verification IDs declared by one AATP work order. */
+export function runDeclaredVerification(cwd: string, declarations: string[]): { rows: VerifyRows; evidenceSha256: string; ok: boolean } {
+	const available = detectStack(cwd).verify;
+	const rows = [] as VerifyRows;
+	rows.headBefore = gitHead(cwd);
+	if (declarations.length > MAX_TICKET_VERIFY_STEPS) {
+		rows.push({ id: "ticket-verify-limit", command: `first ${MAX_TICKET_VERIFY_STEPS} declarations`, exitCode: 1, output: "AATP_VERIFY_RESOURCE_GATE: ticket verification declaration limit exceeded." });
+		rows.headAfter = gitHead(cwd);
+		return { rows, evidenceSha256: provenanceEvidence(rows[0]?.output, rows.headBefore, rows.headAfter), ok: false };
+	}
+	const selected: VerifyStep[] = [];
+	for (const declaration of declarations) {
+		const step = declaredStep(cwd, declaration, available);
+		if (!step) rows.push({ id: `declaration:${declaration}`, command: declaration, exitCode: 1, output: `AATP_VERIFY_GATE: declaration ${declaration} does not resolve to a detected verification step or package script.` });
+		else if (!selected.some((item) => item.command === step.command)) selected.push(step);
+	}
+	const deadline = Date.now() + VERIFY_TOTAL_TIMEOUT;
+	for (const step of selected) {
+		const remaining = Math.min(VERIFY_STEP_TIMEOUT, deadline - Date.now());
+		if (remaining <= 0) { rows.push({ id: "ticket-verify-timeout", command: step.command, exitCode: 1, output: "AATP_VERIFY_TIMEOUT: ticket verification deadline exceeded." }); break; }
+		rows.push(executeVerifyStep(cwd, step, remaining));
+	}
+	rows.headAfter = gitHead(cwd);
+	const evidenceSha256 = provenanceEvidence(...rows.map((row) => `${row.id}\0${row.command}\0${row.exitCode}\0${row.output}`), rows.headBefore, rows.headAfter);
+	return { rows, evidenceSha256, ok: rows.length > 0 && rows.every((row) => row.exitCode === 0) && Boolean(rows.headBefore && rows.headBefore === rows.headAfter) };
+}
 
 export function runVerify(cwd: string): VerifyRows {
 	const stack = detectStack(cwd);

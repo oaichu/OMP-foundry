@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { aatpManifestHash, archiveAatpSpecs, beginTicket, completeTicket, hydrateAatp, listAatpSpecs, readyIndependent, reviewTicket, routeAgent, validateAatpSpecs } from "../src/aatp";
+import { aatpManifestHash, archiveAatpSpecs, beginTicket, completeTicket, hydrateAatp, invalidateDescendants, listAatpSpecs, readyIndependent, reviewAgentForRisk, reviewTicket, routeAgent, validateAatpCoverage, validateAatpSpecs } from "../src/aatp";
 import { defaultState } from "../src/types";
 const spec = (id: string, deps: string[] = []) => ({ id, objective: "x", dependencies: deps, allowed_files: [`src/${id.toLowerCase()}`], forbidden_files: [], risk: "normal", path: `docs/AATP/${id}.md` });
 
@@ -34,6 +34,17 @@ describe("aatp authority and sealing", () => {
 		expect(validateAatpSpecs([{ ...valid, allowed_files: ["../outside"] }], { strict: true }).join(" ")).toContain("repository-relative exact path");
 		expect(validateAatpSpecs([{ ...valid, allowed_files: ["src/**/*.ts"] }], { strict: true }).join(" ")).toContain("repository-relative exact path");
 		expect(validateAatpSpecs([{ ...valid, allowed_files: [".omp/company-state.yaml"] }], { strict: true }).join(" ")).toContain("allowed_files includes a Foundry governance artifact");
+	});
+	test("security sensitivity routes independently of implementation difficulty", () => {
+		expect(reviewAgentForRisk("normal")).toBe("reviewer");
+		expect(reviewAgentForRisk("normal", true)).toBe("security-reviewer");
+		expect(reviewAgentForRisk("critical")).toBe("security-reviewer");
+	});
+	test("locked concern IDs must be covered by the compiled DAG", () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-aatp-coverage-")); mkdirSync(join(dir, "docs"), { recursive: true });
+		writeFileSync(join(dir, "docs", "MASTER_PLAN.md"), "# Plan\nREQ-1 and SEC-A\n");
+		expect(validateAatpCoverage(dir, [spec("AATP-1")]).join(" ")).toContain("REQ-1");
+		expect(validateAatpCoverage(dir, [{ ...spec("AATP-1"), covers: ["REQ-1", "SEC-A"] }])).toEqual([]);
 	});
 	test("malformed inline lists fail closed", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-malformed-list-")); mkdirSync(join(dir, "docs", "AATP"), { recursive: true });
@@ -75,5 +86,22 @@ describe("parent-owned transitions", () => {
 		expect(reviewTicket(state, "AATP-1", "APPROVE").ok).toBe(false);
 		const completed = defaultState(); completed.tickets["AATP-1"] = { id: "AATP-1", status: "completed", allowed_files: [], forbidden_files: [], risk: "normal", review: "none" };
 		expect(reviewTicket(completed, "AATP-1", "REQUEST_CHANGES", "reviewer", "r").ok).toBe(true); expect(completed.tickets["AATP-1"]?.status).toBe("ready");
+	});
+	test("dependencies unlock only after approved provenance-bound implementation", () => {
+		const state = defaultState();
+		state.tickets["AATP-1"] = { id: "AATP-1", status: "completed", allowed_files: [], forbidden_files: [], risk: "normal", review: "none", implementation_commit_sha: "c", implementation_scope_sha256: "s" };
+		const child = spec("AATP-2", ["AATP-1"]);
+		expect(beginTicket(state, child, child.id).ok).toBe(false);
+		state.tickets["AATP-1"]!.review = "APPROVE";
+		expect(beginTicket(state, child, child.id).ok).toBe(true);
+	});
+	test("request changes invalidates the complete descendant chain", () => {
+		const state = defaultState();
+		state.tickets["AATP-1"] = { id: "AATP-1", status: "completed", dependencies: [], allowed_files: [], forbidden_files: [], risk: "normal", review: "APPROVE" };
+		state.tickets["AATP-2"] = { id: "AATP-2", status: "completed", dependencies: ["AATP-1"], allowed_files: [], forbidden_files: [], risk: "normal", review: "APPROVE" };
+		state.tickets["AATP-3"] = { id: "AATP-3", status: "completed", dependencies: ["AATP-2"], allowed_files: [], forbidden_files: [], risk: "normal", review: "APPROVE" };
+		expect(invalidateDescendants(state, "AATP-1")).toEqual(["AATP-2", "AATP-3"]);
+		expect(state.tickets["AATP-2"]?.status).toBe("ready");
+		expect(state.tickets["AATP-3"]?.review).toBe("none");
 	});
 });

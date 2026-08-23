@@ -206,4 +206,24 @@ describe("extension integration smoke", () => {
 		expect(result.isError).toBe(true);
 		expect(result.content[0].text).toContain("FOUNDRY_EXEC_GATE");
 	});
+
+	test("plan revise invalidates the prior design lock and AATP epoch", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-revise-"));
+		const state = defaultState();
+		state.product.status = "approved";
+		state.master_plan.status = "locked";
+		state.master_plan.sha256 = "old-plan";
+		state.design = { required: false, status: "locked", version: "1.0", sha256: "old-design" };
+		state.aatp.epoch = "old-epoch";
+		saveState(cwd, state);
+		const { commands } = harness();
+		await commands.get("plan-revise")!.handler("architecture changed", ctx(cwd));
+		const after = loadState(cwd);
+		expect(after.master_plan.status).toBe("draft");
+		expect(after.master_plan.sha256).toBe("");
+		expect(after.design.status).toBe("missing");
+		expect(after.design.required).toBe(true);
+		expect(after.design.sha256).toBe("");
+		expect(after.planning.epoch).not.toBe("");
+	});
 });

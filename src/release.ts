@@ -5,6 +5,7 @@ import { designAllowsUi, planLocked, productReady, recountTickets } from "./stat
 import { safeRepoPath } from "./paths";
 import type { CompanyState } from "./types";
 import { gitCall } from "./git-runtime";
+import { dependencyScopeHash, ticketScopeHash } from "./provenance";
 
 export function sha256File(cwd: string, rel: string): string {
 	const file = safeRepoPath(cwd, rel);
@@ -70,10 +71,49 @@ export function artifactsMatch(cwd: string, state: CompanyState): boolean {
 	return true;
 }
 
-export function reviewsApproved(state: CompanyState): boolean {
+function reviewProvenanceFresh(cwd: string, state: CompanyState, ticket: CompanyState["tickets"][string]): boolean {
+	if (!ticket.implementation_commit_sha || !ticket.implementation_parent_sha || !ticket.implementation_scope_sha256 || !ticket.verification_evidence_sha256) return false;
+	if (!ticket.review_commit_sha || !ticket.review_parent_sha || !ticket.reviewed_scope_sha256 || !ticket.reviewed_dependency_sha256 || !ticket.reviewed_manifest_sha256) return false;
+	if (ticket.reviewed_manifest_sha256 !== state.aatp.manifest_sha256) return false;
+	if (ticketScopeHash(cwd, ticket) !== ticket.implementation_scope_sha256 || ticketScopeHash(cwd, ticket) !== ticket.reviewed_scope_sha256) return false;
+	for (const dep of ticket.dependencies ?? []) {
+		if (!dep || dep === "NONE") continue;
+		const dependency = state.tickets[dep.toUpperCase()];
+		if (!dependency?.implementation_scope_sha256 || ticketScopeHash(cwd, dependency) !== dependency.implementation_scope_sha256) return false;
+	}
+	if (dependencyScopeHash(state, ticket) !== ticket.reviewed_dependency_sha256) return false;
+	const implementation = gitCall(cwd, ["cat-file", "-e", `${ticket.implementation_commit_sha}^{commit}`], { encoding: "utf8" });
+	const review = gitCall(cwd, ["cat-file", "-e", `${ticket.review_commit_sha}^{commit}`], { encoding: "utf8" });
+	return implementation.status === 0 && review.status === 0;
+}
+
+/**
+ * Prove that every commit after the Foundry baseline was recorded by a
+ * governed implementation/review transition. This catches a clean external
+ * commit that would otherwise look indistinguishable from a Foundry result.
+ */
+export function governedCommitLedgerFresh(cwd: string, state: CompanyState, head: string): boolean {
+	const baseline = state.aatp.baseline_sha;
+	const ledger = new Set(state.aatp.governed_commits.map((sha) => sha.toLowerCase()));
+	if (!baseline || ledger.size === 0 || !head) return false;
+	const baselineExists = gitCall(cwd, ["cat-file", "-e", `${baseline}^{commit}`], { encoding: "utf8" });
+	if (baselineExists.status !== 0) return false;
+	const ancestor = gitCall(cwd, ["merge-base", "--is-ancestor", baseline, head], { encoding: "utf8" });
+	if (ancestor.status !== 0) return false;
+	const history = gitCall(cwd, ["rev-list", "--max-count=8192", `${baseline}..${head}`], { encoding: "utf8", maxBuffer: 512 * 1024 });
+	if (history.status !== 0) return false;
+	const commits = new Set(history.stdout.split(/\r?\n/).map((sha) => sha.trim().toLowerCase()).filter(Boolean));
+	if (commits.size === 0 || !commits.has(head.toLowerCase())) return false;
+	// The ledger must be exact: no unknown commit may enter the candidate, and
+	// no recorded commit may have been rewritten out of the candidate history.
+	if ([...commits].some((sha) => !ledger.has(sha)) || [...ledger].some((sha) => !commits.has(sha))) return false;
+	return true;
+}
+
+export function reviewsApproved(state: CompanyState, cwd?: string): boolean {
 	const tickets = Object.values(state.tickets);
 	if (tickets.length === 0) return false;
-	return tickets.every((t) => t.status === "completed" && t.review === "APPROVE" && (t.review_by === "reviewer" || t.review_by === "security-reviewer") && Boolean(t.review_evidence_sha256));
+	return tickets.every((t) => t.status === "completed" && t.review === "APPROVE" && (t.review_by === "reviewer" || t.review_by === "security-reviewer") && Boolean(t.review_evidence_sha256) && (!cwd || reviewProvenanceFresh(cwd, state, t)));
 }
 
 export function deriveRelease(cwd: string, state: CompanyState): boolean {
@@ -82,7 +122,7 @@ export function deriveRelease(cwd: string, state: CompanyState): boolean {
 	const head = gitHead(cwd);
 	const qaOk = state.qa.status === "pass" && clean && state.qa.tree_sha !== "" && state.qa.tree_sha === head && artifactsMatch(cwd, state);
 	const aatpOk = state.aatp.total > 0 && state.aatp.completed === state.aatp.total && state.aatp.blocked === 0;
-	const ready = productReady(state) && planLocked(state) && designAllowsUi(state) && aatpOk && reviewsApproved(state) && qaOk;
+	const ready = productReady(state) && planLocked(state) && designAllowsUi(state) && aatpOk && reviewsApproved(state, cwd) && governedCommitLedgerFresh(cwd, state, head) && qaOk;
 	state.release.ready = ready;
 	state.release.tree_sha = ready ? head : "";
 	if (!clean && state.qa.status === "pass") state.qa.status = "pending";

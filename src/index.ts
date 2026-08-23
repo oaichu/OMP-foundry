@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes, randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +20,11 @@ import {
 	seedTickets,
 	summarizeAatp,
 	validateAatpSpecs,
+	validateAatpCoverage,
 	writeAatpIndex,
+	type AatpSpec,
+	type ImplementationProvenance,
+	type ReviewProvenance,
 } from "./aatp";
 import { bootstrapFoundryProject } from "./bootstrap";
 import { CONTEXT_POLICY, phasePrompt } from "./context-policy";
@@ -31,6 +35,7 @@ import {
 	applyPatchArtifact,
 	commitAppliedPatch,
 	extractTaskResults,
+	gitChangedPaths,
 	governedTask,
 	hashEvidence,
 	IMPLEMENTER_AGENTS,
@@ -56,15 +61,16 @@ import {
 	plan3Status,
 	PLAN3_ARTIFACTS,
 } from "./plan3";
-import { artifactsMatch, deriveRelease, invalidateQa, lockArtifactHash, workingTreeClean } from "./release";
+import { artifactsMatch, deriveRelease, gitHead, governedCommitLedgerFresh, invalidateQa, lockArtifactHash, workingTreeClean } from "./release";
+import { dependencyScopeHash, ticketScopeHash } from "./provenance";
 import { roleOf } from "./skills/phase-filter";
 import { loadRegistry } from "./skills/registry";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
 import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
-import { type CompanyState, type Plan3Stage, defaultState } from "./types";
+import { type CompanyState, type ConflictKind, type Plan3Stage, defaultState } from "./types";
 import { checkForUpdate, versionReport } from "./update-check";
-import { applyQa, executeVerifyStep, runVerify } from "./verify-runner";
+import { applyQa, executeVerifyStep, runDeclaredVerification, runVerify } from "./verify-runner";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CUSTOM = "com.omp.foundry.state";
@@ -78,10 +84,10 @@ const TASK_AGENTS = new Set([
 ]);
 const MUTATING_TASK_TOOLS = new Set(["task", "write", "edit", "ast_edit", "apply_patch", "foundry_init", "foundry_exec"]);
 
-type PendingRun = { bindings: TaskBinding[]; startedClean: boolean };
+type PendingRun = { bindings: TaskBinding[]; startedClean: boolean; headAtDispatch: string };
 type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
-type PendingPlanRun = { stage: ActivePlanStage; agent: string; index: number; cwd: string; beforeHash?: string; capability: string };
-type PendingAatpRun = { agent: typeof AATP_COMPILER; index: number; cwd: string; capability: string };
+type PendingPlanRun = { stage: ActivePlanStage; epoch: string; agent: string; index: number; cwd: string; beforeHash?: string; capability: string };
+type PendingAatpRun = { agent: typeof AATP_COMPILER; epoch: string; index: number; cwd: string; capability: string };
 type SafeState = { state: CompanyState; broken?: string; missing: boolean };
 
 function persist(cwd: string, state: CompanyState): CompanyState { saveState(cwd, state); return state; }
@@ -145,6 +151,7 @@ function requestAatpCompile(pi: ExtensionAPI, cwd: string, state: CompanyState, 
 	}
 	state.phase = "aatp";
 	state.aatp.manifest_sha256 = "";
+	state.aatp.epoch = randomUUID();
 	persist(cwd, state);
 	const modelGate = plan3ModelsReady(cwd);
 	if (modelGate) { orchestrate(pi, "AATP compiler model role is not ready.", `${modelGate}\nConfigure foundry_synth in ~/.omp/agent/config.yml or this project's .omp/config.yml.`); return; }
@@ -152,7 +159,7 @@ function requestAatpCompile(pi: ExtensionAPI, cwd: string, state: CompanyState, 
 		"Spawn exactly one blocking aatp-compiler using @foundry_synth.",
 		"Run the compiler in the parent governance context (do not set isolated=true); generated implementation workers are isolated later.",
 		"It may write only docs/AATP/AATP-*.md and docs/AATP/INDEX.md; use exact repository-relative paths, never globs or ..; do not implement.",
-		"Foundry will validate dependencies, scope, risk, acceptance, and verification, then seal the manifest before workers run.",
+		"Foundry will validate dependencies, scope, risk, security_sensitive, acceptance, and executable verification IDs, then seal the manifest before workers run.",
 	].join("\n"));
 }
 
@@ -197,7 +204,7 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 	if (loaded.missing) {
 		const boot = bootstrapFoundryProject(cwd, ROOT);
 		orchestrate(pi, "Foundry enabled for this project.", [
-			`stack=${boot.stackIds.join(",") || "unknown"} ui=${boot.ui}`,
+			`stack=${boot.stackIds.join(",") || "unknown"} ui=${boot.ui} ui_confidence=${boot.uiConfidence}`,
 			idea ? `User idea: ${idea}` : "If the user has not described the product, ask one short question.",
 			"Spawn blocking product-analyst. Then wait for /foundry-approve product.",
 		].join("\n"));
@@ -212,9 +219,9 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 	if (tasks.length === 0) { requestAatpCompile(pi, cwd, state); return; }
 	const ready = readyIndependent(tasks), counts = summarizeAatp(tasks);
 	if (ready.length > 0) { orchestrate(pi, "Build the next independent AATP layer.", "Run /build. Foundry will use the sealed DAG, isolate workers, validate patches, then apply+commit only valid deltas."); return; }
+	const unreviewed = tasks.filter((t) => t.status === "completed" && t.review !== "APPROVE");
+	if (unreviewed.length > 0) { orchestrate(pi, "Review before downstream work.", `Run /review <AATP-ID>. Dependencies unlock only after APPROVE. Unreviewed: ${unreviewed.map((t) => t.id).join(", ")}.`); return; }
 	if (counts.completed === counts.total && counts.total > 0 && state.qa.status !== "pass") {
-		const unreviewed = tasks.filter((t) => t.status === "completed" && t.review !== "APPROVE");
-		if (unreviewed.length > 0) { orchestrate(pi, "Review before QA.", `Run /review <AATP-ID>. Unreviewed: ${unreviewed.map((t) => t.id).join(", ")}.`); return; }
 		orchestrate(pi, "All AATP done. Run /verify.", "Foundry runs deterministic verification against a clean committed tree.");
 		return;
 	}
@@ -232,8 +239,25 @@ function resultForPlan(results: ReturnType<typeof extractTaskResults>, pending: 
 	return indexed;
 }
 
-function processGovernedResults(cwd: string, state: CompanyState, bindings: TaskBinding[], details: unknown): string[] {
-	const messages: string[] = [], results = extractTaskResults(details);
+/** Fingerprint the visible Git worktree so design preview commands cannot
+ * smuggle production source changes around the AATP gate. */
+function visibleWorktreeFingerprint(cwd: string): string {
+	const paths = gitChangedPaths(cwd).sort();
+	return hashEvidence(...paths.flatMap((path) => {
+		const file = safeRepoPath(cwd, path);
+		if (!file) return [path, "<path-gate>"];
+		try {
+			const stat = lstatSync(file);
+			if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 4 * 1024 * 1024) return [path, `<unhashed:${stat.size}>`];
+			return [path, readFileSync(file, "base64")];
+		}
+		catch { return [path, "<missing>"]; }
+	}));
+}
+
+function processGovernedResults(cwd: string, state: CompanyState, bindings: TaskBinding[], details: unknown, specs: AatpSpec[], initialHead: string): string[] {
+	const messages: string[] = [], results = extractTaskResults(details), specById = new Map(specs.map((spec) => [spec.id, spec]));
+	let expectedHead = initialHead;
 	for (const binding of bindings) {
 		const ticket = state.tickets[binding.ticketId];
 		if (!ticket) { messages.push(`${binding.ticketId}: missing parent ticket state`); continue; }
@@ -250,7 +274,8 @@ function processGovernedResults(cwd: string, state: CompanyState, bindings: Task
 		}
 		const output = result.output ?? "", conflict = parseConflict(output);
 		if (conflict && binding.kind === "implementation") {
-			blockTicket(state, binding.ticketId, `${conflict.kind}: ${conflict.reason}`);
+			const conflictKind = (["PLAN_CONFLICT", "DESIGN_CONFLICT", "DEPENDENCY_CONFLICT", "SCOPE_INSUFFICIENT"] as string[]).includes(conflict.kind) ? conflict.kind as ConflictKind : "SCOPE_INSUFFICIENT";
+			blockTicket(state, binding.ticketId, `${conflict.kind}: ${conflict.reason}`, conflictKind);
 			messages.push(`${binding.ticketId}: blocked by worker conflict ${conflict.kind}`);
 			continue;
 		}
@@ -273,19 +298,47 @@ function processGovernedResults(cwd: string, state: CompanyState, bindings: Task
 			messages.push(`${binding.ticketId}: ${applied.reason}`);
 			continue;
 		}
-		const committed = commitAppliedPatch(cwd, binding.ticketId, binding.kind, checked.paths);
+		if (gitHead(cwd) !== expectedHead) {
+			restoreCleanHead(cwd);
+			if (binding.kind === "implementation") resetTicket(state, binding.ticketId);
+			messages.push(`${binding.ticketId}: PROVENANCE_GATE repository HEAD changed while applying the worker result`);
+			continue;
+		}
+		let verificationSha = "";
+		if (binding.kind === "implementation") {
+			const spec = specById.get(binding.ticketId);
+			const verification = runDeclaredVerification(cwd, spec?.verification ?? []);
+			verificationSha = verification.evidenceSha256;
+			const changed = gitChangedPaths(cwd).filter((path) => !path.startsWith("<"));
+			const expected = new Set(checked.paths.map((path) => canonicalRepoPath(cwd, path)).filter((path): path is string => path !== null));
+			const unexpected = changed.filter((path) => {
+				const canonical = canonicalRepoPath(cwd, path);
+				return canonical !== null && !expected.has(canonical);
+			});
+			if (!verification.ok || unexpected.length) {
+				restoreCleanHead(cwd);
+				resetTicket(state, binding.ticketId);
+				messages.push(`${binding.ticketId}: AATP_VERIFY_GATE verification failed${unexpected.length ? ` or changed unexpected paths: ${unexpected.join(", ")}` : ""}`);
+				continue;
+			}
+		}
+		const committed = commitAppliedPatch(cwd, binding.ticketId, binding.kind, checked.paths, expectedHead);
 		if (!committed.ok) {
 			restoreCleanHead(cwd);
 			if (binding.kind === "implementation") resetTicket(state, binding.ticketId);
 			messages.push(`${binding.ticketId}: ${committed.reason}`);
 			continue;
 		}
-		const evidence = hashEvidence(checked.patch, output, result.id, result.agent);
+		const evidence = hashEvidence(checked.patch, output, result.id, result.agent, expectedHead, committed.commitSha, verificationSha);
+		expectedHead = committed.commitSha ?? expectedHead;
 		if (binding.kind === "implementation") {
-			const done = completeTicket(state, binding.ticketId, evidence);
+			const ticketScope = ticketScopeHash(cwd, ticket);
+			const provenance: ImplementationProvenance = { parentSha: committed.parentSha, commitSha: committed.commitSha, scopeSha: ticketScope, verificationSha };
+			const done = completeTicket(state, binding.ticketId, evidence, provenance);
 			messages.push(done.ok ? `${binding.ticketId}: validated, applied, committed, completed` : `${binding.ticketId}: ${done.reason}`);
 		} else {
-			const reviewed = reviewTicket(state, binding.ticketId, reviewVerdict!, binding.agent, evidence);
+			const provenance: ReviewProvenance = { parentSha: committed.parentSha, commitSha: committed.commitSha, scopeSha: ticketScopeHash(cwd, ticket), dependencySha: dependencyScopeHash(state, ticket), manifestSha: state.aatp.manifest_sha256 };
+			const reviewed = reviewTicket(state, binding.ticketId, reviewVerdict!, binding.agent, evidence, provenance);
 			messages.push(reviewed.ok ? `${binding.ticketId}: review=${reviewVerdict} recorded with evidence` : `${binding.ticketId}: ${reviewed.reason}`);
 		}
 	}
@@ -301,7 +354,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.registerTool({ name: "foundry_aatp_write", label: "Foundry AATP Write", description: "Compiler-only atomic writer for unsealed AATP work orders; native file writes remain denied.", loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
 		const loaded = safeState(ctx.cwd);
 		if (loaded.broken || loaded.missing || loaded.state.phase !== "aatp" || loaded.state.aatp.manifest_sha256) return { isError: true, content: [{ type: "text", text: "AATP_COMPILER_GATE: compiler writer is available only during an unsealed AATP phase." }] };
-		const run = [...pendingAatp.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability === params.capability);
+		const run = [...pendingAatp.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability === params.capability && candidate.epoch === loaded.state.aatp.epoch);
 		if (!run) return { isError: true, content: [{ type: "text", text: "AATP_COMPILER_GATE: invalid or expired compiler capability." }] };
 		const rel = canonicalRepoPath(ctx.cwd, params.path);
 		if (!rel || !/^docs\/aatp\/(?:aatp-[^/]+\.md|index\.md)$/i.test(rel)) return { isError: true, content: [{ type: "text", text: "AATP_PATH_GATE: compiler may write only docs/AATP/AATP-*.md or INDEX.md." }] };
@@ -329,7 +382,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.registerTool({ name: "foundry_plan_write", label: "Foundry Plan Write", description: "Active Plan3-stage atomic writer; native planning writes remain denied.", loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
 		const loaded = safeState(ctx.cwd);
 		if (loaded.broken || loaded.missing || loaded.state.mode !== "plan3" || loaded.state.phase !== "planning") return { isError: true, content: [{ type: "text", text: "PLAN3_GATE: plan writer is available only during an active Plan3 stage." }] };
-		const run = [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability === params.capability);
+		const run = [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability === params.capability && candidate.epoch === loaded.state.planning.epoch && candidate.stage === loaded.state.planning.stage);
 		if (!run) return { isError: true, content: [{ type: "text", text: "PLAN3_GATE: invalid or expired planning capability." }] };
 		const expected = PLAN3_ARTIFACTS[run.stage], rel = canonicalRepoPath(ctx.cwd, params.path);
 		if (!rel || rel.toLowerCase() !== expected.toLowerCase()) return { isError: true, content: [{ type: "text", text: `PLAN3_PATH_GATE: active stage may write only ${expected}.` }] };
@@ -366,8 +419,8 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const role = roleOf(agentName);
 		const skillState = agentName === AATP_COMPILER && state.phase === "aatp" ? { ...state, phase: "planning" as const } : state;
 		const pack = broken ? [] : resolveSkillManifests(ctx.cwd, skillState, role ? { role } : undefined);
-		const compiler = agentName === AATP_COMPILER ? [...pendingAatp.values()].find((candidate) => candidate.cwd === ctx.cwd) : undefined;
-		const planRun = PLAN_AGENTS.has(agentName) ? [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.agent === agentName) : undefined;
+		const compiler = agentName === AATP_COMPILER ? [...pendingAatp.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.epoch === state.aatp.epoch) : undefined;
+		const planRun = PLAN_AGENTS.has(agentName) ? [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.agent === agentName && candidate.epoch === state.planning.epoch && candidate.stage === state.planning.stage) : undefined;
 		const capabilityHint = compiler ? `\nCompiler capability (use only with foundry_aatp_write): ${compiler.capability}` : planRun ? `\nPlan3 capability (use only with foundry_plan_write): ${planRun.capability}` : "";
 		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, skillState.phase)}${capabilityHint}`, display: true, details: { ...state, skills: pack.map((s) => s.id) } } };
 	});
@@ -394,7 +447,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				if (!key) return { block: true, reason: "AATP_COMPILER_GATE: compiler task must expose a unique toolCallId." };
 				if (pendingAatp.has(key)) return { block: true, reason: "AATP_COMPILER_GATE: duplicate compiler task id is not replayable." };
 				if (compilerActiveFor(pendingAatp, ctx.cwd)) return { block: true, reason: "AATP_COMPILER_GATE: a project-wide compiler is already running for this project." };
-				pendingAatp.set(key, { agent: AATP_COMPILER, index: compilerItems[0].index, cwd: ctx.cwd, capability: randomBytes(32).toString("hex") });
+				pendingAatp.set(key, { agent: AATP_COMPILER, index: compilerItems[0].index, cwd: ctx.cwd, epoch: loaded.state.aatp.epoch, capability: randomBytes(32).toString("hex") });
 			}
 			if (loaded.state.mode === "plan3") {
 				const planItems = items.filter((item) => PLAN_AGENTS.has(item.agent));
@@ -407,7 +460,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 					if (!key) return { block: true, reason: "PLAN3_GATE: planning task must expose a unique toolCallId." };
 					if (pendingPlan.has(key)) return { block: true, reason: "PLAN3_GATE: duplicate planning task id is not replayable." };
 					if (planActiveFor(pendingPlan, ctx.cwd)) return { block: true, reason: "PLAN3_GATE: one blocking Plan3 stage task may run per project." };
-					pendingPlan.set(key, { stage: loaded.state.planning.stage as ActivePlanStage, agent: expected, index: planItems[0].index, cwd: ctx.cwd, beforeHash: hashPlan3Artifact(ctx.cwd, loaded.state.planning.stage as ActivePlanStage), capability: randomBytes(32).toString("hex") });
+					pendingPlan.set(key, { stage: loaded.state.planning.stage as ActivePlanStage, epoch: loaded.state.planning.epoch, agent: expected, index: planItems[0].index, cwd: ctx.cwd, beforeHash: hashPlan3Artifact(ctx.cwd, loaded.state.planning.stage as ActivePlanStage), capability: randomBytes(32).toString("hex") });
 				}
 			}
 			if (items.some((item) => item.agent === AATP_COMPILER || PLAN_AGENTS.has(item.agent)) && loaded.state.mode !== "plan3" && !(loaded.state.phase === "aatp" && !loaded.state.aatp.manifest_sha256)) return { block: true, reason: "TASK_GATE: planning/compiler agents are only legal in their owning phase." };
@@ -439,12 +492,15 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 					} else {
 						const ticket = state.tickets[binding.ticketId];
 						if (!ticket || ticket.status !== "completed") return { block: true, reason: `REVIEW_GATE: ${binding.ticketId} must be completed before review.` };
-						const expectedAgent = reviewAgentForRisk(ticket.risk);
+						if (!ticket.implementation_commit_sha || !ticket.implementation_scope_sha256 || !ticket.verification_evidence_sha256) return { block: true, reason: `REVIEW_PROVENANCE_GATE: ${binding.ticketId} has no verified implementation provenance.` };
+						const expectedAgent = reviewAgentForRisk(ticket.risk, ticket.security_sensitive === true);
 						if (binding.agent !== expectedAgent) return { block: true, reason: `REVIEW_ROLE_GATE: ${binding.ticketId} risk=${ticket.risk} requires ${expectedAgent}; received ${binding.agent || "(missing)"}.` };
 					}
 				}
 				recountTickets(state); invalidateQa(state); persist(ctx.cwd, state);
-				pending.set(key, { bindings: parsed.bindings, startedClean: true });
+				const headAtDispatch = gitHead(ctx.cwd);
+				if (!headAtDispatch) return { block: true, reason: "PROVENANCE_GATE: unable to capture repository HEAD before dispatch." };
+				pending.set(key, { bindings: parsed.bindings, startedClean: true, headAtDispatch });
 			}
 			const isolated = forceIsolatedTaskInput(raw);
 			if (isolated) return { input: isolated };
@@ -460,6 +516,8 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const planRun = pendingPlan.get(key);
 		if (planRun) {
 			pendingPlan.delete(key);
+			const currentPlanState = loadState(ctx.cwd);
+			if (currentPlanState.planning.epoch !== planRun.epoch || currentPlanState.planning.stage !== planRun.stage) return { isError: true, content: [{ type: "text" as const, text: "PLAN3_EPOCH_GATE: stale planning capability result rejected; restart the current Plan3 stage." }] };
 			const result = resultForPlan(extractTaskResults(event.details), planRun);
 			if (!result || result.exitCode !== 0 || result.error || result.aborted) return { isError: true, content: [{ type: "text" as const, text: `PLAN3_STAGE_FAILED: ${planRun.stage} did not complete; stage remains unchanged.` }] };
 			const artifactHash = hashPlan3Artifact(ctx.cwd, planRun.stage);
@@ -473,13 +531,14 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (aatpRun) {
 			pendingAatp.delete(key);
 			if (aatpRun.cwd !== ctx.cwd) return { isError: true, content: [{ type: "text" as const, text: "AATP_COMPILER_GATE: compiler result arrived for a different project context." }] };
+			if (loadState(ctx.cwd).aatp.epoch !== aatpRun.epoch) return { isError: true, content: [{ type: "text" as const, text: "AATP_EPOCH_GATE: stale compiler result rejected; recompile the current locked plan." }] };
 			const result = resultForPlan(extractTaskResults(event.details), { agent: aatpRun.agent, index: aatpRun.index });
 			if (!result || result.exitCode !== 0 || result.error || result.aborted) return aatpCompilerError(ctx.cwd, "AATP_COMPILER_FAILED: compiler did not complete; the manifest remains unsealed.");
 			try {
 				const state = loadState(ctx.cwd), specs = listAatpSpecs(ctx.cwd), sourceManifest = aatpManifestHash(ctx.cwd);
 				if (state.master_plan.status !== "locked" || (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required")) return aatpCompilerError(ctx.cwd, "AATP_COMPILER_GATE: plan/design must remain locked while compiling AATP.");
 				if (specs.length === 0) return aatpCompilerError(ctx.cwd, "AATP_COMPILER_GATE: no docs/AATP/AATP-*.md work orders were produced.");
-				const errors = validateAatpSpecs(specs, { strict: true });
+				const errors = [...validateAatpSpecs(specs, { strict: true }), ...validateAatpCoverage(ctx.cwd, specs)];
 				if (errors.length) return aatpCompilerError(ctx.cwd, `AATP_COMPILER_GATE: ${errors.join("; ")}`);
 				const manifest = aatpManifestHash(ctx.cwd);
 				if (!sourceManifest || manifest !== sourceManifest) return aatpCompilerError(ctx.cwd, "AATP_COMPILER_GATE: AATP sources changed while validating; retry compilation from a clean artifact set.");
@@ -495,13 +554,13 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const run = pending.get(key);
 		if (!run) return;
 		pending.delete(key);
-		if (run.startedClean && !workingTreeClean(ctx.cwd)) {
+		if (run.startedClean && (!workingTreeClean(ctx.cwd) || gitHead(ctx.cwd) !== run.headAtDispatch)) {
 			const state = loadState(ctx.cwd);
 			for (const binding of run.bindings) if (binding.kind === "implementation") resetTicket(state, binding.ticketId);
 			recountTickets(state); persist(ctx.cwd, state);
-			return { isError: true, content: [{ type: "text" as const, text: "ISOLATION_GATE: parent tree changed while worker ran. Worker patch was not applied; parent changes were preserved." }] };
+			return { isError: true, content: [{ type: "text" as const, text: "ISOLATION_GATE: parent tree or HEAD changed while worker ran. Worker patch was not applied; parent changes were preserved." }] };
 		}
-		const state = loadState(ctx.cwd), messages = processGovernedResults(ctx.cwd, state, run.bindings, event.details);
+		const state = loadState(ctx.cwd), specs = listAatpSpecs(ctx.cwd), messages = processGovernedResults(ctx.cwd, state, run.bindings, event.details, specs, run.headAtDispatch);
 		persist(ctx.cwd, state);
 		return { isError: messages.some((m) => /failed|blocked|GATE|rejected/i.test(m)), content: [{ type: "text" as const, text: messages.join("\n") }] };
 	});
@@ -517,7 +576,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.registerTool({ name: "foundry_init", label: "Foundry Init", description: "Advanced/manual bootstrap. /foundry auto-bootstraps new projects using this same project-local path.", loadMode: "essential", approval: "write", parameters: z.object({ name: z.string().optional() }), async execute(_id, params, _session, _user, ctx) {
 		const boot = bootstrapFoundryProject(ctx.cwd, ROOT);
 		ctx.ui.setStatus("foundry", statusOf(boot.state));
-		return { content: [{ type: "text", text: `${boot.existed ? "Kept" : "Initialized"} Foundry. stack=${boot.stackIds.join(",")} ui=${boot.ui} project_config=${boot.configCreated ? "created" : "updated-without-model-overrides"} name=${params.name ?? ""}` }], details: boot.state };
+		return { content: [{ type: "text", text: `${boot.existed ? "Kept" : "Initialized"} Foundry. stack=${boot.stackIds.join(",")} ui=${boot.ui} ui_confidence=${boot.uiConfidence} project_config=${boot.configCreated ? "created" : "updated-without-model-overrides"} name=${params.name ?? ""}` }], details: boot.state };
 	} });
 
 	pi.registerTool({ name: "foundry_exec", label: "Foundry Design Verify", description: "Run one detected verification command during unlocked design only; no arbitrary command input.", loadMode: "essential", approval: "write", parameters: z.object({ id: z.string() }), async execute(_id, params, _session, _user, ctx) {
@@ -525,7 +584,10 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (state.phase !== "design" || state.master_plan.status !== "locked" || state.design.status === "locked") return { content: [{ type: "text", text: "FOUNDRY_EXEC_GATE: verification tool is available only while design is unlocked after plan lock." }], isError: true };
 		const steps = detectStack(ctx.cwd).verify, step = steps.find((s) => s.id === params.id);
 		if (!step) return { content: [{ type: "text", text: `Unknown verify id ${params.id}. Available: ${steps.map((s) => s.id).join(", ") || "none"}` }], isError: true };
+		const headBefore = gitHead(ctx.cwd), worktreeBefore = visibleWorktreeFingerprint(ctx.cwd);
 		const result = executeVerifyStep(ctx.cwd, step, 120_000);
+		const headAfter = gitHead(ctx.cwd), worktreeAfter = visibleWorktreeFingerprint(ctx.cwd);
+		if (headBefore !== headAfter || worktreeBefore !== worktreeAfter) return { content: [{ type: "text", text: `${step.id} exit=${result.exitCode}\nFOUNDRY_EXEC_MUTATION_GATE: design verification changed the visible repository. Production sources must be implemented through an AATP ticket; inspect and clean the change before continuing.` }], isError: true };
 		return { content: [{ type: "text", text: `${step.id} exit=${result.exitCode}\n${result.output}` }], isError: result.exitCode !== 0 };
 	} });
 
@@ -556,7 +618,18 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("plan3", { description: "Enter/resume governed Draft → Redteam → Synth planning mode", handler: plan3Handler });
 	pi.registerCommand("3-stage-plan", { description: "Alias of /plan3", handler: plan3Handler });
 	pi.registerCommand("plan-revise", { description: "Human-only: reopen locked plan and restart Plan3", handler: async (args, ctx) => {
-		const state = loadState(ctx.cwd); state.master_plan.status = "draft"; state.conflict = { kind: "PLAN_CONFLICT", reason: args.trim() || "user revise" }; resetAatp(state); invalidateQa(state); enterPlan3(state, true); persist(ctx.cwd, state); orchestrate(pi, "PLAN reopened by user.", `${plan3Status(state)}\n${plan3Instruction(state)}\nDownstream AATP/reviews/QA were invalidated.`);
+		const state = loadState(ctx.cwd);
+		state.master_plan.status = "draft";
+		state.master_plan.sha256 = "";
+		state.conflict = { kind: "PLAN_CONFLICT", reason: args.trim() || "user revise" };
+		// A design is derived from the locked plan. Never carry a v1 design lock
+		// across a plan revision; require an explicit approve/skip decision again.
+		state.design = { required: true, version: state.design.version, status: "missing", sha256: "" };
+		resetAatp(state);
+		invalidateQa(state);
+		enterPlan3(state, true);
+		persist(ctx.cwd, state);
+		orchestrate(pi, "PLAN reopened by user.", `${plan3Status(state)}\n${plan3Instruction(state)}\nDownstream design/AATP/reviews/QA were invalidated. Run /design approve or /design skip after the new plan is locked.`);
 	} });
 
 	pi.registerCommand("design", { description: "Design foundation after plan lock", handler: async (args, ctx) => {
@@ -589,6 +662,9 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (state.aatp.manifest_sha256 !== aatpManifestHash(ctx.cwd)) { ctx.ui.notify("AATP_SPEC_GATE: sealed AATP specs changed. Re-run /aatp after an explicit plan/design revision.", "error"); return; }
 		if (!artifactsMatch(ctx.cwd, state)) { ctx.ui.notify("AATP_ARTIFACT_GATE: locked product/plan/design evidence changed. Reopen the relevant human gate before building.", "error"); return; }
 		const baselineError = commitGovernanceBaseline(ctx.cwd); if (baselineError) { ctx.ui.notify(baselineError, "error"); return; }
+		const baselineHead = gitHead(ctx.cwd);
+		if (!baselineHead) { ctx.ui.notify("PROVENANCE_GATE: unable to capture the Foundry baseline commit.", "error"); return; }
+		if (!state.aatp.baseline_sha) state.aatp.baseline_sha = baselineHead;
 		seedTickets(state, specs); const tasks = hydrateAatp(ctx.cwd, state), ready = readyIndependent(tasks); state.phase = "implementation"; recountTickets(state); persist(ctx.cwd, state);
 		const lines = ready.map((t) => `- ${t.id} agent=${routeAgent(t.risk)} :: ${t.objective}`);
 		orchestrate(pi, "Run the ready AATP layer.", [`Ready (${ready.length}):`, lines.join("\n") || "(none)", "Spawn one blocking task item per line with the exact AATP id in each task text.", "Do NOT call aatp_begin/complete. Foundry owns lifecycle, patch validation, apply, and commit.", "Worker conflicts must end with: FOUNDRY_CONFLICT <KIND> <reason>."].join("\n"));
@@ -597,7 +673,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const state = loadState(ctx.cwd), completed = Object.values(state.tickets).filter((t) => t.status === "completed" && t.review !== "APPROVE"), requested = args.trim().toUpperCase(), target = requested ? state.tickets[requested] : completed[0];
 		if (!target || target.status !== "completed") { ctx.ui.notify("REVIEW_GATE: specify a completed AATP id.", "warning"); return; }
 		state.phase = "review"; persist(ctx.cwd, state);
-		const agent = reviewAgentForRisk(target.risk);
+		const agent = reviewAgentForRisk(target.risk, target.security_sensitive === true);
 		orchestrate(pi, "Independent review.", `Spawn blocking ${agent} for ${target.id}. The review report and final output must contain the same exact marker: FOUNDRY_REVIEW ${target.id} APPROVE|REQUEST_CHANGES|BLOCK. Reviewer cannot call lifecycle tools or modify product code.`);
 	} });
 	pi.registerCommand("verify", { description: "Deterministic QA", handler: async (_args, ctx) => { const state = loadState(ctx.cwd), rows = runVerify(ctx.cwd); applyQa(ctx.cwd, state, rows); deriveRelease(ctx.cwd, state); persist(ctx.cwd, state); orchestrate(pi, `QA ${state.qa.status}`, rows.map((r) => `${r.id}=${r.exitCode}`).join(" ") || "no-commands"); } });
@@ -606,7 +682,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const report = [
 			`${productOk(state) ? "✓" : "✗"} PRODUCT`, `${state.master_plan.status === "locked" ? "✓" : "✗"} PLAN locked`, `${!state.design.required || state.design.status === "locked" || state.design.status === "not_required" ? "✓" : "✗"} DESIGN`,
 			`${state.aatp.manifest_sha256 && state.aatp.manifest_sha256 === aatpManifestHash(ctx.cwd) ? "✓" : "✗"} AATP specs sealed`, `${state.aatp.total > 0 && state.aatp.completed === state.aatp.total && state.aatp.blocked === 0 ? "✓" : "✗"} AATP complete`,
-			`${Object.values(state.tickets).every((t) => t.review === "APPROVE" && (t.review_by === "reviewer" || t.review_by === "security-reviewer") && t.review_evidence_sha256) && Object.keys(state.tickets).length > 0 ? "✓" : "✗"} independent reviews`, `${state.qa.status === "pass" ? "✓" : "✗"} QA pass @ ${state.qa.tree_sha || "no-sha"}`, `${workingTreeClean(ctx.cwd) ? "✓" : "✗"} clean tree`,
+			`${Object.values(state.tickets).every((t) => t.review === "APPROVE" && (t.review_by === "reviewer" || t.review_by === "security-reviewer") && t.review_evidence_sha256) && Object.keys(state.tickets).length > 0 ? "✓" : "✗"} independent reviews`, `${governedCommitLedgerFresh(ctx.cwd, state, gitHead(ctx.cwd)) ? "✓" : "✗"} provenance ledger`, `${state.qa.status === "pass" ? "✓" : "✗"} QA pass @ ${state.qa.tree_sha || "no-sha"}`, `${workingTreeClean(ctx.cwd) ? "✓" : "✗"} clean tree`,
 		].join("\n");
 		orchestrate(pi, ready ? "RELEASE_READY=true (derived)." : "Release blocked.", `${report}\n\nAgent push/publish/deploy remains denied. Release from a human shell after this gate is green.`);
 	} });

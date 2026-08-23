@@ -1,4 +1,5 @@
-import { lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -31,6 +32,17 @@ export const FOUNDRY_MODEL_ROLES = [
 	"foundry_security",
 ] as const;
 const MAX_CONFIG_BYTES = 512 * 1024;
+
+function atomicConfigWrite(path: string, text: string): void {
+	const temp = `${path}.${randomUUID()}.tmp`;
+	try {
+		writeFileSync(temp, text, { encoding: "utf8", flag: "wx" });
+		renameSync(temp, path);
+	} catch (error) {
+		try { unlinkSync(temp); } catch { /* best effort cleanup */ }
+		throw error;
+	}
+}
 
 function readBoundedConfig(path: string): string {
 	const stat = lstatSync(path);
@@ -157,7 +169,7 @@ export function ensureProjectFoundryConfig(cwd: string): { created: boolean; pat
 	let text = "task:\n  isolation:\n    mode: auto\n    apply: false\n";
 	try { text = readBoundedConfig(path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; created = true; }
 	const next = ensureTopLevelScalar(text, "modelRoleStorage", "project");
-	if (next !== text) writeFileSync(path, next, "utf8");
+	if (next !== text) atomicConfigWrite(path, next);
 	return { created, path };
 }
 
@@ -211,7 +223,7 @@ export function ensureGlobalFoundryRoles(options: { path?: string; roles?: Recor
 	for (const role of FOUNDRY_MODEL_ROLES) if (!aliases[role]) aliases[role] = "@default";
 	mkdirSync(dirname(path), { recursive: true });
 	const text = ensureModelRoles(before, aliases);
-	writeFileSync(path, text, "utf8");
+	atomicConfigWrite(path, text);
 	return { path, added, values: aliases };
 }
 
@@ -252,5 +264,5 @@ export function narrowFoundryGitignore(cwd: string): void {
 	const required = [".omp/foundry-state.yml", ".omp/foundry-state.yml.*.tmp", ".omp/foundry-state.yml.pre-v*.bak", ".omp/company-state.yml", ".omp/company-state.yaml"];
 	for (const line of required) if (!lines.includes(line)) lines.push(line);
 	const next = `${lines.filter(Boolean).join("\n")}\n`;
-	if (next !== text) writeFileSync(path, next, "utf8");
+	if (next !== text) atomicConfigWrite(path, next);
 }

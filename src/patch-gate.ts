@@ -46,7 +46,7 @@ export function prepareImplementationBaseline(cwd: string): { ok: boolean; reaso
 	if (dirty.length === 0) return { ok: true, committed: false };
 	const safe = dirty.every((rel) => {
 		const lower = rel.toLowerCase();
-		return /^(?:docs\/(?:product|master_plan|design|security|architecture|aatp|release_report)\.md|docs\/planning\/(?:master_plan_draft|plan_review)\.md|docs\/aatp\/(?:aatp-[^/]+|index)\.md|docs\/reports\/(?:qa|review-[^/]+)\.md|\.gitignore|\.omp\/config\.ya?ml)$/.test(lower);
+		return /^(?:docs\/(?:product|master_plan|design|security|architecture|aatp|release_report)\.md|docs\/planning\/(?:master_plan_draft|plan_review)\.md|docs\/aatp\/(?:aatp-[^/]+|index)\.md|docs\/aatp\/archive\/[a-z0-9_-]+\/(?:aatp-[^/]+|index)\.md|docs\/reports\/(?:qa|review-[^/]+)\.md|\.gitignore|\.omp\/config\.ya?ml)$/.test(lower);
 	});
 	if (!safe) return { ok: false, reason: `WORKTREE_GATE: commit or stash non-governance changes before /build: ${dirty.join(", ")}` };
 	let result = gitCall(cwd, ["diff", "--cached", "--quiet"], { encoding: "utf8" });
@@ -134,7 +134,9 @@ export function validatePatchArtifact(cwd: string, patchPath: string | undefined
 function fileHash(path: string): string | null | undefined {
 	try {
 		const stat = lstatSync(path);
-		if (stat.isSymbolicLink() || !stat.isFile()) return undefined;
+		// A governed patch must not mutate an inode shared with a path outside
+		// the repository (hard-link escape). New files have nlink=1.
+		if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink > 1) return undefined;
 		return createHash("sha256").update(readFileSync(path)).digest("hex");
 	} catch (error) {
 		return (error as NodeJS.ErrnoException).code === "ENOENT" ? null : undefined;
@@ -158,6 +160,16 @@ export function applyPatchArtifact(cwd: string, patchPath: string | undefined, e
 	const patchPaths = parsePatchPaths(patchText);
 	if (patchPaths.length === 0) return { ok: false, reason: "PATCH_GATE: patch artifact contains no file paths." };
 	if (expectedPaths && !sameCanonicalPaths(cwd, patchPaths, expectedPaths)) return { ok: false, reason: "PATCH_GATE: patch paths changed after validation." };
+	for (const path of patchPaths) {
+		const canonical = canonicalRepoPath(cwd, path), absolute = canonical ? join(cwd, path) : "";
+		if (!canonical) return { ok: false, reason: `PATH_GATE: escaped patch path before apply: ${path}` };
+		try {
+			const stat = lstatSync(absolute);
+			if (stat.nlink > 1) return { ok: false, reason: `PATCH_GATE: hard-linked target is not eligible for a governed patch: ${path}` };
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { ok: false, reason: `PATCH_GATE: unable to inspect ${path}` };
+		}
+	}
 	const check = gitCall(cwd, ["apply", "--check", "--whitespace=nowarn"], { input: patchText, encoding: "utf8" });
 	if (check.status !== 0) return { ok: false, reason: `PATCH_APPLY_FAILED: ${check.stderr.trim() || check.stdout.trim()}` };
 	const result = gitCall(cwd, ["apply", "--whitespace=nowarn"], { input: patchText, encoding: "utf8" });
@@ -179,9 +191,9 @@ export function applyPatchArtifact(cwd: string, patchPath: string | undefined, e
 		const absolute = join(cwd, path);
 		try {
 			const stat = lstatSync(absolute);
-			if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) {
+			if (stat.isSymbolicLink() || stat.nlink > 1 || (!stat.isFile() && !stat.isDirectory())) {
 				reversePatch(cwd, patchText, patchPaths);
-				return { ok: false, reason: `PATCH_GATE: symlink or special file created at ${path}` };
+				return { ok: false, reason: `PATCH_GATE: symlink, hard-link, or special file created at ${path}` };
 			}
 		} catch {
 			// Deleted paths have no leaf to inspect; git's mode summary check below
@@ -212,7 +224,9 @@ export function applyPatchArtifact(cwd: string, patchPath: string | undefined, e
 	LAST_APPLIED_PATCH.set(cwd, { text: patchText, paths: patchPaths, expectedHashes });
 	return { ok: true };
 }
-export function commitAppliedPatch(cwd: string, ticketId: string, kind: "implementation" | "review", paths?: string[]): { ok: boolean; reason?: string } {
+export function commitAppliedPatch(cwd: string, ticketId: string, kind: "implementation" | "review", paths?: string[], expectedParentSha?: string): { ok: boolean; reason?: string; parentSha?: string; commitSha?: string } {
+	const parentSha = gitCall(cwd, ["rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+	if (!parentSha || (expectedParentSha && parentSha !== expectedParentSha)) return { ok: false, reason: "PROVENANCE_GATE: repository HEAD changed before the validated patch could be committed." };
 	let result = gitCall(cwd, ["diff", "--cached", "--quiet"], { encoding: "utf8" });
 	if (result.status !== 0) return { ok: false, reason: "PATCH_GATE: git index contains unrelated staged changes." };
 	const applied = LAST_APPLIED_PATCH.get(cwd);
@@ -244,10 +258,14 @@ export function commitAppliedPatch(cwd: string, ticketId: string, kind: "impleme
 		}
 	}
 	result = gitCall(cwd, ["diff", "--cached", "--quiet"], { encoding: "utf8" });
-	if (result.status === 0) { LAST_APPLIED_PATCH.delete(cwd); return { ok: true }; }
+	if (result.status === 0) { LAST_APPLIED_PATCH.delete(cwd); return { ok: true, parentSha, commitSha: parentSha }; }
 	const message = kind === "review" ? `foundry: review ${ticketId}` : `foundry: complete ${ticketId}`;
 	result = gitCall(cwd, ["commit", "-m", message], { encoding: "utf8", env: { ...gitIdentity } });
-	if (result.status === 0) { LAST_APPLIED_PATCH.delete(cwd); return { ok: true }; }
+	if (result.status === 0) {
+		const commitSha = gitCall(cwd, ["rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+		LAST_APPLIED_PATCH.delete(cwd);
+		return commitSha ? { ok: true, parentSha, commitSha } : { ok: false, reason: "PROVENANCE_GATE: committed patch has no readable commit SHA." };
+	}
 	return { ok: false, reason: `git commit failed: ${result.stderr.trim() || result.stdout.trim()}` };
 }
 /** Reverse only the last Foundry-applied patch. Never reset/clean unrelated parent work. */

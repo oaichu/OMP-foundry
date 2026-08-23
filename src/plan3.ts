@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, readFileSync } from "node:fs";
 import type { CompanyState, Plan3Stage } from "./types";
 import { safeRepoPath } from "./paths";
@@ -35,13 +35,14 @@ export function enterPlan3(state: CompanyState, restart = false): void {
 	state.mode = "plan3";
 	state.phase = "planning";
 	if (restart || state.planning.stage === "idle" || state.planning.stage === "awaiting_lock") {
-		state.planning = { stage: "draft", draft_sha256: "", review_sha256: "", final_sha256: "" };
+		state.planning = { stage: "draft", epoch: randomUUID(), draft_sha256: "", review_sha256: "", final_sha256: "" };
 	}
+	if (!state.planning.epoch) state.planning.epoch = randomUUID();
 }
 
 export function abortPlan3(state: CompanyState): void {
 	state.mode = "normal";
-	state.planning = { stage: "idle", draft_sha256: "", review_sha256: "", final_sha256: "" };
+	state.planning = { stage: "idle", epoch: randomUUID(), draft_sha256: "", review_sha256: "", final_sha256: "" };
 	state.phase = state.master_plan.status === "locked" ? "aatp" : "planning";
 }
 

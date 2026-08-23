@@ -62,6 +62,15 @@ describe("pre-apply patch gate", () => {
 		expect(readFileSync(join(dir, "src", "auth", "a.ts"), "utf8")).toBe("2\n");
 		expect(commitAppliedPatch(dir, ticket.id, "implementation").ok).toBe(true);
 	});
+	test("commit rejects a clean external HEAD change", () => {
+		const dir = gitRepo(), patchPath = patchFor(dir, "src/auth/a.ts", "2\n");
+		const checked = validatePatchArtifact(dir, patchPath, ticket, "implementation"); expect(checked.ok).toBe(true);
+		const before = spawnSync("git", ["rev-parse", "HEAD"], { cwd: dir, encoding: "utf8" }).stdout.trim();
+		expect(applyPatchArtifact(dir, patchPath, checked.ok ? checked.patch : undefined, checked.ok ? checked.paths : undefined).ok).toBe(true);
+		writeFileSync(join(dir, "external.txt"), "external\n"); spawnSync("git", ["add", "external.txt"], { cwd: dir }); spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "external"], { cwd: dir, encoding: "utf8" });
+		expect(commitAppliedPatch(dir, ticket.id, "implementation", checked.ok ? checked.paths : undefined, before).ok).toBe(false);
+		restoreCleanHead(dir);
+	});
 	test("validated patch bytes cannot be swapped before apply", () => {
 		const dir = gitRepo(), patchPath = patchFor(dir, "src/auth/a.ts", "safe\n");
 		const checked = validatePatchArtifact(dir, patchPath, ticket, "implementation");
@@ -96,4 +105,5 @@ describe("worker evidence", () => {
 		expect(parseConflict("FOUNDRY_CONFLICT PLAN_CONFLICT locked plan mismatch")?.kind).toBe("PLAN_CONFLICT");
 	});
 	test("dirty source WIP blocks governed build", () => { const dir = gitRepo(); writeFileSync(join(dir, "src", "auth", "a.ts"), "user edit\n"); expect(prepareImplementationBaseline(dir).ok).toBe(false); });
+	test("AATP archives are accepted as governed baseline artifacts", () => { const dir = gitRepo(); mkdirSync(join(dir, "docs", "AATP", "archive", "20260823"), { recursive: true }); writeFileSync(join(dir, "docs", "AATP", "archive", "20260823", "AATP-001.md"), "archived\n"); const result = prepareImplementationBaseline(dir); expect(result.ok).toBe(true); expect(result.committed).toBe(true); });
 });

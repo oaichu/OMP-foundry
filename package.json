@@ -1,10 +1,11 @@
 {
   "name": "omp-foundry",
-  "version": "0.6.2",
+  "version": "0.7.0",
   "description": "Lock the plan. Then pour the code. Governed AI foundry for Oh My Pi.",
   "license": "MIT",
   "scripts": {
     "test": "bun test",
+    "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "check:omp-contract": "bun scripts/check-omp-contract.ts"
   },

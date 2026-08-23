@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
-import { LOCKED_AATP_PATHS, LOCKED_DESIGN_PATHS, LOCKED_PLAN_PATHS, LOCKED_PRODUCT_PATHS, STATE_PATHS, type CompanyState, type ReviewVerdict, type TicketStatus } from "./types";
+import { LOCKED_AATP_PATHS, LOCKED_DESIGN_PATHS, LOCKED_PLAN_PATHS, LOCKED_PRODUCT_PATHS, STATE_PATHS, type CompanyState, type ConflictKind, type ReviewVerdict, type TicketStatus } from "./types";
 import { comparablePath, safeRepoPath } from "./paths";
 
 export interface AatpSpec {
@@ -13,12 +13,17 @@ export interface AatpSpec {
 	risk: string;
 	acceptance?: string[];
 	verification?: string[];
+	security_sensitive?: boolean;
+	covers?: string[];
 	path: string;
 }
 
 export interface AatpTask extends AatpSpec {
 	status: TicketStatus;
 	review: ReviewVerdict;
+	implementation_commit_sha?: string;
+	implementation_scope_sha256?: string;
+	verification_evidence_sha256?: string;
 }
 
 const MAX_AATP_FILES = 256;
@@ -28,6 +33,7 @@ const MAX_ARCHIVE_BYTES = MAX_AATP_BYTES;
 const MAX_DEPENDENCIES = 256;
 const MAX_GRAPH_DEPTH = 256;
 const MAX_FIELD_BYTES = 16 * 1024;
+const MAX_GOVERNED_COMMITS = 4096;
 
 function parseList(block: string, key: string): string[] {
 	const normalized = block.replace(/\r\n/g, "\n");
@@ -78,6 +84,13 @@ function safeAatpDir(cwd: string): string {
 	const dir = safeRepoPath(cwd, "docs/AATP");
 	if (!dir) throw new Error("PATH_GATE: refusing docs/AATP through a symlink or outside the repository.");
 	return dir;
+}
+
+function parseBoolean(block: string, key: string): boolean {
+	const value = parseField(block, key);
+	if (!value) return false;
+	if (value !== "true" && value !== "false") throw new Error(`${key} must be true or false`);
+	return value === "true";
 }
 
 /** Preserve the previous generated DAG outside the active manifest before recompiling. */
@@ -154,6 +167,8 @@ export function listAatpSpecs(cwd: string): AatpSpec[] {
 			risk: parseField(body, "risk") || "normal",
 			acceptance: parseList(body, "acceptance"),
 			verification: parseList(body, "verification"),
+			security_sensitive: parseBoolean(body, "security_sensitive"),
+			covers: parseList(body, "covers").map((value) => value.toUpperCase()),
 			path,
 		});
 	}
@@ -211,6 +226,9 @@ export function validateAatpSpecs(specs: AatpSpec[], options: AatpValidationOpti
 			if (!risks.has(spec.risk.toLowerCase())) errors.push(`${spec.id}: invalid risk ${spec.risk}`);
 			if (!spec.acceptance?.length) errors.push(`${spec.id}: acceptance must be explicit and non-empty`);
 			if (!spec.verification?.length) errors.push(`${spec.id}: verification must be explicit and non-empty`);
+			if (spec.verification?.some((value) => !/^[A-Za-z0-9_.:@/-]+$/.test(value) && !/^(?:bun|npm)\s+test(?:\s+--silent)?$/i.test(value))) errors.push(`${spec.id}: verification entries must be step ids or package-script names, not shell commands`);
+			if (spec.security_sensitive !== undefined && typeof spec.security_sensitive !== "boolean") errors.push(`${spec.id}: security_sensitive must be boolean`);
+			if (spec.covers?.some((concern) => !/^(?:REQ|ARCH|SEC|DES|OPS)-[A-Z0-9_-]+$/.test(concern))) errors.push(`${spec.id}: covers must use REQ-/ARCH-/SEC-/DES-/OPS- concern IDs`);
 			if (!spec.forbidden_files.length || !spec.forbidden_files.some((file) => governance.some((locked) => underPath(governancePath(file), governancePath(locked)) || underPath(governancePath(locked), governancePath(file))))) {
 				errors.push(`${spec.id}: forbidden_files must include Foundry governance artifacts`);
 			}
@@ -261,6 +279,22 @@ export function validateAatpSpecs(specs: AatpSpec[], options: AatpValidationOpti
 	return errors;
 }
 
+/** Verify machine-readable concern coverage when the locked plan/design uses IDs. */
+export function validateAatpCoverage(cwd: string, specs: AatpSpec[]): string[] {
+	const concerns = new Set<string>();
+	for (const rel of ["docs/MASTER_PLAN.md", "docs/DESIGN.md"]) {
+		const file = safeRepoPath(cwd, rel);
+		if (!file) continue;
+		try {
+			const text = readFileSync(file, "utf8");
+			for (const match of text.matchAll(/\b(?:REQ|ARCH|SEC|DES|OPS)-[A-Z0-9_-]+\b/gi)) concerns.add(match[0].toUpperCase());
+		} catch { /* missing optional design artifact is handled by the phase gate */ }
+	}
+	if (concerns.size === 0) return [];
+	const covered = new Set(specs.flatMap((spec) => spec.covers ?? []).map((value) => value.toUpperCase()));
+	return [...concerns].filter((concern) => !covered.has(concern)).map((concern) => `AATP_COVERAGE_GATE: locked concern ${concern} is not covered by any AATP work order`);
+}
+
 export function aatpManifestHash(cwd: string): string {
 	const specs = listAatpSpecs(cwd);
 	if (specs.length === 0) return "";
@@ -277,12 +311,12 @@ export function aatpManifestHash(cwd: string): string {
 export function hydrateAatp(cwd: string, state: CompanyState): AatpTask[] {
 	return listAatpSpecs(cwd).map((spec) => {
 		const ticket = state.tickets[spec.id];
-		return { ...spec, status: ticket?.status ?? "ready", review: ticket?.review ?? "none" };
+		return { ...spec, status: ticket?.status ?? "ready", review: ticket?.review ?? "none", implementation_commit_sha: ticket?.implementation_commit_sha, implementation_scope_sha256: ticket?.implementation_scope_sha256, verification_evidence_sha256: ticket?.verification_evidence_sha256 };
 	});
 }
 
 export function readyIndependent(tasks: AatpTask[]): AatpTask[] {
-	const done = new Set(tasks.filter((t) => t.status === "completed").map((t) => t.id));
+	const done = new Set(tasks.filter((t) => t.status === "completed" && t.review === "APPROVE" && t.implementation_commit_sha && t.implementation_scope_sha256 && t.verification_evidence_sha256).map((t) => t.id));
 	return tasks.filter((task) => task.status === "ready" && task.dependencies.every((dep) => done.has(dep) || dep === "NONE" || dep === ""));
 }
 
@@ -318,18 +352,20 @@ export function routeAgent(risk: string): string {
 }
 
 /** Critical/security work must be adjudicated by the security reviewer. */
-export function reviewAgentForRisk(risk: string): "reviewer" | "security-reviewer" {
-	return /critical|security/i.test(risk) ? "security-reviewer" : "reviewer";
+export function reviewAgentForRisk(risk: string, securitySensitive = false): "reviewer" | "security-reviewer" {
+	return securitySensitive || risk.toLowerCase() === "critical" ? "security-reviewer" : "reviewer";
 }
 
 export function seedTickets(state: CompanyState, specs: AatpSpec[]): void {
 	const valid = new Set(specs.map((s) => s.id));
 	for (const id of Object.keys(state.tickets)) if (!valid.has(id)) delete state.tickets[id];
 	for (const spec of specs) {
-		const ticket = state.tickets[spec.id] ?? { id: spec.id, status: "ready" as const, allowed_files: spec.allowed_files, forbidden_files: spec.forbidden_files, risk: spec.risk, review: "none" as const };
+		const ticket = state.tickets[spec.id] ?? { id: spec.id, status: "ready" as const, dependencies: spec.dependencies, allowed_files: spec.allowed_files, forbidden_files: spec.forbidden_files, risk: spec.risk, security_sensitive: spec.security_sensitive === true, review: "none" as const };
+		ticket.dependencies = spec.dependencies;
 		ticket.allowed_files = spec.allowed_files;
 		ticket.forbidden_files = spec.forbidden_files;
 		ticket.risk = spec.risk;
+		ticket.security_sensitive = spec.security_sensitive === true;
 		state.tickets[spec.id] = ticket;
 	}
 }
@@ -343,7 +379,7 @@ export function beginTicket(state: CompanyState, spec: AatpSpec | undefined, id:
 		if (dep === "NONE" || dep === "") continue;
 		const depTicket = state.tickets[dep];
 		if (!depTicket) return { ok: false, reason: `DEPENDENCY_CONFLICT: ${id} depends on unknown ticket ${dep}.` };
-		if (depTicket.status !== "completed") return { ok: false, reason: `DEPENDENCY_CONFLICT: ${dep} is ${depTicket.status}.` };
+		if (depTicket.status !== "completed" || depTicket.review !== "APPROVE" || !depTicket.implementation_scope_sha256 || !depTicket.implementation_commit_sha) return { ok: false, reason: `DEPENDENCY_CONFLICT: ${dep} is not an approved, provenance-bound implementation.` };
 	}
 	const ticket = existing ?? { id, status: "ready" as const, allowed_files: spec?.allowed_files ?? [], forbidden_files: spec?.forbidden_files ?? [], risk: spec?.risk ?? "normal", review: "none" as const };
 	if (ticket.status !== "ready") return { ok: false, reason: `${id} is ${ticket.status}; only ready tickets can begin.` };
@@ -353,17 +389,42 @@ export function beginTicket(state: CompanyState, spec: AatpSpec | undefined, id:
 	ticket.review_by = undefined;
 	ticket.review_evidence_sha256 = undefined;
 	ticket.implementation_evidence_sha256 = undefined;
-	if (spec) { ticket.allowed_files = spec.allowed_files; ticket.forbidden_files = spec.forbidden_files; ticket.risk = spec.risk; }
+	ticket.implementation_parent_sha = undefined;
+	ticket.implementation_commit_sha = undefined;
+	ticket.implementation_scope_sha256 = undefined;
+	ticket.verification_evidence_sha256 = undefined;
+	ticket.review_parent_sha = undefined;
+	ticket.review_commit_sha = undefined;
+	ticket.reviewed_scope_sha256 = undefined;
+	ticket.reviewed_dependency_sha256 = undefined;
+	ticket.reviewed_manifest_sha256 = undefined;
+	if (spec) { ticket.dependencies = spec.dependencies; ticket.allowed_files = spec.allowed_files; ticket.forbidden_files = spec.forbidden_files; ticket.risk = spec.risk; ticket.security_sensitive = spec.security_sensitive === true; }
 	state.tickets[id] = ticket;
 	return { ok: true, ticket };
 }
 
-export function completeTicket(state: CompanyState, id: string, evidenceSha?: string): TransitionResult {
+export interface ImplementationProvenance { parentSha?: string; commitSha?: string; scopeSha?: string; verificationSha?: string }
+export interface ReviewProvenance { parentSha?: string; commitSha?: string; scopeSha?: string; dependencySha?: string; manifestSha?: string }
+
+function recordGovernedCommit(state: CompanyState, sha: string | undefined): void {
+	if (!sha || !/^[a-f0-9]{40,128}$/i.test(sha)) return;
+	if (!state.aatp.governed_commits.includes(sha)) {
+		state.aatp.governed_commits.push(sha);
+		if (state.aatp.governed_commits.length > MAX_GOVERNED_COMMITS) state.aatp.governed_commits.splice(0, state.aatp.governed_commits.length - MAX_GOVERNED_COMMITS);
+	}
+}
+
+export function completeTicket(state: CompanyState, id: string, evidenceSha?: string, provenance: ImplementationProvenance = {}): TransitionResult {
 	const ticket = state.tickets[id];
 	if (!ticket) return { ok: false, reason: "Unknown ticket." };
 	if (ticket.status !== "active") return { ok: false, reason: `${id} is ${ticket.status}; only active tickets can complete.` };
 	ticket.status = "completed";
 	ticket.implementation_evidence_sha256 = evidenceSha;
+	ticket.implementation_parent_sha = provenance.parentSha;
+	ticket.implementation_commit_sha = provenance.commitSha;
+	ticket.implementation_scope_sha256 = provenance.scopeSha;
+	ticket.verification_evidence_sha256 = provenance.verificationSha;
+	recordGovernedCommit(state, provenance.commitSha);
 	state.tickets[id] = ticket;
 	return { ok: true, ticket };
 }
@@ -376,11 +437,20 @@ export function resetTicket(state: CompanyState, id: string): TransitionResult {
 	ticket.review_by = undefined;
 	ticket.review_evidence_sha256 = undefined;
 	ticket.implementation_evidence_sha256 = undefined;
+	ticket.implementation_parent_sha = undefined;
+	ticket.implementation_commit_sha = undefined;
+	ticket.implementation_scope_sha256 = undefined;
+	ticket.verification_evidence_sha256 = undefined;
+	ticket.review_parent_sha = undefined;
+	ticket.review_commit_sha = undefined;
+	ticket.reviewed_scope_sha256 = undefined;
+	ticket.reviewed_dependency_sha256 = undefined;
+	ticket.reviewed_manifest_sha256 = undefined;
 	state.tickets[id] = ticket;
 	return { ok: true, ticket };
 }
 
-export function blockTicket(state: CompanyState, id: string, reason: string): TransitionResult {
+export function blockTicket(state: CompanyState, id: string, reason: string, kind: ConflictKind = "SCOPE_INSUFFICIENT"): TransitionResult {
 	const ticket = state.tickets[id];
 	if (!ticket) return { ok: false, reason: "Unknown ticket." };
 	ticket.status = "blocked";
@@ -388,25 +458,72 @@ export function blockTicket(state: CompanyState, id: string, reason: string): Tr
 	ticket.review_by = undefined;
 	ticket.review_evidence_sha256 = undefined;
 	ticket.implementation_evidence_sha256 = undefined;
+	ticket.implementation_parent_sha = undefined;
+	ticket.implementation_commit_sha = undefined;
+	ticket.implementation_scope_sha256 = undefined;
+	ticket.verification_evidence_sha256 = undefined;
+	ticket.review_parent_sha = undefined;
+	ticket.review_commit_sha = undefined;
+	ticket.reviewed_scope_sha256 = undefined;
+	ticket.reviewed_dependency_sha256 = undefined;
+	ticket.reviewed_manifest_sha256 = undefined;
 	state.tickets[id] = ticket;
-	state.conflict = { kind: "SCOPE_INSUFFICIENT", reason };
+	state.conflict = { kind, reason };
 	return { ok: true, ticket };
 }
 
-export function reviewTicket(state: CompanyState, id: string, verdict: Exclude<ReviewVerdict, "none">, reviewer = "reviewer", evidenceSha?: string): TransitionResult {
+export function reviewTicket(state: CompanyState, id: string, verdict: Exclude<ReviewVerdict, "none">, reviewer = "reviewer", evidenceSha?: string, provenance: ReviewProvenance = {}): TransitionResult {
 	const ticket = state.tickets[id];
 	if (!ticket) return { ok: false, reason: "Unknown ticket." };
 	if (ticket.status !== "completed") return { ok: false, reason: `${id} is ${ticket.status}; review requires completed.` };
 	ticket.review = verdict;
 	ticket.review_by = reviewer;
 	ticket.review_evidence_sha256 = evidenceSha;
+	ticket.review_parent_sha = provenance.parentSha;
+	ticket.review_commit_sha = provenance.commitSha;
+	ticket.reviewed_scope_sha256 = provenance.scopeSha;
+	ticket.reviewed_dependency_sha256 = provenance.dependencySha;
+	ticket.reviewed_manifest_sha256 = provenance.manifestSha;
+	recordGovernedCommit(state, provenance.commitSha);
 	if (verdict === "REQUEST_CHANGES") ticket.status = "ready";
 	if (verdict === "BLOCK") ticket.status = "blocked";
 	state.tickets[id] = ticket;
+	if (verdict === "REQUEST_CHANGES") invalidateDescendants(state, id);
 	return { ok: true, ticket };
+}
+
+/** Reset every downstream ticket when an upstream implementation is reopened. */
+export function invalidateDescendants(state: CompanyState, rootId: string): string[] {
+	const invalidated: string[] = [], queue = [rootId], seen = new Set<string>(queue);
+	while (queue.length) {
+		const parent = queue.shift()!;
+		for (const ticket of Object.values(state.tickets)) {
+			if (!(ticket.dependencies ?? []).some((dep) => dep.toUpperCase() === parent.toUpperCase()) || seen.has(ticket.id)) continue;
+			seen.add(ticket.id);
+			if (ticket.status !== "ready" || ticket.review !== "none") {
+				ticket.status = "ready";
+				ticket.review = "none";
+				ticket.review_by = undefined;
+				ticket.review_evidence_sha256 = undefined;
+				ticket.implementation_evidence_sha256 = undefined;
+				ticket.implementation_parent_sha = undefined;
+				ticket.implementation_commit_sha = undefined;
+				ticket.implementation_scope_sha256 = undefined;
+				ticket.verification_evidence_sha256 = undefined;
+				ticket.review_parent_sha = undefined;
+				ticket.review_commit_sha = undefined;
+				ticket.reviewed_scope_sha256 = undefined;
+				ticket.reviewed_dependency_sha256 = undefined;
+				ticket.reviewed_manifest_sha256 = undefined;
+				invalidated.push(ticket.id);
+			}
+			queue.push(ticket.id);
+		}
+	}
+	return invalidated;
 }
 
 export function resetAatp(state: CompanyState): void {
 	state.tickets = {};
-	state.aatp = { total: 0, ready: 0, active: 0, completed: 0, blocked: 0, manifest_sha256: "" };
+	state.aatp = { total: 0, ready: 0, active: 0, completed: 0, blocked: 0, manifest_sha256: "", epoch: "", baseline_sha: "", governed_commits: [] };
 }

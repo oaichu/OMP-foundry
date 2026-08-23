@@ -23,6 +23,7 @@ export interface BootstrapResult {
 	state: CompanyState;
 	stackIds: string[];
 	ui: boolean;
+	uiConfidence: "detected" | "not_detected" | "unknown";
 	configCreated: boolean;
 }
 
@@ -44,10 +45,11 @@ export function bootstrapFoundryProject(cwd: string, root: string): BootstrapRes
 	const state = existed ? loadState(cwd) : defaultState();
 	const stack = detectStack(cwd);
 	if (!existed) {
-		state.design.required = stack.ui;
+		// An unrecognised workspace must not silently skip the human design gate.
+		state.design.required = stack.ui || stack.uiConfidence === "unknown";
 		state.phase = "discovery";
 		saveState(cwd, state);
 	}
 
-	return { existed, state, stackIds: stack.ids, ui: stack.ui, configCreated: config.created };
+	return { existed, state, stackIds: stack.ids, ui: stack.ui, uiConfidence: stack.uiConfidence, configCreated: config.created };
 }

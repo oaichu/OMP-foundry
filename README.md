@@ -127,7 +127,7 @@ It resumes the exact persisted workflow stage. You intervene at the human gates 
 | `/foundry-init` | Advanced/manual project bootstrap |
 | `/foundry-doctor` | Diagnose isolation + Foundry model-role availability |
 | `/foundry-approve product\|plan` | Human gates |
-| `/plan3` · `/plan-revise` | Draft → red-team → synthesis · human-only reopen (invalidates downstream AATP/review/QA) |
+| `/plan3` · `/plan-revise` | Draft → red-team → synthesis · human-only reopen (invalidates design, downstream AATP/review/QA, and stale worker capabilities) |
 | `/design` · `/design approve\|skip` | Design foundation + preview · human gate |
 | `/aatp` · `/build` | Route the locked project to `aatp-compiler` (`@foundry_synth`), validate/seal the DAG, then run the ready layer |
 | `/review AATP-xxx` | Independent review |
@@ -137,7 +137,7 @@ It resumes the exact persisted workflow stage. You intervene at the human gates 
 
 ## How a work order runs
 
-After the human locks the plan (and approves or skips design when applicable), Foundry automatically routes one blocking `aatp-compiler` agent through the existing `@foundry_synth` capability. It decomposes the **whole locked project** into AATP work orders; it does not implement code and cannot rewrite the locked plan/design. A recompile archives the previous generated DAG under `docs/AATP/archive/`, then Foundry validates and seals the new manifest before any worker can start. Each active `docs/AATP/AATP-*.md` is immutable once sealed — explicit `allowed_files`, forbidden governance paths, acceptance/verification evidence, valid dependencies, and a risk class. Dependency references must exist and the graph must be acyclic. **Risk is the routing authority**: low/trivial → `smol-implementer`, normal → `implementer`, hard/difficult/critical → `hard-implementer`. There is no separate AATP model role and no model-written `recommended_agent` override.
+After the human locks the plan (and explicitly approves or skips design), Foundry automatically routes one blocking `aatp-compiler` agent through the existing `@foundry_synth` capability. It decomposes the **whole locked project** into AATP work orders; it does not implement code and cannot rewrite the locked plan/design. A recompile archives the previous generated DAG under `docs/AATP/archive/`, then Foundry validates and seals the new manifest before any worker can start. Each active `docs/AATP/AATP-*.md` is immutable once sealed — explicit `allowed_files`, forbidden governance paths, acceptance evidence, executable verification IDs, concern coverage, valid dependencies, a risk class, and an orthogonal `security_sensitive` flag. Dependencies unlock only after the upstream ticket is independently approved with provenance. Dependency references must exist and the graph must be acyclic. **Risk is the implementation routing authority**: low/trivial → `smol-implementer`, normal → `implementer`, hard/difficult/critical → `hard-implementer`; security-sensitive work also routes to `security-reviewer`. There is no separate AATP model role and no model-written `recommended_agent` override.
 
 For every ready item:
 
@@ -147,8 +147,8 @@ For every ready item:
 4. OMP returns the worker’s patch artifact.
 5. Foundry canonicalizes every touched path and checks it against **that ticket only**.
 6. Valid → Foundry applies and commits. Invalid → never applied, tree untouched.
-7. Independent review writes exactly `docs/reports/REVIEW-<id>.md` (or the security variant) and must echo the matching `FOUNDRY_REVIEW <id> ...` verdict; evidence is hashed with reviewer identity.
-8. Release derivation demands every ticket completed, independently approved, QA-passed on current clean committed HEAD.
+7. An implementation patch runs its declared deterministic verification before it can be committed or reviewed. Independent review then writes exactly `docs/reports/REVIEW-<id>.md` (or the security variant) and must echo the matching `FOUNDRY_REVIEW <id> ...` verdict.
+8. Implementation, verification, review, dependency, manifest, and scope digests are recorded; release derivation recomputes them rather than trusting a non-empty evidence field.
 
 Before the first implementation layer, the source tree must be clean (governance-only setup may be committed as the implementation baseline).
 
@@ -156,26 +156,26 @@ Before the first implementation layer, the source tree must be clean (governance
 
 `foundry_synth` is the single reasoning capability used by Plan3 synthesis and the post-lock `aatp-compiler`; there is **no separate AATP model role**. The compiler and Plan3 stage agents receive short-lived in-memory capabilities and write through `foundry_aatp_write` / `foundry_plan_write`. Native writes to unsealed governance artifacts are denied, so another task cannot impersonate the compiler by merely knowing its agent name.
 
-Normal implementation remains cheap-first: risk routes work to `smol-implementer`, `implementer`, or `hard-implementer`; deterministic checks run before review; review/security roles are selected by ticket risk. Model names stay in OMP `modelRoles`, not in Foundry's policy.
+Normal implementation remains cheap-first: risk routes work to `smol-implementer`, `implementer`, or `hard-implementer`; declared deterministic checks run before review; `security_sensitive` or critical tickets route to the security reviewer. Model names stay in OMP `modelRoles`, not in Foundry's policy.
 
 ## Release integrity
 
-`/release-check` is **derived, never sticky** — recomputed against the current repository state: artifact hashes unchanged, manifest sealed, all tickets completed, all reviews independently APPROVE with evidence, QA PASS at the current HEAD, clean tree.
+`/release-check` is **derived, never sticky** — recomputed against the current repository state: artifact hashes unchanged, manifest sealed, all tickets completed, all reviews independently APPROVE with fresh evidence, the baseline/commit ledger exactly matches Git history, QA PASS at the current HEAD, and a clean tree.
 
 Even green, agent release commands stay denied. **You ship from a human shell** — no single agent shell line can mutate code after the check and push it.
 
 ## Under the hood
 
-- **State** — `.omp/foundry-state.yml`, schema-versioned and fail-closed. Current schema **v4**; older states migrate forward with a one-time backup; newer unsupported schemas are rejected, never guessed. v4 removes the old inert `unlock_token` field.
+- **State** — `.omp/foundry-state.yml`, schema-versioned and fail-closed. Current schema **v6**; older states migrate forward with a one-time backup. Legacy completed/approved tickets without provenance are reopened instead of being trusted. Planning/AATP epochs reject stale worker capabilities; the AATP baseline plus bounded governed-commit ledger rejects clean external commits at release; newer unsupported schemas are rejected, never guessed.
 - **Plan3** — persisted runtime authority: `draft → redteam → synth → awaiting_lock`, with SHA-256 evidence for every stage artifact. Human plan approval fails if any accepted planning artifact drifted.
 - **Model roles** — ten global `foundry_*` defaults are registered additively in `~/.omp/agent/config.yml`; project configs inherit them unless you intentionally add a project-level `foundry_*` override.
 - **Updates** — checks the latest **GitHub Release** (not `main`) with a user-level cache; network failures are fail-open and never block coding. Foundry never self-updates while loaded.
-- **Repo intelligence** — one `RepoFacts` detector drives skill routing, QA and design classification (no detector drift): Web, SaaS, Android, .NET, Cloudflare, Python, Go, Rust… Skills are filtered by phase **and role**; only metadata is injected, bodies load on demand via `foundry_skill_read`.
+- **Repo intelligence** — one `RepoFacts` detector drives skill routing, QA and design classification (no detector drift): Web, SaaS, Android, .NET, Cloudflare, Python, Go, Rust… Nested workspace layouts are bounded-scanned; uncertain UI detection never silently skips the human design decision. Skills are filtered by phase **and role**; only metadata is injected, bodies load on demand via `foundry_skill_read`.
 - **Dead-code guard** — CI runs TypeScript with `noUnusedLocals` and `noUnusedParameters`, in addition to runtime tests and syntax smoke.
 - **OMP compatibility** — CI checks the current `can1357/oh-my-pi` isolation/patch/LSP contracts; upstream contract drift fails CI instead of shipping against an imagined API.
-- **Verification safety** — detected checks are structured argv (`shell=false`), bounded by step/total time and output limits, use `npx --no-install`, and resolve executables outside the repository. Foundry records the HEAD before and after verification and refuses QA when it moves.
+- **Verification safety** — detected checks are structured argv (`shell=false`), bounded by step/total time and output limits, use `npx --no-install`, resolve executables outside the repository, and run with a sanitized environment plus disposable HOME/TMP. Per-ticket declarations run before review; design previews must leave the visible worktree unchanged. Set `FOUNDRY_VERIFY_REQUIRE_SANDBOX=1` with a trusted OS wrapper for hostile repositories; without that explicit mode, verification is a constrained trusted-host operation, not a host security sandbox. Foundry records the HEAD before and after verification and refuses QA when it moves.
 - **Filesystem and patch safety** — repository paths reject traversal, URI schemes, symlink components, Windows reserved/short-name aliases, and POSIX backslash ambiguity. Patch bytes are compared before apply, rolled back exactly on rejection, and hashed again before staging/commit.
-- **Resource bounds** — state/config/skills/locked-plan/AATP readers cap bytes, entries, dependency depth, and verification steps; malformed inline lists, mismatched AATP filenames, unknown risk classes, oversized task results, and oversized patch artifacts fail closed before expensive work. The only helper exception is `scout`, and it is limited to draft-stage evidence gathering.
+- **Resource bounds** — state/config/skills/locked-plan/AATP readers cap bytes, entries, dependency depth, and verification steps; malformed inline lists, mismatched AATP filenames, unknown risk classes, missing concern coverage, unresolved verification declarations, oversized task results, and oversized patch artifacts fail closed before expensive work. The only helper exception is `scout`, and it is limited to draft-stage evidence gathering.
 
 ### What Foundry writes
 

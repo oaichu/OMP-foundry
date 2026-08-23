@@ -62,7 +62,11 @@ describe("Plan3 governed mode", () => {
 		state.planning.review_sha256 = "review";
 		abortPlan3(state);
 		expect(state.mode).toBe("normal");
-		expect(state.planning).toEqual({ stage: "idle", draft_sha256: "", review_sha256: "", final_sha256: "" });
+		expect(state.planning.stage).toBe("idle");
+		expect(state.planning.epoch).not.toBe("");
+		expect(state.planning.draft_sha256).toBe("");
+		expect(state.planning.review_sha256).toBe("");
+		expect(state.planning.final_sha256).toBe("");
 	});
 
 	test("write authority follows only the active planning artifact", () => {
