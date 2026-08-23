@@ -69,9 +69,9 @@ describe("global role registration", () => {
 		const text = readFileSync(path, "utf8");
 		expect(text).toContain("shellPath: /bin/bash");
 		expect(text).toContain("foundry_plan: openai/pinned"); // never overwritten
-		expect(text).toContain("foundry_redteam: @slow");
-		expect(text).toContain("foundry_impl: @task");
-		expect(text).toContain("foundry_review: @default");
+		expect(text).toContain(String.raw`foundry_redteam: "@slow"`);
+		expect(text).toContain(String.raw`foundry_impl: "@task"`);
+		expect(text).toContain(String.raw`foundry_review: "@default"`);
 	});
 	test("idempotent: second run adds nothing", () => {
 		const { ensureGlobalFoundryRoles } = require("../src/omp-runtime");
@@ -90,6 +90,22 @@ describe("global role registration", () => {
 		const result = ensureGlobalFoundryRoles({ path, roles: {} });
 		expect(result.added.length).toBe(10);
 		const text = readFileSync(path, "utf8");
-		expect((text.match(/: @default/g) ?? []).length).toBe(10);
+		expect((text.match(/: "@default"/g) ?? []).length).toBe(10);
+	});
+});
+
+describe("generated config must be valid YAML", () => {
+	test("quoted @aliases parse and resolve back to the same strings", async () => {
+		const { parse } = await import("yaml");
+		const { ensureGlobalFoundryRoles } = require("../src/omp-runtime");
+		const dir = mkdtempSync(join(tmpdir(), "foundry-yaml-"));
+		const path = join(dir, "config.yml");
+		writeFileSync(path, "shellPath: /bin/bash\n");
+		const result = ensureGlobalFoundryRoles({ path, roles: { default: "x/a:high", slow: "x/c:max" } });
+		const parsed = parse(readFileSync(path, "utf8")) as { modelRoles: Record<string, string>; shellPath: string };
+		expect(parsed.shellPath).toBe("/bin/bash");
+		expect(parsed.modelRoles.foundry_redteam).toBe("@slow");
+		expect(parsed.modelRoles.foundry_review).toBe("@default");
+		for (const role of result.added) expect(typeof parsed.modelRoles[role]).toBe("string");
 	});
 });

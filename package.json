@@ -1,6 +1,6 @@
 {
   "name": "omp-foundry",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Lock the plan. Then pour the code. Governed AI foundry for Oh My Pi.",
   "license": "MIT",
   "scripts": {
@@ -12,12 +12,17 @@
     "type": "git",
     "url": "https://github.com/oaichu/omp-foundry.git"
   },
-  "bugs": { "url": "https://github.com/oaichu/omp-foundry/issues" },
+  "bugs": {
+    "url": "https://github.com/oaichu/omp-foundry/issues"
+  },
   "homepage": "https://github.com/oaichu/omp-foundry#readme",
   "keywords": ["oh-my-pi", "omp", "foundry", "agent-workflow", "plan-lock", "aatp"],
-  "omp": { "extensions": ["./src/index.ts"] },
+  "omp": {
+    "extensions": ["./src/index.ts"]
+  },
   "devDependencies": {
     "bun-types": "^1.4.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "yaml": "^2.9.0"
   }
 }

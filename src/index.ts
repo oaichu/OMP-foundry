@@ -218,7 +218,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				const registered = ensureGlobalFoundryRoles();
 				if (registered.added.length > 0) {
 					ctx.ui.notify(
-						`Foundry added ${registered.added.length} model roles to /models → Roles (aliases to your existing roles; reassign freely).`,
+						`Foundry registered ${registered.added.length} model roles (foundry_*) in ~/.omp/agent/config.yml — assign models there; unset roles follow your OMP roles.`,
 						"info",
 					);
 				}

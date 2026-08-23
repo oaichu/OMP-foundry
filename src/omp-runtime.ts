@@ -106,6 +106,12 @@ function ensureTopLevelScalar(text: string, key: string, value: string): string 
 	return `${lines.join("\n")}\n`;
 }
 
+// A leading @ is a reserved YAML indicator: alias values must be quoted or
+// the whole settings file fails to parse and OMP quarantines it.
+function formatRoleValue(value: string): string {
+	return value.startsWith("@") ? `"${value}"` : value;
+}
+
 function ensureModelRoles(text: string, defaults: Record<string, string>): string {
 	let next = text;
 	let block = topLevelBlock(next, "modelRoles");
@@ -113,7 +119,7 @@ function ensureModelRoles(text: string, defaults: Record<string, string>): strin
 		const lines = next.replace(/\r\n/g, "\n").split("\n");
 		while (lines.length && !lines[lines.length - 1]) lines.pop();
 		lines.push("modelRoles:");
-		for (const role of FOUNDRY_MODEL_ROLES) if (defaults[role]) lines.push(`  ${role}: ${defaults[role]}`);
+		for (const role of FOUNDRY_MODEL_ROLES) if (defaults[role]) lines.push(`  ${role}: ${formatRoleValue(defaults[role])}`);
 		return `${lines.join("\n")}\n`;
 	}
 	const existing = new Set<string>();
@@ -121,7 +127,7 @@ function ensureModelRoles(text: string, defaults: Record<string, string>): strin
 		const match = block.lines[i].match(/^\s{2}([A-Za-z0-9_.-]+):/);
 		if (match) existing.add(match[1]);
 	}
-	const inserts = FOUNDRY_MODEL_ROLES.filter((role) => !existing.has(role) && defaults[role]).map((role) => `  ${role}: ${defaults[role]}`);
+	const inserts = FOUNDRY_MODEL_ROLES.filter((role) => !existing.has(role) && defaults[role]).map((role) => `  ${role}: ${formatRoleValue(defaults[role])}`);
 	if (!inserts.length) return next.endsWith("\n") ? next : `${next}\n`;
 	block.lines.splice(block.end, 0, ...inserts);
 	return `${block.lines.join("\n").replace(/\n+$/, "")}\n`;

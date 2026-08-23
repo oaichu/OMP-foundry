@@ -178,7 +178,7 @@ If you linked a checkout with `omp plugin link .`, delete the checkout too. If y
 
 ```bash
 # 2. the global model roles (the plugin's only user-level write)
-sed -i '/^  foundry_/d' ~/.omp/agent/config.yml     # or delete the ten foundry_* lines in /models → Roles
+sed -i '/^  foundry_/d' ~/.omp/agent/config.yml     # or delete the ten foundry_* lines by hand
 ```
 
 ```bash
@@ -190,7 +190,7 @@ rm -rf .omp docs/.foundry-governed docs/planning docs/AATP docs/reports
 
 ### Roles — pour your own metals
 
-When the plugin first runs, it registers its **ten `foundry_*` model roles at user level** — they appear in `/models → Roles` everywhere, ready to assign. Each is written as a **cross-role alias** (`foundry_redteam: "@slow"`), so it keeps following your OMP roles when you reassign them; give one a specific model (`provider/model:level`) to pin a stage. Only missing keys are ever inserted — values you set yourself are never modified or removed. Per-project, `/foundry-init` additionally sets `modelRoleStorage: project` so `/models` edits inside a governed repo stay local (`roles.example.yml` is a manual skeleton if you want full control).
+When the plugin first runs, it registers its **ten `foundry_*` model roles** in `~/.omp/agent/config.yml` — the plugin's only user-level write. Each is a **cross-role alias** (`foundry_redteam: "@slow"`), so it keeps following your OMP roles when you reassign those; pin a stage by giving it a concrete model (`foundry_redteam: openai/gpt-5.6:max`). Only missing keys are ever inserted — values you set yourself are never modified or removed. Note: OMP's `/models → Roles` tab lists its **built-in** roles only, so `foundry_*` (like any custom role key) is assigned by editing `~/.omp/agent/config.yml` — the aliases keep working regardless. Per-project, `/foundry-init` additionally sets `modelRoleStorage: project` so `/models` edits inside a governed repo stay local (`roles.example.yml` is a manual skeleton if you want full control).
 
 Configure nothing at all and Foundry still runs: unset roles fall back through OMP's own chain down to your session's active model — a one-model foundry that keeps every gate, just without model diversity. One caveat: the user-level roles are registered in your **default** profile; a session started with `--profile` won't see them and runs in that same single-model fallback until you assign its roles.
 
