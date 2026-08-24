@@ -13,7 +13,7 @@ import {
 const FILE_MUTATING = new Set(["write", "edit", "ast_edit", "apply_patch"]);
 const READ_PATH_TOOLS = new Set(["read", "read_file", "read_text", "grep", "glob", "find", "list_files", "ls", "ast_grep"]);
 const SAFE_CONTROL_TOOLS = new Set(["task", "fetch", "web_fetch", "web_search", "question", "ask", "report_conflict", "todo", "memory", "plan", "compact", "session"]);
-const FOUNDRY_CONTROL_TOOLS = new Set(["foundry_status", "foundry_skill_read", "foundry_exec", "foundry_aatp_write", "foundry_plan_write", "foundry_approve", "foundry_step"]);
+const FOUNDRY_CONTROL_TOOLS = new Set(["foundry_status", "foundry_skill_read", "foundry_exec", "foundry_aatp_write", "foundry_plan_write", "foundry_approve", "foundry_step", "foundry_confirm"]);
 const GOVERNED = new Set(["implementer", "hard-implementer", "smol-implementer", "reviewer", "security-reviewer"]);
 const LSP_MUTATING = new Set(["rename", "rename_file", "code_actions", "request", "reload"]);
 const LSP_READ_ONLY = new Set(["hover", "definition", "type_definition", "implementation", "references", "document_symbol", "workspace_symbol", "completion", "signature_help", "diagnostics", "document_diagnostics", "workspace_diagnostics", "folding_range", "inlay_hints"]);
@@ -49,6 +49,66 @@ export interface ToolInput {
 export interface DenyContext {
 	activeTickets?: AatpTicket[]; stateBroken?: string;
 	canonicalize?: (raw: string) => string | null; isolatedWithoutState?: boolean;
+	cwd?: string;
+}
+
+/**
+ * Human-in-the-loop approval model.
+ *
+ * Previously every privileged action was fail-closed (hard-denied). The model
+ * now defers privileged actions to the user: the attempt is blocked once with
+ * an APPROVAL_REQUIRED reason, and only proceeds after the user grants it
+ * (via /confirm or a natural approval). Grants are session-scoped (in-memory)
+ * so they never survive a restart — a fresh session always re-asks.
+ *
+ * Safety invariants (repo escape, symlink, non-regular files, malformed
+ * input, TOCTOU) remain HARD-DENIED and are never escalated to approval,
+ * because approving them cannot make them safe.
+ */
+export type ApprovalAction =
+	| "release"
+	| "eval"
+	| "lifecycle"
+	| "foundry_init"
+	| "unknown_tool"
+	| "mutating_bash"
+	| "write_governance";
+
+const approvalGrants = new Map<string, Set<ApprovalAction>>();
+const pendingApprovals = new Map<string, Set<ApprovalAction>>();
+
+function approvalKey(cwd: string): string { return cwd; }
+
+export function requestApproval(cwd: string, action: ApprovalAction, reason: string): { block: true; reason: string; approvalRequired: true } {
+	const key = approvalKey(cwd);
+	if (!pendingApprovals.has(key)) pendingApprovals.set(key, new Set());
+	pendingApprovals.get(key)!.add(action);
+	return { block: true, reason: `APPROVAL_REQUIRED (${action}): ${reason} Reply 'yes' or run /confirm to proceed.`, approvalRequired: true };
+}
+
+/** Grant pending approval(s). Returns the actions that were granted. */
+export function grantApproval(cwd: string, action?: ApprovalAction): ApprovalAction[] {
+	const key = approvalKey(cwd);
+	const pending = pendingApprovals.get(key);
+	if (!pending || pending.size === 0) return [];
+	const toGrant = action ? (pending.has(action) ? [action] : []) : [...pending];
+	if (toGrant.length === 0) return [];
+	if (!approvalGrants.has(key)) approvalGrants.set(key, new Set());
+	for (const a of toGrant) { approvalGrants.get(key)!.add(a); pending.delete(a); }
+	return toGrant;
+}
+
+export function hasApproval(cwd: string, action: ApprovalAction): boolean {
+	return approvalGrants.get(approvalKey(cwd))?.has(action) ?? false;
+}
+
+/** One-time consume: a granted action is cleared after it is used once. */
+export function consumeApproval(cwd: string, action: ApprovalAction): void {
+	approvalGrants.get(approvalKey(cwd))?.delete(action);
+}
+
+export function pendingApprovalList(cwd: string): ApprovalAction[] {
+	return [...(pendingApprovals.get(approvalKey(cwd)) ?? [])];
 }
 
 export function collectPaths(input: ToolInput): string[] {
@@ -123,7 +183,11 @@ function prePlanAllowed(rel: string, state: CompanyState): boolean {
 }
 
 export function denyToolCall(toolName: string, input: ToolInput, state: CompanyState, ctx: DenyContext = {}): { block: true; reason: string } | undefined {
-	if (toolName === "eval") return { block: true, reason: "EVAL_GATE: eval is denied for the entire Foundry session." };
+	const cwd = ctx.cwd ?? "";
+	if (toolName === "eval") {
+		if (hasApproval(cwd, "eval")) { consumeApproval(cwd, "eval"); return undefined; }
+		return requestApproval(cwd, "eval", "eval is disabled by default for agent sessions.");
+	}
 	if (toolName === "lsp") {
 		const action = String(input.action ?? "").toLowerCase();
 		if (LSP_MUTATING.has(action) || (action === "code_actions" && input.apply === true)) return { block: true, reason: `LSP_GATE: mutating LSP action ${action || "unknown"} is denied; use read-only navigation/diagnostics.` };
@@ -134,8 +198,14 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 	}
 	if (toolName === "bash") {
 		const command = String(input.command ?? "");
-		if (RELEASE_ACTION.some((re) => re.test(command))) return { block: true, reason: "RELEASE_GATE: agent push/publish/deploy is always denied. Run /release-check, then release from a human shell." };
-		if (!bashAllowed(command, ctx.canonicalize)) return { block: true, reason: "BASH_GATE: arbitrary shell is denied in Foundry. Use read-only shell commands or extension-owned verification." };
+		if (RELEASE_ACTION.some((re) => re.test(command))) {
+			if (hasApproval(cwd, "release")) { consumeApproval(cwd, "release"); return undefined; }
+			return requestApproval(cwd, "release", "push / publish / deploy is disabled for agent sessions.");
+		}
+		if (!bashAllowed(command, ctx.canonicalize)) {
+			if (hasApproval(cwd, "mutating_bash")) { consumeApproval(cwd, "mutating_bash"); return undefined; }
+			return requestApproval(cwd, "mutating_bash", "arbitrary shell is disabled for agent sessions.");
+		}
 		return;
 	}
 	// Extension tools and the task dispatcher are known control-plane tools.
@@ -156,9 +226,13 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 			}
 		} catch { /* malformed URLs are handled by the tool */ }
 	}
-	if (toolName === "foundry_init") return { block: true, reason: "FOUNDRY_INIT_GATE: initialization is human-command-only; use /foundry-init or /foundry." };
+	if (toolName === "foundry_init") {
+		if (hasApproval(cwd, "foundry_init")) { consumeApproval(cwd, "foundry_init"); return undefined; }
+		return requestApproval(cwd, "foundry_init", "initialization is human-command-only.");
+	}
 	if (!FILE_MUTATING.has(toolName) && !SAFE_CONTROL_TOOLS.has(toolName) && !FOUNDRY_CONTROL_TOOLS.has(toolName) && !READ_PATH_TOOLS.has(toolName) && toolName !== "bash" && toolName !== "lsp") {
-		return { block: true, reason: "TOOL_GATE: unknown mutation-capable tool is denied in Foundry." };
+		if (hasApproval(cwd, "unknown_tool")) { consumeApproval(cwd, "unknown_tool"); return undefined; }
+		return requestApproval(cwd, "unknown_tool", `unknown mutation-capable tool ${toolName} is disabled for agent sessions.`);
 	}
 	if (READ_PATH_TOOLS.has(toolName)) {
 		const paths = collectReadPaths(input, toolName);
@@ -175,45 +249,52 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 		if (rel === null) return { block: true, reason: `PATH_GATE: path escapes the repository: ${raw}` };
 		rels.push(rel);
 	}
-	if (rels.some((rel) => matchesAny(rel, STATE_PATHS))) return { block: true, reason: "STATE_GATE: Foundry state is extension-owned." };
-	if (rels.some((rel) => (!isReviewReport(rel) && matchesAny(rel, EXTENSION_OWNED_PATHS.filter((path) => path !== "docs/reports/review-"))) || (isReviewReport(rel) && state.phase !== "review"))) return { block: true, reason: "FOUNDRY_OWNED_GATE: extension-owned artifacts are immutable to agents." };
-	if (rels.some((rel) => matchesAny(rel, LOCKED_PLAN_PATHS)) && planLocked(state)) return { block: true, reason: "BLOCKED: PLAN_CONFLICT. MASTER_PLAN is locked." };
-	if (rels.some((rel) => matchesAny(rel, LOCKED_PRODUCT_PATHS)) && productReady(state)) return { block: true, reason: "PRODUCT_GATE: PRODUCT.md is approved." };
-	if (rels.some((rel) => matchesAny(rel, LOCKED_DESIGN_PATHS)) && state.design.status === "locked") return { block: true, reason: "BLOCKED: DESIGN_CONFLICT. Design is locked." };
-	if (rels.some((rel) => matchesAny(rel, LOCKED_AATP_PATHS)) && state.aatp.manifest_sha256) return { block: true, reason: "AATP_SPEC_GATE: AATP specs are sealed for this plan." };
+	// The extension-owned state file is never escalated to approval — it is
+	// the runtime's own source of truth and must stay agent-immutable.
+	if (rels.some((rel) => matchesAny(rel, STATE_PATHS))) return { block: true, reason: "STATE_GATE: Foundry state is extension-owned and never user-grantable." };
+	// Every other governance/locked-artifact write is deferred to the user.
+	const gov = (reason: string): { block: true; reason: string } | undefined => {
+		if (hasApproval(cwd, "write_governance")) { consumeApproval(cwd, "write_governance"); return undefined; }
+		return requestApproval(cwd, "write_governance", reason);
+	};
+	if (rels.some((rel) => (!isReviewReport(rel) && matchesAny(rel, EXTENSION_OWNED_PATHS.filter((path) => path !== "docs/reports/review-"))) || (isReviewReport(rel) && state.phase !== "review"))) return gov("FOUNDRY_OWNED_GATE: extension-owned artifacts are immutable to agents.");
+	if (rels.some((rel) => matchesAny(rel, LOCKED_PLAN_PATHS)) && planLocked(state)) return gov("PLAN_CONFLICT. MASTER_PLAN is locked.");
+	if (rels.some((rel) => matchesAny(rel, LOCKED_PRODUCT_PATHS)) && productReady(state)) return gov("PRODUCT_GATE: PRODUCT.md is approved.");
+	if (rels.some((rel) => matchesAny(rel, LOCKED_DESIGN_PATHS)) && state.design.status === "locked") return gov("DESIGN_CONFLICT. Design is locked.");
+	if (rels.some((rel) => matchesAny(rel, LOCKED_AATP_PATHS)) && state.aatp.manifest_sha256) return gov("AATP_SPEC_GATE: AATP specs are sealed for this plan.");
 	if (ctx.isolatedWithoutState) {
-		if (rels.some((rel) => matchesAny(rel, [...LOCKED_PLAN_PATHS, ...LOCKED_PRODUCT_PATHS, ...LOCKED_DESIGN_PATHS, ...LOCKED_AATP_PATHS]))) return { block: true, reason: "ISOLATION_GATE: isolated worker cannot modify governance artifacts." };
+		if (rels.some((rel) => matchesAny(rel, [...LOCKED_PLAN_PATHS, ...LOCKED_PRODUCT_PATHS, ...LOCKED_DESIGN_PATHS, ...LOCKED_AATP_PATHS]))) return gov("ISOLATION_GATE: isolated worker cannot modify governance artifacts.");
 		return;
 	}
 	if (state.mode === "plan3" && state.phase === "planning" && state.planning.stage !== "idle" && state.planning.stage !== "awaiting_lock") {
-		return { block: true, reason: "PLAN3_COMPILER_GATE: native planning-artifact writes are disabled; the active stage agent must use foundry_plan_write." };
+		return gov("PLAN3_COMPILER_GATE: native planning-artifact writes are disabled; the active stage agent must use foundry_plan_write.");
 	}
 	if (!planLocked(state)) {
 		const bad = rels.filter((rel) => !prePlanAllowed(rel, state));
 		if (bad.length) {
 			const stage = state.mode === "plan3" ? ` Plan3 stage=${state.planning.stage}.` : "";
-			return { block: true, reason: `PLAN_GATE:${stage} pre-lock writes are limited to the active planning artifact; denied ${bad.join(", ")}.` };
+			return gov(`PLAN_GATE:${stage} pre-lock writes are limited to the active planning artifact; denied ${bad.join(", ")}.`);
 		}
 		return;
 	}
 	if (state.phase === "design" && state.design.status !== "locked") {
 		const bad = rels.filter((rel) => !matchesAny(rel, LOCKED_DESIGN_PATHS));
-		if (bad.length) return { block: true, reason: `DESIGN_GATE: design phase may only change design artifacts; denied ${bad.join(", ")}.` };
+		if (bad.length) return gov(`DESIGN_GATE: design phase may only change design artifacts; denied ${bad.join(", ")}.`);
 		return;
 	}
 	if (state.phase === "aatp" && !state.aatp.manifest_sha256) {
-		return { block: true, reason: "AATP_COMPILER_GATE: native file writes are disabled while the DAG is unsealed; the compiler must use foundry_aatp_write." };
+		return gov("AATP_COMPILER_GATE: native file writes are disabled while the DAG is unsealed; the compiler must use foundry_aatp_write.");
 	}
 	if (state.phase === "review") {
 		const bad = rels.filter((rel) => !isReviewReport(rel));
-		if (bad.length) return { block: true, reason: `REVIEW_GATE: reviewer may only write review reports; denied ${bad.join(", ")}.` };
+		if (bad.length) return gov(`REVIEW_GATE: reviewer may only write review reports; denied ${bad.join(", ")}.`);
 		return;
 	}
-	if (state.design.required && !designAllowsUi(state)) return { block: true, reason: "DESIGN_GATE: implementation denied until /design approve or skip." };
+	if (state.design.required && !designAllowsUi(state)) return gov("DESIGN_GATE: implementation denied until /design approve or skip.");
 	const tickets = ctx.activeTickets ?? [];
-	if (tickets.length === 0) return { block: true, reason: "AATP_SCOPE: no active ticket." };
+	if (tickets.length === 0) return gov("AATP_SCOPE: no active ticket.");
 	const bad = rels.filter((p) => !tickets.some((t) => pathAllowed(p, t)));
-	if (bad.length) return { block: true, reason: `AATP_SCOPE: no active ticket allows ${bad.join(", ")}.` };
+	if (bad.length) return gov(`AATP_SCOPE: no active ticket allows ${bad.join(", ")}.`);
 	return undefined;
 }
 

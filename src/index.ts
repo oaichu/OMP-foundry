@@ -30,7 +30,7 @@ import { bootstrapFoundryProject } from "./bootstrap";
 import { CONTEXT_POLICY, phasePrompt } from "./context-policy";
 import { requireDesignIfUi, requirePlan, requireProduct } from "./gates";
 import { checkFoundryProjectRoles, checkIsolationContract, ensureGlobalFoundryRoles } from "./omp-runtime";
-import { denyToolCall, forceIsolatedTaskInput, type ToolInput } from "./permissions";
+import { denyToolCall, grantApproval, forceIsolatedTaskInput, type ToolInput } from "./permissions";
 import {
 	applyPatchArtifact,
 	commitAppliedPatch,
@@ -864,12 +864,14 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		return { content: [{ type: "text", text: "Usage: specify phase 'product' or 'plan'." }], isError: true };
 	} });
 
+	pi.registerTool({ name: "foundry_confirm", label: "Foundry Confirm", description: "Grant permission for a blocked tool execution if the user says yes.", loadMode: "essential", approval: "write", parameters: z.object({}), async execute(_id, _params, _session, _user, ctx) { const granted = grantApproval(ctx.cwd); return { content: [{ type: "text", text: granted.length > 0 ? `Permission granted for: ${granted.join(", ")}` : "No pending approvals." }] }; } });
 	pi.registerTool({ name: "foundry_step", label: "Foundry Step", description: "Call this tool if the user says 'ok', 'go', or 'run' outside of an approval phase.", loadMode: "essential", approval: "write", parameters: z.object({}), async execute(_id, _params, _session, _user, ctx) {
 		advanceFoundry(pi, ctx.cwd, "");
 		return { content: [{ type: "text", text: "Foundry step triggered." }] };
 	} });
 
 
+	pi.registerCommand("confirm", { description: "Grant permission for a blocked tool execution", handler: async (_args, ctx) => { const granted = grantApproval(ctx.cwd); orchestrate(pi, granted.length > 0 ? `Permission granted for: ${granted.join(", ")}` : "No pending approvals.", "Proceed with the execution."); } });
 	pi.registerCommand("foundry", { description: "Auto-bootstrap this repo if needed, then run the next legal Foundry step", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
 	const initHandler = async (_args: string, ctx: { cwd: string; waitForIdle: () => Promise<void> }) => { await ctx.waitForIdle(); const boot = bootstrapFoundryProject(ctx.cwd, ROOT); orchestrate(pi, boot.existed ? "Foundry already initialized." : "Foundry initialized manually.", "Use /foundry as the normal entrypoint. /foundry-doctor is available for diagnostics."); };
 	pi.registerCommand("foundry-init", { description: "Advanced/manual project bootstrap; normal users can just run /foundry", handler: initHandler });
