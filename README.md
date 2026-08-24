@@ -51,7 +51,7 @@ No more memorizing rigid commands. Respond naturally in conversation or use ergo
 * **Ergonomic Shortcuts**:
   * `/approve`: Smart approval that automatically advances current phase (Product $\rightarrow$ Plan $\rightarrow$ Build).
   * `/ok`, `/run`, `/go`: Instantly trigger the next ready execution layer.
-  * `/plan`: Shortcut alias for `/plan3`.
+  * `/plan`: Start/resume 3-Stage Master Plan cycle.
   * `/debug`: Systematic Superpowers 5-Step root cause isolation.
 
 ### 3. 🛡️ Low-Cost & Low-Context Model Guardrails (AATP Standards)
@@ -129,7 +129,7 @@ Just one command to start or resume:
 | `/foundry` | **Core** | Auto-bootstrap repo if needed, then resume the next step |
 | `/approve` | **Natural** | Smart approval for current phase (Product or Plan) |
 | `/ok` · `/run` · `/go` | **Natural** | Trigger the next ready execution layer |
-| `/plan` · `/plan3` | **Planning** | Start/resume 3-Stage Master Plan cycle |
+| `/plan` | **Planning** | Start/resume 3-Stage Master Plan cycle |
 | `/plan-revise` | **Planning** | Reopen locked plan (invalidates stale downstream DAG) |
 | `/debug` | **Superpowers**| Run systematic 5-Step root cause isolation workflow |
 | `/build` | **Execution**| Run ready workers from the sealed AATP DAG |

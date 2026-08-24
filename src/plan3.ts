@@ -54,7 +54,7 @@ export function expectedPlan3Agent(state: CompanyState): string | undefined {
 export function plan3Instruction(state: CompanyState): string {
 	const stage = state.planning.stage;
 	if (stage === "awaiting_lock") return "Plan3 synthesis and task breakdown complete. Review the plan above. To approve, reply naturally ('ok', 'làm đi', 'duyệt', 'tiếp tục') or run /approve.";
-	if (stage === "idle") return "Plan3 is idle. Run /plan3 to start.";
+	if (stage === "idle") return "Plan3 is idle. Run /plan to start.";
 	const agent = PLAN3_AGENTS[stage];
 	const artifact = PLAN3_ARTIFACTS[stage];
 	if (stage === "synth") {

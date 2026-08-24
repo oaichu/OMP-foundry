@@ -492,7 +492,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	const capabilityError = (kind: "PLAN3" | "AATP", key: string, active?: CapabilityRun, revokeActive = true, ctx?: unknown) => {
 		const guard = capabilityFailure(key, active, revokeActive);
 		const prefix = kind === "PLAN3" ? "PLAN3" : "AATP_COMPILER";
-		const restart = kind === "PLAN3" ? "/plan3" : "/aatp";
+		const restart = kind === "PLAN3" ? "/plan" : "/aatp";
 		if (guard.tripped || active?.revoked) {
 			try { (ctx as { abort?: () => void } | undefined)?.abort?.(); } catch { /* abort is best-effort; the terminal result remains authoritative */ }
 			return {
@@ -509,7 +509,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	};
 	const capabilityCircuit = (kind: "PLAN3" | "AATP") => {
 		const prefix = kind === "PLAN3" ? "PLAN3" : "AATP_COMPILER";
-		const restart = kind === "PLAN3" ? "/plan3" : "/aatp";
+		const restart = kind === "PLAN3" ? "/plan" : "/aatp";
 		return { isError: true, content: [{ type: "text" as const, text: `${prefix}_CAPABILITY_CIRCUIT_BREAKER: this capability run was revoked after invalid attempts or expiry. Do not retry or guess. Re-run ${restart} to spawn a fresh stage agent and receive a new capability.` }], details: { code: `${prefix}_CAPABILITY_CIRCUIT_BREAKER`, retryable: false, recovery: "respawn_stage_agent" } };
 	};
 	const resetCapabilityFailure = (key: string): void => {
@@ -656,7 +656,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 					const expected = expectedPlan3Agent(loaded.state);
 					if (!expected) return { block: true, reason: `PLAN3_GATE: no planning agent is allowed at stage ${loaded.state.planning.stage}.` };
 					if (items.length !== 1 || planItems.length !== 1 || planItems[0].agent !== expected) return { block: true, reason: `PLAN3_GATE: stage ${loaded.state.planning.stage} requires exactly one blocking ${expected}; no other Plan3 stage may run.` };
-					if (!plan3PriorEvidenceMatches(ctx.cwd, loaded.state)) return { block: true, reason: "PLAN3_EVIDENCE_GATE: a prior stage artifact changed after it was accepted. Restart /plan3 or restore the artifact." };
+					if (!plan3PriorEvidenceMatches(ctx.cwd, loaded.state)) return { block: true, reason: "PLAN3_EVIDENCE_GATE: a prior stage artifact changed after it was accepted. Restart /plan or restore the artifact." };
 					const key = taskKey(event, ctx.cwd);
 					if (!key) return { block: true, reason: "PLAN3_GATE: planning task must expose a unique toolCallId." };
 					if (pendingPlan.has(key)) return { block: true, reason: "PLAN3_GATE: duplicate planning task id is not replayable." };
@@ -857,9 +857,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (state.master_plan.status === "locked") { ctx.ui.notify("PLAN_GATE: master plan is locked. Use /plan-revise before starting a new Plan3 cycle.", "warning"); return; }
 		enterOrResumePlan3(pi, ctx.cwd, state, sub === "restart");
 	};
-	pi.registerCommand("plan", { description: "Alias of /plan3", handler: plan3Handler });
-	pi.registerCommand("plan3", { description: "Enter/resume governed Draft → Redteam → Synth planning mode", handler: plan3Handler });
-	pi.registerCommand("3-stage-plan", { description: "Alias of /plan3", handler: plan3Handler });
+	pi.registerCommand("plan", { description: "Enter/resume governed Draft → Redteam → Synth planning mode", handler: plan3Handler });
 	pi.registerCommand("plan-revise", { description: "Human-only: reopen locked plan and restart Plan3", handler: async (args, ctx) => {
 		const state = loadState(ctx.cwd);
 		state.master_plan.status = "draft";

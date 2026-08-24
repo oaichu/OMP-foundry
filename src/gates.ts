@@ -9,7 +9,7 @@ export function requireProduct(state: CompanyState): string | undefined {
 export function requirePlan(state: CompanyState): string | undefined {
 	const product = requireProduct(state);
 	if (product) return product;
-	if (!planLocked(state)) return "MASTER_PLAN not locked. Run /plan3.";
+	if (!planLocked(state)) return "MASTER_PLAN not locked. Run /plan.";
 	return undefined;
 }
 
