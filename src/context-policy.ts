@@ -7,7 +7,7 @@ export const CONTEXT_POLICY = [
 	"2. Constraint: working_set <= 5 files, patch <= 80 lines diff, zero-regression, no new dependencies.",
 	"3. Criteria: explicit verification commands (typecheck, lint, test).",
 	"4. Low-Cost Model Execution: zero hallucination, strict boundary adherence, no unauthorized refactoring.",
-	"5. Natural UX: user may approve with natural responses ('ok', 'làm đi', 'duyệt', 'tiếp tục').",
+	"5. Natural UX: user may approve with natural responses ('ok', 'yes', 'approve', 'proceed').",
 ].join(" ");
 
 export function phasePrompt(state: CompanyState): string {

@@ -47,7 +47,7 @@ flowchart LR
 
 ### 2. 💬 Zero-Friction Natural Interaction
 No more memorizing rigid commands. Respond naturally in conversation or use ergonomic shortcuts:
-* **Natural replies accepted**: *"ok"*, *"làm đi"*, *"duyệt"*, *"tiếp tục"*, *"triển khai"*, *"làm tiếp đi"*.
+* **Natural replies accepted**: *"ok"*, *"yes"*, *"approve"*, *"proceed"*, *"looks good"*.
 * **Ergonomic Shortcuts**:
   * `/approve`: Smart approval that automatically advances current phase (Product $\rightarrow$ Plan $\rightarrow$ Build).
   * `/ok`, `/run`, `/go`: Instantly trigger the next ready execution layer.
