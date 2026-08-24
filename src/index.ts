@@ -621,7 +621,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (compiler) armStageWatchdog(compiler, ctx);
 		if (planRun) armStageWatchdog(planRun, ctx);
 		const capabilityHint = compiler ? `\nCompiler capability (use only with foundry_aatp_write): ${compiler.capability}` : planRun ? `\nPlan capability (use only with foundry_plan_write): ${planRun.capability}` : "";
-		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, skillState.phase)}${capabilityHint}`, display: true, details: { ...state, skills: pack.map((s) => s.id) } } };
+		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, skillState.phase)}${capabilityHint}`, display: false, details: { ...state, skills: pack.map((s) => s.id) } } };
 	});
 
 	pi.on("tool_call", async (event, ctx) => {
