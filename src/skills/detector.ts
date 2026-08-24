@@ -52,7 +52,7 @@ function projectFiles(cwd: string, suffix: string): string[] {
 	const out: string[] = [];
 	const root = safeRepoPath(cwd, ".");
 	if (!root) return out;
-	const skip = new Set([".git", ".omp", "node_modules", "vendor", "dist", "build"]);
+	const skip = new Set([".git", ".omp", "node_modules", "vendor", "dist", "build", ".venv", "venv", "env"]);
 	const walk = (dir: string, depth: number): void => {
 		if (depth > 3 || out.length >= MAX_DIR_ENTRIES) return;
 		let entries: import("node:fs").Dirent[] = [];

@@ -838,6 +838,38 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		return { content: [{ type: "text", text: bodies.join("\n\n") }], details: { ids: wanted } };
 	} });
 
+	pi.registerTool({ name: "foundry_approve", label: "Foundry Approve", description: "Smart approve: call this tool if the user naturally confirms/approves the product or plan in conversation (e.g., 'ok', 'yes', 'làm đi').", loadMode: "essential", approval: "write", parameters: z.object({ phase: z.string().optional() }), async execute(_id, params, _session, _user, ctx) {
+		const which = (params.phase || "").trim().toLowerCase(), state = loadState(ctx.cwd);
+		if (which === "product" || (!which && state.product.status !== "approved")) {
+			if (!lockArtifactHash(ctx.cwd, state, "product")) return { content: [{ type: "text", text: "PRODUCT_GATE: docs/PRODUCT.md must exist and be non-empty before approval." }], isError: true };
+			state.product.status = "approved"; state.phase = "planning"; enterPlan3(state); invalidateQa(state); persist(ctx.cwd, state);
+			orchestrate(pi, "PRODUCT approved.", "Product approved. Running Plan3...");
+			enterOrResumePlan3(pi, ctx.cwd, state);
+			return { content: [{ type: "text", text: "Product phase approved successfully." }] };
+		}
+		if (which === "plan" || (!which && state.product.status === "approved")) {
+			if (state.mode === "plan3" && state.planning.stage !== "awaiting_lock") return { content: [{ type: "text", text: "PLAN3_GATE: plan approval requires a completed Draft → Redteam → Synth cycle." }], isError: true };
+			if (!plan3ArtifactsMatch(ctx.cwd, state)) return { content: [{ type: "text", text: "PLAN3_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan3 or restore the accepted artifacts." }], isError: true };
+			if (!lockArtifactHash(ctx.cwd, state, "master_plan")) return { content: [{ type: "text", text: "PLAN_GATE: docs/MASTER_PLAN.md must exist and be non-empty before lock." }], isError: true };
+			state.master_plan.status = "locked"; state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version; state.conflict = { kind: "none", reason: "" }; state.mode = "normal"; invalidateQa(state); persist(ctx.cwd, state);
+			if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") {
+				state.phase = "design"; resetAatp(state); persist(ctx.cwd, state);
+				orchestrate(pi, "PLAN LOCKED by user.", "Plan3 evidence accepted. Continue with /design; after design gate Foundry runs /build automatically.");
+			} else {
+				if (state.aatp.manifest_sha256) advanceFoundry(pi, ctx.cwd, "");
+				else requestAatpCompile(pi, ctx.cwd, state);
+			}
+			return { content: [{ type: "text", text: "Plan phase approved successfully." }] };
+		}
+		return { content: [{ type: "text", text: "Usage: specify phase 'product' or 'plan'." }], isError: true };
+	} });
+
+	pi.registerTool({ name: "foundry_step", label: "Foundry Step", description: "Call this tool if the user says 'ok', 'go', or 'run' outside of an approval phase.", loadMode: "essential", approval: "write", parameters: z.object({}), async execute(_id, _params, _session, _user, ctx) {
+		advanceFoundry(pi, ctx.cwd, "");
+		return { content: [{ type: "text", text: "Foundry step triggered." }] };
+	} });
+
+
 	pi.registerCommand("foundry", { description: "Auto-bootstrap this repo if needed, then run the next legal Foundry step", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
 	const initHandler = async (_args: string, ctx: { cwd: string; waitForIdle: () => Promise<void> }) => { await ctx.waitForIdle(); const boot = bootstrapFoundryProject(ctx.cwd, ROOT); orchestrate(pi, boot.existed ? "Foundry already initialized." : "Foundry initialized manually.", "Use /foundry as the normal entrypoint. /foundry-doctor is available for diagnostics."); };
 	pi.registerCommand("foundry-init", { description: "Advanced/manual project bootstrap; normal users can just run /foundry", handler: initHandler });

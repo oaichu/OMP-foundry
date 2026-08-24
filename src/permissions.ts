@@ -13,7 +13,7 @@ import {
 const FILE_MUTATING = new Set(["write", "edit", "ast_edit", "apply_patch"]);
 const READ_PATH_TOOLS = new Set(["read", "read_file", "read_text", "grep", "glob", "find", "list_files", "ls", "ast_grep"]);
 const SAFE_CONTROL_TOOLS = new Set(["task", "fetch", "web_fetch", "web_search", "question", "ask", "report_conflict", "todo", "memory", "plan", "compact", "session"]);
-const FOUNDRY_CONTROL_TOOLS = new Set(["foundry_status", "foundry_skill_read", "foundry_exec", "foundry_aatp_write", "foundry_plan_write"]);
+const FOUNDRY_CONTROL_TOOLS = new Set(["foundry_status", "foundry_skill_read", "foundry_exec", "foundry_aatp_write", "foundry_plan_write", "foundry_approve", "foundry_step"]);
 const GOVERNED = new Set(["implementer", "hard-implementer", "smol-implementer", "reviewer", "security-reviewer"]);
 const LSP_MUTATING = new Set(["rename", "rename_file", "code_actions", "request", "reload"]);
 const LSP_READ_ONLY = new Set(["hover", "definition", "type_definition", "implementation", "references", "document_symbol", "workspace_symbol", "completion", "signature_help", "diagnostics", "document_diagnostics", "workspace_diagnostics", "folding_range", "inlay_hints"]);
