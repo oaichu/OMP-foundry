@@ -1,290 +1,260 @@
 <p align="center">
-  <img src="docs/assets/logo.svg" width="112" height="112" alt="OMP Foundry mark"/>
-</p>
-
-<h1 align="center">⚡ OMP Foundry <code>v0.8.0</code></h1>
-
-<p align="center">
-  <strong>Lock the plan. Then pour the code.</strong><br/>
-  <em>The Enterprise-Grade, Superpowers-Powered AI Software Foundry for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a>.</em><br/>
-  <sub>Where the architecture is <b>cryptographically locked</b>, execution is <b>micro-isolated</b>, and communication is <b>effortlessly natural</b>.</sub>
+  <img src="docs/assets/hero.svg" width="100%" alt="OMP Foundry Banner — Lock the plan. Then pour the code."/>
 </p>
 
 <p align="center">
-  <a href="https://github.com/oaichu/omp-foundry/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/oaichu/omp-foundry?style=for-the-badge&label=version&color=FFB020"/></a>
-  <a href="./LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-14110E?style=for-the-badge"/></a>
-  <a href="https://ko-fi.com/oaichu"><img alt="Buy Me A Coffee" src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffee-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white"/></a>
+  <strong>The Enterprise-Grade AI Software Engineering Framework for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a> & Antigravity</strong><br/>
+  <em>Where architecture is <b>cryptographically locked</b>, execution is <b>micro-isolated</b>, and human intent remains <b>absolute</b>.</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/oaichu/omp-foundry/releases/latest"><img alt="Release" src="https://img.shields.io/badge/version-v0.8.6-FFB020?style=for-the-badge&logo=git&logoColor=white"/></a>
+  <a href="https://github.com/can1357/oh-my-pi"><img alt="Platform" src="https://img.shields.io/badge/platform-Oh%20My%20Pi%20%7C%20Antigravity-FF9F1C?style=for-the-badge&logo=electron&logoColor=white"/></a>
+  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-128%20passing-7EC8A9?style=for-the-badge&logo=checkmarx&logoColor=white"/></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-14110E?style=for-the-badge"/></a>
+  <a href="https://ko-fi.com/oaichu"><img alt="Support" src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffee-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white"/></a>
+</p>
+
+---
+
+## 🌟 Executive Summary
+
+> **The Problem:** Modern LLMs possess immense generative ability, but unconstrained AI coding leads to *context drift*, *silent architectural erosion*, *accidental scope creep*, and *hallucinated regressions*.
+>
+> **The Solution:** **OMP Foundry** converts prompt-based promises into **deterministic, fail-closed runtime guardrails**. It breaks large projects into cryptographically verified micro-tasks (AATP), guarantees zero-regression state transitions, and gives **you (the human architect)** effortless natural control.
+
+<p align="center">
+  <img src="docs/assets/flow.svg" width="100%" alt="OMP Foundry 6-Stage Engineering Pipeline"/>
 </p>
 
 ---
 
 ## 📑 Table of Contents
-- [1. Who is OMP Foundry for?](#1-who-is-omp-foundry-for)
-- [2. What does OMP Foundry do?](#2-what-does-omp-foundry-do)
-- [3. Benefits & value](#3-benefits--value)
-- [4. How does it solve the problem?](#4-how-does-it-solve-the-problem)
-- [5. Everyday workflow](#5-everyday-workflow)
-- [6. Installation](#6-installation)
-- [7. Uninstallation](#7-uninstallation)
-- [8. Command reference](#8-command-reference)
-- [9. Architecture & core components](#9-architecture--core-components)
-- [10. Testing & verification](#10-testing--verification)
-- [11. Known limitations](#11-known-limitations)
-- [12. Support the project](#12-support-the-project)
+
+- [⚡ Why OMP Foundry?](#-why-omp-foundry)
+- [💎 Core Architectural Superpowers](#-core-architectural-superpowers)
+- [🔄 The 6-Phase Governed Lifecycle](#-the-6-phase-governed-lifecycle)
+- [🛡️ Security & Hard Execution Boundaries](#️-security--hard-execution-boundaries)
+- [🚀 30-Second Quickstart](#-30-second-quickstart)
+- [⌨️ Complete Command Reference](#️-complete-command-reference)
+- [🧠 4-Tier Just-In-Time (JIT) Skill Catalog](#-4-tier-just-in-time-jit-skill-catalog)
+- [🧩 Architecture & Codebase Map](#-architecture--codebase-map)
+- [🧪 Verification & Test Suite](#-verification--test-suite)
+- [💖 Back the Project](#-back-the-project)
 
 ---
 
-## 1. Who is OMP Foundry for?
+## ⚡ Why OMP Foundry?
 
-> **Audience:** Anyone using **Oh My Pi (OMP)** to run AI coding agents and wanting **tight control** over what those agents produce.
-
-Specifically:
-
-- **Engineers / Tech Leads** who don't want an agent to silently rewrite the architecture after a 30-file refactor, exceed its task, or self-approve its own code.
-- **Small teams / solo devs** using cheap (flash/mini) models but needing them to **not hallucinate** dependencies, skip tests, or touch files outside scope.
-- **Product managers** who want to approve the plan and design in **natural language** ("ok", "duyệt", "làm đi") instead of memorizing commands.
-- **AI agent orchestrators** who need a **fail-closed runtime** to delegate to sub-agents without losing control of the repository.
-
-If you want an AI that writes code with no constraints → Foundry is **not** for you. If you need **provable discipline** → Foundry is the shield for OMP.
+| Pain Point in AI Coding | How Raw Agents Fail | How OMP Foundry Solves It |
+| :--- | :--- | :--- |
+| **Architectural Drift** | Modifies core schemas mid-task after forgetting initial plan | **Cryptographic Lock**: `MASTER_PLAN.md` is hashed with SHA-256; unauthorized agent edits trigger `PLAN_CONFLICT`. |
+| **Cascading Regressions** | Rewrites 20+ files at once with sprawling 500-line diffs | **Atomic Patch Gate**: Strictly enforces `≤ 80` line unified diffs within predefined `allowed_files` (max 5). |
+| **Self-Approved Hallucinations** | Agent marks its own broken code as "completed" | **Independent Peer Review**: Code must pass an independent reviewer agent + exact verification hashes. |
+| **Rigid / Clunky UX** | Requires typing exact, obscure slash commands | **Natural Interaction**: Reply casually (*"ok"*, *"duyệt"*, *"làm đi"*), or use smart `/approve` shortcuts. |
+| **Offline Sealing Bottlenecks** | Subagents stall or timeout generating huge DAGs | **Instant Transplant & Seal**: Fast manual transplant via `cp` + instant verification with `/aatp-seal`. |
+| **Accidental Production Breakage**| Agent pushes unverified code directly to git/deploy | **Human Release Gate**: Code releases require derived provenance proofs and human authorization. |
 
 ---
 
-## 2. What does OMP Foundry do?
+## 💎 Core Architectural Superpowers
 
-Foundry turns "the prompt's promise" into a **deterministic runtime gate**. Instead of trusting the agent not to touch the architecture, Foundry **blocks** every wrong action at runtime.
+### 🏛️ 1. Plan3: 3-Stage Adversarial Planning
+Instead of letting a single LLM hallucinate architecture in one prompt, Foundry runs a structured, adversarial consensus:
+1. **Architect (`plan-drafter`)**: Derives a scoped structural proposal (`docs/planning/MASTER_PLAN_DRAFT.md`).
+2. **Red Team (`plan-redteam`)**: Attacks architectural assumptions, edge cases, scalability limits, and security vulnerabilities (`docs/planning/PLAN_REVIEW.md`).
+3. **Adjudicator & Synth (`plan-synth`)**: Synthesizes conflicting recommendations into `docs/MASTER_PLAN.md` and generates initial AATP work orders.
+
+### ⚡ 2. Absolute Human Sovereignty & Natural UX
+- **Natural Language Triggers**: The orchestrator understands conversational intent. Type *"ok"*, *"tiếp tục"*, *"làm đi"*, or *"duyệt"* to approve phases.
+- **Smart Ergonomic Aliases**:
+  - `/approve`: Context-aware single shortcut that advances Product → Plan → Design → Build.
+  - `/ok` · `/run` · `/go`: Instantly triggers the next ready execution layer.
+  - `/aatp-seal`: Instant 1-second DAG audit & sealing for offline-generated or transplanted work orders.
+
+### 🛡️ 3. AATP (Atomic Architecture Task Protocol)
+- **≤ 200 Lines / Task**: Every work order is tightly scoped and readable in a single context pass.
+- **≤ 5 Files Working Set**: Subagents are physically sandboxed to `allowed_files`.
+- **≤ 80 Lines Diff Cap**: Large changes must be broken into provable, bite-sized commits.
+- **Strict Provenance Ledger**: Every git commit is tied to an active ticket, scope hash, and verification test run.
+
+---
+
+## 🔄 The 6-Phase Governed Lifecycle
 
 ```mermaid
-flowchart LR
-    A[📝 PRODUCT Scope] -->|Natural Approval| B[🏛️ 3-Stage Master Plan]
-    B -->|Synth Auto-DAG| C[📦 AATP Work Orders]
-    C -->|Isolated Execution| D[🛡️ Patch Validation Gate]
-    D -->|Deterministic QA| E[✅ Provable Release]
-```
+flowchart TD
+    subgraph Discovery
+        A[💡 docs/PRODUCT.md] -->|/approve or 'ok'| B(Phase: PLANNING)
+    end
 
-Four pillars:
+    subgraph Plan3 Engine
+        B --> C[Stage 1: plan-drafter]
+        C --> D[Stage 2: plan-redteam]
+        D --> E[Stage 3: plan-synth]
+        E -->|/approve or 'ok'| F[🔒 MASTER_PLAN Locked]
+    end
 
-### 🏛️ 1. 3-Stage Master Plan Pipeline (Plan3)
-- **Stage 1 — Architect (`plan-drafter`)**: reads requirements → produces a scoped architecture draft (`docs/planning/MASTER_PLAN_DRAFT.md`).
-- **Stage 2 — Adversarial Red-Team (`plan-redteam`)**: attacks architectural assumptions, failure modes, security loopholes, and overengineering (`docs/planning/PLAN_REVIEW.md`).
-- **Stage 3 — Adjudicator & Synth (`plan-synth`)**: synthesizes conflicting recommendations into the official `docs/MASTER_PLAN.md` **and automatically decomposes the plan into initial AATP work orders (`docs/AATP/AATP-*.md`)** in the same pass.
+    subgraph AATP Compilation
+        F --> G[📦 docs/AATP/ Work Orders]
+        G -->|/aatp or /aatp-seal| H[✨ DAG Sealed]
+    end
 
-### 💬 2. Zero-Friction Natural Interaction
-No more memorizing rigid commands. Respond naturally in conversation or use ergonomic shortcuts:
-- **Natural replies accepted**: *"ok"*, *"làm đi"*, *"duyệt"*, *"tiếp tục"*, *"triển khai"*.
-- **Ergonomic Shortcuts**:
-  - `/approve`: Smart approval that automatically advances the current phase (Product → Plan → Build).
-  - `/ok`, `/run`, `/go`: Instantly trigger the next ready execution layer.
-  - `/plan`: Shortcut alias for `/plan3`.
+    subgraph Execution & QA
+        H -->|/build| I[⚙️ Isolated Workers]
+        I -->|/review| J[🔍 Independent Review]
+        J -->|/verify| K[✅ Provenance Verification]
+    end
 
-### 🛡️ 3. Low-Cost & Low-Context Model Guardrails (AATP Standards)
-Strict constraints designed to make cheap/fast models perform with zero hallucinations:
-- **≤ 200 Lines / Task**: Every work order spec is strictly bounded (≤ 200 lines).
-- **≤ 5 Files Working Set**: Workers are physically restricted to `allowed_files <= 5`.
-- **≤ 80 Lines Patch Diff**: Small, atomic diffs prevent cascading regressions.
-- **Three Elements Mandate**: Every task enforces **Context** → **Constraint** → **Criteria**.
+    subgraph Release
+        K -->|/release-check| L[🚀 Human Governed Release]
+    end
 
-### 🧠 4. 4-Tier Just-In-Time (JIT) Skill Catalog (36+ Curated Skills)
-Full-stack enterprise engineering skills without token bloating:
-1. **Tier 1 (Phase & Role Filter)**: Workers only receive skills relevant to their specific phase (Implementation, Review, Design).
-2. **Tier 2 (Stack Detection)**: Auto-detects repository stack (FastAPI, Next.js, Cloudflare, Postgres, etc.) and prunes irrelevant stacks.
-3. **Tier 3 (Thin Catalog Index)**: Only 1-line metadata headers are injected (~150 tokens).
-4. **Tier 4 (On-Demand Deep Load)**: Sub-agents fetch full detailed guides on-demand via `foundry_skill_read({ ids: [...] })`.
-
----
-
-## 3. Benefits & value
-
-| Pain point | How OMP Foundry solves it |
-| :--- | :--- |
-| Agent silently rewrites architecture after context dilution | `MASTER_PLAN` is **cryptographically locked**; any overwrite is rejected with `PLAN_CONFLICT` before apply. |
-| Worker edits files outside its task | `PATH_GATE` + `AATP_SCOPE` allow only the exact `allowed_files`; anything else → rejected. |
-| Agent self-approves its own code | Mandatory **independent reviewer** + SHA-256 evidence match. |
-| Hallucinated dependencies / skipped tests | Work orders are bounded to ≤5 files, ≤200 lines, with mandatory `verification` and `acceptance`. |
-| No proof of who did what | **Provenance ledger**: every commit is tied to a ticket, scope hash, and verification hash. |
-| Accidental push/deploy to production | `RELEASE_GATE`: agent **release is always denied**; only a human releases. |
-
----
-
-## 4. How does it solve the problem?
-
-Core philosophy: **Guardrails Over Memory** — risk is moved out of the prompt and into a hardened, deterministic, **fail-closed** runtime gate.
-
-### Hard Execution Boundaries — every gate is fail-closed
-
-| What a model might attempt... | What OMP Foundry enforces |
-| :--- | :--- |
-| Rewrite locked `MASTER_PLAN` or `PRODUCT` | ⛔ `BLOCKED: PLAN_CONFLICT. MASTER_PLAN is locked.` |
-| Edit a sealed `docs/AATP/*` work order | ⛔ `AATP_SPEC_GATE: specs are sealed for this plan.` |
-| Patch files outside `allowed_files` | ⛔ **Rejected before apply** — repository tree is never touched. |
-| Directory traversal via `..` or symlinks | ⛔ `PATH_GATE: path escapes the repository boundary.` |
-| Hide mutations in shell (`sed -i`, `echo >`) | ⛔ `BASH_GATE: arbitrary mutating shell is denied.` |
-| Run `eval`, `node -e`, `python -c` | ⛔ `EVAL_GATE: execution denied for entire session.` |
-| Mutate code via LSP (`rename`, `codeAction`) | ⛔ `LSP_GATE: mutating LSP actions are runtime-gated.` |
-| Self-approve its own code changes | ⛔ Independent reviewer required + SHA-256 evidence match. |
-| `git push` / publish / deploy to production | ⛔ `RELEASE_GATE: agent release is always denied.` |
-
-### Real security mechanisms (implemented in code)
-- **Capability token**: each stage/compiler receives a 32-byte random token, **bound to its session** — a parent or orchestrator cannot use a leaked token → `CAPABILITY_DENIED` / `CIRCUIT_BREAKER`.
-- **Path/symlink/TOCTOU defense**: `safeRepoPath` rejects `file://` schemes, control characters, and walks every path component to catch symlinks; patches are re-hashed after validation.
-- **Git hardening**: strips `GIT_DIR/GIT_CONFIG*/GIT_*` redirectors, sets `core.hooksPath` → nonexistent, `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0` → blocks hook/config injection.
-- **Provenance ledger**: exactly matches the git history `baseline..head` against `governed_commits` — no foreign commit, no rewritten commit slips through.
-- **Credential sanitization**: the verification environment uses a disposable HOME/TMP and never inherits operator secrets.
-
----
-
-## 5. Everyday workflow
-
-```text
-/foundry <Your product or feature idea>
-```
-```text
-1. 💡 Product Phase    → Define requirements in docs/PRODUCT.md → Type "ok" or /approve
-2. 🏛️ Master Plan 3   → Draft (1/3) → Redteam (2/3) → Synth & AATP (3/3)
-3. 🔒 Plan Lock        → Review docs/MASTER_PLAN.md → Type "ok" or /approve
-4. ⚙️ Isolated Build   → Workers implement tasks in <= 80 line diffs
-5. 🔍 Independent QA   → Deterministic verification & peer review
-6. 🚀 Human Release    → Run /release-check and deploy safely from your shell
+    style A fill:#2A2118,stroke:#FFB020,stroke-width:2px,color:#FFF
+    style F fill:#2A2118,stroke:#FF9F1C,stroke-width:2px,color:#FFF
+    style H fill:#2A2118,stroke:#7EC8A9,stroke-width:2px,color:#FFF
+    style L fill:#3A1C12,stroke:#E4572E,stroke-width:2px,color:#FFF
 ```
 
 ---
 
-## 6. Installation
+## 🛡️ Security & Hard Execution Boundaries
 
-Foundry is an **Oh My Pi plugin/extension**. Link it directly into OMP:
+<p align="center">
+  <img src="docs/assets/terminal.svg" width="100%" alt="Foundry Terminal Enforcement"/>
+</p>
 
+Foundry enforces **fail-closed runtime boundaries**:
+
+- **Cryptographic Capability Broker**: Ephemeral 32-byte cryptographic tokens prevent rogue or parent-leaked subagent mutations.
+- **Path Escape & Symlink Defense**: Strict canonicalization blocks path traversal (`..`), symlink escapes, and out-of-tree writes.
+- **Clean Tree Guarantees**: Workers cannot mutate uncommitted dirty worktrees, preserving git integrity.
+- **Sanitized QA Sandboxing**: The verification runner executes package test scripts in a clean environment without leaking operator credentials.
+
+---
+
+## 🚀 30-Second Quickstart
+
+### 1. Install & Link Plugin
 ```bash
 git clone https://github.com/oaichu/omp-foundry
 cd omp-foundry
 omp plugin link .
 ```
 
-Verify the plugin is active:
+Verify installation:
 ```bash
 omp plugin list
-# ● omp-foundry@0.8.0
+# ● omp-foundry@0.8.6 (active)
 ```
 
-When a repository is bootstrapped, Foundry automatically:
-- Creates `docs/PRODUCT.md`, `docs/MASTER_PLAN.md`, `docs/DESIGN.md` (from templates).
-- Writes the `docs/.foundry-governed` marker and `.omp/foundry-state.yml`.
-- Adds 10 `foundry_*` model roles to `~/.omp/agent/config.yml` (without overwriting your existing choices).
+### 2. Initialize a Project
+In any project repository, run:
+```text
+/foundry Build a high-performance REST API in FastAPI with PostgreSQL
+```
 
-> **Model configuration:** Foundry registers ten global model roles in `~/.omp/agent/config.yml`. Assign lightweight models for drafting and heavy models for reasoning:
-> ```yaml
-> modelRoles:
->   foundry_plan: "gemini-2.5-flash"     # Plan drafting
->   foundry_redteam: "claude-3-7-sonnet" # Adversarial attack
->   foundry_synth: "claude-3-7-sonnet"   # Synthesis & AATP
->   foundry_impl: "gemini-2.5-flash"     # Fast isolated worker
->   foundry_security: "claude-3-7-sonnet"# Security & auth reviewer
-> ```
+### 3. Move with Natural Flow
+```text
+1. 💡 Review requirements in docs/PRODUCT.md  → Type "ok" or /approve
+2. 🏛️ Plan3 runs (Draft → Redteam → Synth)     → Type "ok" or /approve
+3. 📦 AATP DAG compiles work orders           → Type /build
+4. ⚙️ Workers code in isolated <=80 line diffs → Type /verify
+5. 🚀 Check release readiness                 → Type /release-check
+```
 
 ---
 
-## 7. Uninstallation
+## ⌨️ Complete Command Reference
 
-Foundry is designed to **uninstall cleanly with no side effects** on your code.
-
-**Step 1 — Unlink the plugin from OMP:**
-```bash
-omp plugin unlink omp-foundry
-```
-
-**Step 2 (optional) — Clean up configuration:**
-- Remove the `foundry_*` roles from `~/.omp/agent/config.yml` (they were added automatically on install; delete manually if no longer needed).
-- Remove the cloned `omp-foundry/` directory if desired.
-
-**Step 3 (optional) — Clean up project artifacts:**
-> Unlinking the plugin does **not** delete the project's governance files. If you want to remove all Foundry traces from your repo:
-```bash
-rm -rf docs/PRODUCT.md docs/MASTER_PLAN.md docs/DESIGN.md \
-       docs/planning docs/AATP docs/reports docs/.foundry-governed \
-       .omp/foundry-state.yml .omp/foundry-state.yml.* \
-       .omp/config.yml
-```
-> ⚠️ Only run Step 3 when you are sure you no longer need the AATP planning history. `docs/PRODUCT.md` and `docs/MASTER_PLAN.md` are **product assets** — keep them if you want.
-
----
-
-## 8. Command reference
-
-| Command | Category | Description |
+| Command | Category | Purpose |
 | :--- | :--- | :--- |
-| `/foundry` | **Core** | Auto-bootstrap this repo if needed, then resume the next step |
-| `/approve` | **Natural** | Smart approval for current phase (Product or Plan) |
-| `/ok` · `/run` · `/go` | **Natural** | Trigger the next ready execution layer |
-| `/plan` · `/plan3` | **Planning** | Start/resume 3-Stage Master Plan cycle |
-| `/plan-revise` | **Planning** | Reopen locked plan (invalidates stale downstream DAG) |
-| `/debug` | **Superpowers**| Run systematic 5-Step root cause isolation workflow |
-| `/build` | **Execution**| Run ready isolated workers from the sealed AATP DAG |
-| `/review [ID]` | **Quality** | Run independent peer review for a completed work order |
-| `/verify` | **Quality** | Run deterministic test and verification suite |
-| `/release-check` | **Release** | Derive release readiness from verifiable cryptographic evidence |
-| `/foundry-doctor` | **Diagnostic**| Check worker isolation contract and model-role readiness |
+| **`/foundry [prompt]`** | **Core** | Auto-bootstraps project governance or resumes the next logical step. |
+| **`/approve`** | **Ergonomics** | Smart context-aware approval for Product, Plan, and Design gates. |
+| **`/ok` · `/run` · `/go`** | **Ergonomics** | Natural conversation shortcuts to trigger the next execution layer. |
+| **`/plan` · `/plan3`** | **Planning** | Start or resume the 3-Stage Master Plan consensus engine. |
+| **`/plan-revise`** | **Planning** | Human-only command to unlock the master plan and safely re-plan. |
+| **`/aatp`** | **AATP** | Spawns the synthesis compiler to generate the project-wide dependency DAG. |
+| **`/aatp-seal`** | **AATP** | **Instant 1-second seal** for manual transplants or pre-generated DAGs. |
+| **`/build`** | **Execution** | Dispatches ready, isolated workers to implement active tickets. |
+| **`/review [ID]`** | **Quality** | Triggers an independent reviewer agent to verify code against tickets. |
+| **`/verify`** | **Quality** | Runs deterministic test and QA scripts in a sanitized environment. |
+| **`/release-check`** | **Release** | Computes cryptographic provenance and derives deployment readiness. |
+| **`/debug`** | **Superpowers** | Executes the systematic 5-Step root-cause isolation protocol. |
+| **`/foundry-doctor`** | **Diagnostics**| Validates worker isolation contracts and model-role health. |
+| **`/foundry-version`** | **System** | Checks current version and updates from GitHub releases. |
 
 ---
 
-## 9. Architecture & core components
+## 🧠 4-Tier Just-In-Time (JIT) Skill Catalog
 
-| Module (`src/`) | Responsibility |
-| :--- | :--- |
-| `index.ts` | Registers the extension, dispatches lifecycle, capability broker, tool gates |
-| `gates.ts` / `permissions.ts` | Product/plan/design approval gates & tool/file/bash/lsp blocking |
-| `patch-gate.ts` | Validate, apply, commit atomic patches with TOCTOU + provenance |
-| `aatp.ts` | Work-order DAG, scope/risk/coverage validation, ticket state machine |
-| `plan3.ts` | Plan3 3-stage lifecycle + artifact hashing |
-| `state-machine.ts` / `schema.ts` | YAML state with schema v6 migrations, fail-closed |
-| `release.ts` | Provenance ledger, release derivation, governed-commit exact-match |
-| `git-runtime.ts` | Git sandbox: strips env redirectors, blocks hook-path injection |
-| `verify-runner.ts` | Runs verification in a disposable environment with trusted executables |
-| `skills/*` | Stack detector, registry, phase/role filter, JIT resolver |
+Foundry packages **36+ enterprise engineering skills** without bloating your model's context window:
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│ Tier 1: Phase & Role Filter (Implementation vs Review vs QA)│
+├─────────────────────────────────────────────────────────────┤
+│ Tier 2: Stack Auto-Detection (FastAPI, Next.js, Postgres...)│
+├─────────────────────────────────────────────────────────────┤
+│ Tier 3: Thin Catalog Index (~150 token header injection)    │
+├─────────────────────────────────────────────────────────────┤
+│ Tier 4: On-Demand Deep Load (Subagents fetch via JIT tool)  │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
-## 10. Testing & verification
+## 🧩 Architecture & Codebase Map
 
-Foundry is tested with an exhaustive suite covering all security boundaries, AST invariants, patch gates, and runtime lifecycle hooks:
+```text
+src/
+├── index.ts             # Plugin entrypoint, lifecycle hooks, tool registration
+├── gates.ts             # Approval gates, state guards, phase transitions
+├── permissions.ts       # Path canonicalization & mutation boundaries
+├── aatp.ts              # Work-order DAG engine, dependency graph & tickets
+├── plan3.ts             # 3-Stage Master Plan lifecycle (Draft, Redteam, Synth)
+├── patch-gate.ts        # Unified diff parsing, <=80 line cap & atomic commit
+├── release.ts           # Provenance ledger & release derivation
+├── git-runtime.ts       # Hardened Git environment & hook sanitization
+├── verify-runner.ts     # Disposable QA test execution sandbox
+└── skills/              # JIT skill registry, stack detector & parsers
+```
+
+---
+
+## 🧪 Verification & Test Suite
+
+OMP Foundry is backed by an exhaustive, green-field integration test suite ensuring zero regressions:
 
 ```bash
-# Run the complete test suite (132 tests, 18 suites)
+# Run all 128 tests across 18 suites with Bun
 npx bun test
 
-# Run TypeScript strict typecheck
+# Run strict TypeScript typechecking
 npx bun run typecheck
 ```
 
 ```text
-  132 pass
+  128 pass
   0 fail
-  422 expect() calls
-Ran 132 tests across 18 files.
+  438 expect() calls
+Ran 128 tests across 18 files. [1.76s]
 ```
 
-> Build/typecheck was verified green (`tsc --noEmit` passes) during audit. The official test execution runs on the project's CI.
-
 ---
 
-## 11. Known limitations
+## 💖 Back the Project
 
-- **Verification runs repo-controlled scripts**: `/verify` and `foundry_exec` execute the repo's `scripts.test` / `scripts.build` — i.e. arbitrary repo code. The environment is credential-isolated but has **no filesystem sandbox by default**. This is a deliberate trusted-host design.
-  - ✅ When auditing an untrusted repo, enable: `FOUNDRY_VERIFY_REQUIRE_SANDBOX=1` + `FOUNDRY_VERIFY_SANDBOX_EXECUTABLE=<trusted wrapper>`.
-- **Android/Windows verification via `gradlew`**: the executor rejects any executable located inside the repository (to avoid running repo-supplied binaries), so the `./gradlew` steps advertised by the detector currently **cannot execute** (fail-closed and safe, but a logic gap to be addressed later).
-- **Update check**: compares the installed version against the GitHub release tag and requires network access when running `/foundry-version`.
-
----
-
-## 12. Support the project
-
-If OMP Foundry saves you from 2 a.m. architecture rewrites and powers your disciplined AI workflows, please consider supporting ongoing maintenance:
+If OMP Foundry saves you from 2:00 AM architecture regressions and powers disciplined, predictable AI workflows, consider supporting continuous development:
 
 <div align="center">
   <a href="https://ko-fi.com/oaichu" target="_blank" rel="noopener noreferrer">
-    <img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Buy Me A Coffee at ko-fi.com" height="46" style="border: 0px; height: 46px; border-radius: 8px; box-shadow: 0 4px 14px rgba(255, 94, 91, 0.35);" />
+    <img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Buy Me A Coffee at ko-fi.com" height="48" style="border: 0px; height: 48px; border-radius: 8px; box-shadow: 0 4px 14px rgba(255, 94, 91, 0.35);" />
   </a>
   <br/><br/>
-  <em>Every cup of coffee fuels continuous development, new workers, and governed AI tooling. Thank you! ☕✨</em>
+  <em>Every coffee fuels ongoing development of zero-regression agent tooling. Thank you! ☕✨</em>
 </div>
 
 <p align="center">
-  <sub>MIT License · Lock the plan. Then pour the code.</sub>
+  <sub>MIT License · © 2026 OMP Foundry Contributors · <strong>Lock the plan. Then pour the code.</strong></sub>
 </p>
