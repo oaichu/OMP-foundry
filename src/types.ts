@@ -34,6 +34,7 @@ export interface AatpTicket {
 	/** Security sensitivity is orthogonal to implementation difficulty. */
 	security_sensitive?: boolean;
 	agent?: string;
+	attempts?: number;
 	review?: ReviewVerdict;
 	review_by?: string;
 	review_evidence_sha256?: string;

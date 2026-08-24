@@ -22,6 +22,7 @@ export interface AatpSpec {
 export interface AatpTask extends AatpSpec {
 	status: TicketStatus;
 	review: ReviewVerdict;
+	attempts?: number;
 	implementation_commit_sha?: string;
 	implementation_scope_sha256?: string;
 	verification_evidence_sha256?: string;
@@ -318,7 +319,7 @@ export function aatpManifestHash(cwd: string): string {
 export function hydrateAatp(cwd: string, state: CompanyState): AatpTask[] {
 	return listAatpSpecs(cwd).map((spec) => {
 		const ticket = state.tickets[spec.id];
-		return { ...spec, status: ticket?.status ?? "ready", review: ticket?.review ?? "none", implementation_commit_sha: ticket?.implementation_commit_sha, implementation_scope_sha256: ticket?.implementation_scope_sha256, verification_evidence_sha256: ticket?.verification_evidence_sha256 };
+		return { ...spec, status: ticket?.status ?? "ready", review: ticket?.review ?? "none", attempts: ticket?.attempts, implementation_commit_sha: ticket?.implementation_commit_sha, implementation_scope_sha256: ticket?.implementation_scope_sha256, verification_evidence_sha256: ticket?.verification_evidence_sha256 };
 	});
 }
 
@@ -350,7 +351,8 @@ export function writeAatpIndex(cwd: string, tasks: AatpTask[]): void {
 	writeFileSync(index, lines.join("\n"), "utf8");
 }
 
-export function routeAgent(risk: string): string {
+export function routeAgent(risk: string, attempts = 0): string {
+	if (attempts >= 1) return "hard-implementer";
 	const r = risk.toLowerCase();
 	if (r === "trivial" || r === "low") return "implementer";
 	if (r === "difficult" || r === "hard" || r === "critical") return "hard-implementer";
@@ -440,6 +442,7 @@ export function resetTicket(state: CompanyState, id: string): TransitionResult {
 	const ticket = state.tickets[id];
 	if (!ticket) return { ok: false, reason: "Unknown ticket." };
 	ticket.status = "ready";
+	ticket.attempts = (ticket.attempts || 0) + 1;
 	ticket.review = "none";
 	ticket.review_by = undefined;
 	ticket.review_evidence_sha256 = undefined;

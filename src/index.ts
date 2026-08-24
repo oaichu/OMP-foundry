@@ -687,7 +687,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 					const spec = specs.find((s) => s.id === binding.ticketId);
 					if (!spec) return { block: true, reason: `AATP_BINDING_GATE: unknown ${binding.ticketId}.` };
 					if (binding.kind === "implementation") {
-						const expectedAgent = routeAgent(spec.risk);
+						const expectedAgent = routeAgent(spec.risk, state.tickets[binding.ticketId]?.attempts);
 						const rank = (a: string) => a === "smol-implementer" ? 0 : a === "implementer" ? 1 : a === "hard-implementer" ? 2 : -1;
 						if (rank(binding.agent) < rank(expectedAgent)) return { block: true, reason: `AATP_ROUTE_GATE: ${binding.ticketId} risk=${spec.risk} requires at least ${expectedAgent}; received ${binding.agent || "(missing)"}. Escalation is allowed, downgrading is not.` };
 						const begun = beginTicket(state, spec, binding.ticketId, binding.agent);
@@ -1027,7 +1027,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		}
 		if (zombies > 0) ctx.ui.notify(`WATCHDOG: Reset ${zombies} zombie ticket(s) back to ready.`, "warning");
 		seedTickets(state, specs); const tasks = hydrateAatp(ctx.cwd, state), ready = readyIndependent(tasks); state.phase = "implementation"; recountTickets(state); persist(ctx.cwd, state);
-		const lines = ready.map((t) => `- ${t.id} agent=${routeAgent(t.risk)} :: ${t.objective}`);
+		const lines = ready.map((t) => `- ${t.id} agent=${routeAgent(t.risk, t.attempts)} :: ${t.objective}`);
 		orchestrate(pi, "Run the ready AATP layer.", [`Ready (${ready.length}):`, lines.join("\n") || "(none)", "Call the 'task' tool to spawn one blocking subagent per line using the exact AATP id in the task instructions.", "Do NOT call aatp_begin/complete. Foundry owns lifecycle, patch validation, apply, and commit.", "Worker conflicts must end with: FOUNDRY_CONFLICT <KIND> <reason>."].join("\n"));
 	} });
 	pi.registerCommand("review", { description: "Independent AATP review with parent-owned verdict transition", handler: async (args, ctx) => {
