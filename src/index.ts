@@ -688,7 +688,8 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 					if (!spec) return { block: true, reason: `AATP_BINDING_GATE: unknown ${binding.ticketId}.` };
 					if (binding.kind === "implementation") {
 						const expectedAgent = routeAgent(spec.risk);
-						if (binding.agent !== expectedAgent) return { block: true, reason: `AATP_ROUTE_GATE: ${binding.ticketId} risk=${spec.risk} requires ${expectedAgent}; received ${binding.agent || "(missing)"}.` };
+						const rank = (a: string) => a === "smol-implementer" ? 0 : a === "implementer" ? 1 : a === "hard-implementer" ? 2 : -1;
+						if (rank(binding.agent) < rank(expectedAgent)) return { block: true, reason: `AATP_ROUTE_GATE: ${binding.ticketId} risk=${spec.risk} requires at least ${expectedAgent}; received ${binding.agent || "(missing)"}. Escalation is allowed, downgrading is not.` };
 						const begun = beginTicket(state, spec, binding.ticketId, binding.agent);
 						if (!begun.ok) return { block: true, reason: begun.reason };
 					} else {
