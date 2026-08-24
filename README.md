@@ -66,7 +66,7 @@ Instead of letting a single LLM hallucinate architecture in one prompt, Foundry 
 3. **Adjudicator & Synth (`plan-synth`)**: Synthesizes conflicting recommendations into `docs/MASTER_PLAN.md` and generates initial AATP work orders.
 
 ### ⚡ 2. Absolute Human Sovereignty & Natural UX
-- **Natural Language Triggers**: The orchestrator understands conversational intent. Type *"ok"*, *"tiếp tục"*, *"làm đi"*, or *"duyệt"* to approve phases.
+- **Natural Language Triggers**: The orchestrator understands conversational intent. Type *"ok"*, *"proceed"*, *"do it"*, or *"approve"* to approve phases.
 - **Smart Ergonomic Aliases**:
   - `/approve`: Context-aware single shortcut that advances Product → Plan → Design → Build.
   - `/ok` · `/run` · `/go`: Instantly triggers the next ready execution layer.
