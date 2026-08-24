@@ -5,8 +5,9 @@
 <h1 align="center">⚡ OMP Foundry <code>v0.8.0</code></h1>
 
 <p align="center">
-  <strong>Khóa bản kế hoạch. Sau đó mới đổ code.</strong><br/>
-  <em>Runtime quản trị (governed runtime) cho AI coding agent trên <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a> — nơi kiến trúc bị <b>khóa bằng mật mã</b>, thực thi bị <b>vi bản lập (micro-isolated)</b>, và giao tiếp <b>tự nhiên như nói chuyện</b>.</em>
+  <strong>Lock the plan. Then pour the code.</strong><br/>
+  <em>The Enterprise-Grade, Superpowers-Powered AI Software Foundry for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a>.</em><br/>
+  <sub>Where the architecture is <b>cryptographically locked</b>, execution is <b>micro-isolated</b>, and communication is <b>effortlessly natural</b>.</sub>
 </p>
 
 <p align="center">
@@ -17,136 +18,139 @@
 
 ---
 
-## 📑 Mục lục
-- [1. OMP Foundry dành cho ai?](#1-omp-foundry-dành-cho-ai)
-- [2. OMP Foundry làm gì?](#2-omp-foundry-làm-gì)
-- [3. Tác dụng & giá trị mang lại](#3-tác-dụng--giá-trị-mang-lại)
-- [4. Giải quyết vấn đề thế nào?](#4-giải-quyết-vấn-đề-thế-nào)
-- [5. Quy trình làm việc hàng ngày](#5-quy-trình-làm-việc-hàng-ngày)
-- [6. Cài đặt](#6-cài-đặt)
-- [7. Gỡ bỏ](#7-gỡ-bỏ)
-- [8. Bảng lệnh nhanh](#8-bảng-lệnh-nhanh)
-- [9. Kiến trúc & thành phần cốt lõi](#9-kiến-trúc--thành-phần-cốt-lõi)
-- [10. Kiểm thử & Xác minh](#10-kiểm-thử--xác-minh)
-- [11. Hạn chế đã biết](#11-hạn-chế-đã-biết)
-- [12. Ủng hộ dự án](#12-ủng-hộ-dự-án)
+## 📑 Table of Contents
+- [1. Who is OMP Foundry for?](#1-who-is-omp-foundry-for)
+- [2. What does OMP Foundry do?](#2-what-does-omp-foundry-do)
+- [3. Benefits & value](#3-benefits--value)
+- [4. How does it solve the problem?](#4-how-does-it-solve-the-problem)
+- [5. Everyday workflow](#5-everyday-workflow)
+- [6. Installation](#6-installation)
+- [7. Uninstallation](#7-uninstallation)
+- [8. Command reference](#8-command-reference)
+- [9. Architecture & core components](#9-architecture--core-components)
+- [10. Testing & verification](#10-testing--verification)
+- [11. Known limitations](#11-known-limitations)
+- [12. Support the project](#12-support-the-project)
 
 ---
 
-## 1. OMP Foundry dành cho ai?
+## 1. Who is OMP Foundry for?
 
-> **Đối tượng:** Những ai dùng **Oh My Pi (OMP)** để chạy AI coding agent và muốn **kiểm soát chặt chẽ** kết quả mà agent sinh ra.
+> **Audience:** Anyone using **Oh My Pi (OMP)** to run AI coding agents and wanting **tight control** over what those agents produce.
 
-Cụ thể:
+Specifically:
 
-- **Kỹ sư / Tech Lead** không muốn agent "lặng lẽ" viết lại kiến trúc sau 30 file refactor, vượt quá task, hoặc tự duyệt code của chính nó.
-- **Team nhỏ / solo dev** dùng model giá rẻ (flash/mini) nhưng cần chúng **không bị ảo giác** (hallucinate) dependency, không skip test, không sửa file ngoài phạm vi.
-- **Người quản lý sản phẩm (PM)** muốn duyệt kế hoạch và thiết kế bằng **ngôn ngữ tự nhiên** ("ok", "duyệt", "làm đi") thay vì học thuộc command.
-- **AI agent orchestrator** cần một **runtime cửa an toàn (fail-closed)** để ủy quyền cho sub-agent mà không mất quyền kiểm soát repository.
+- **Engineers / Tech Leads** who don't want an agent to silently rewrite the architecture after a 30-file refactor, exceed its task, or self-approve its own code.
+- **Small teams / solo devs** using cheap (flash/mini) models but needing them to **not hallucinate** dependencies, skip tests, or touch files outside scope.
+- **Product managers** who want to approve the plan and design in **natural language** ("ok", "duyệt", "làm đi") instead of memorizing commands.
+- **AI agent orchestrators** who need a **fail-closed runtime** to delegate to sub-agents without losing control of the repository.
 
-Nếu bạn chỉ cần một AI viết code thoải mái không cần ràng buộc → Foundry **không** dành cho bạn. Nếu bạn cần **kỷ luật có thể chứng minh (provable discipline)** → Foundry là lớp khiên cho OMP.
+If you want an AI that writes code with no constraints → Foundry is **not** for you. If you need **provable discipline** → Foundry is the shield for OMP.
 
 ---
 
-## 2. OMP Foundry làm gì?
+## 2. What does OMP Foundry do?
 
-Foundry biến "lời hứa của prompt" thành một **cổng xác thực xác định (deterministic runtime gate)**. Thay vì tin agent sẽ không động vào kiến trúc, Foundry **chặn** mọi hành vi sai ngay tại runtime.
+Foundry turns "the prompt's promise" into a **deterministic runtime gate**. Instead of trusting the agent not to touch the architecture, Foundry **blocks** every wrong action at runtime.
 
 ```mermaid
 flowchart LR
-    A[📝 PRODUCT Phạm vi] -->|Duyệt tự nhiên| B[🏛️ Master Plan 3 giai đoạn]
-    B -->|Synth tự động tách DAG| C[📦 AATP Work Orders]
-    C -->|Thực thi cách ly| D[🛡️ Cổng kiểm tra patch]
-    D -->|QA xác định| E[✅ Release có bằng chứng]
+    A[📝 PRODUCT Scope] -->|Natural Approval| B[🏛️ 3-Stage Master Plan]
+    B -->|Synth Auto-DAG| C[📦 AATP Work Orders]
+    C -->|Isolated Execution| D[🛡️ Patch Validation Gate]
+    D -->|Deterministic QA| E[✅ Provable Release]
 ```
 
-Bốn trụ cột:
+Four pillars:
 
-### 🏛️ 1. Master Plan 3 giai đoạn (Plan3)
-- **Giai đoạn 1 — Architect (`plan-drafter`)**: đọc yêu cầu → phác thảo kiến trúc (`docs/planning/MASTER_PLAN_DRAFT.md`).
-- **Giai đoạn 2 — Red-Team (`plan-redteam`)**: tấn công giả định kiến trúc, failure mode, lỗ hổng bảo mật, over-engineering (`docs/planning/PLAN_REVIEW.md`).
-- **Giai đoạn 3 — Adjudicator & Synth (`plan-synth`)**: hợp nhất → `docs/MASTER_PLAN.md` **và tự động tách** thành các work order AATP (`docs/AATP/AATP-*.md`) trong cùng một lượt.
+### 🏛️ 1. 3-Stage Master Plan Pipeline (Plan3)
+- **Stage 1 — Architect (`plan-drafter`)**: reads requirements → produces a scoped architecture draft (`docs/planning/MASTER_PLAN_DRAFT.md`).
+- **Stage 2 — Adversarial Red-Team (`plan-redteam`)**: attacks architectural assumptions, failure modes, security loopholes, and overengineering (`docs/planning/PLAN_REVIEW.md`).
+- **Stage 3 — Adjudicator & Synth (`plan-synth`)**: synthesizes conflicting recommendations into the official `docs/MASTER_PLAN.md` **and automatically decomposes the plan into initial AATP work orders (`docs/AATP/AATP-*.md`)** in the same pass.
 
-### 💬 2. Tương tác tự nhiên, zero-friction
-Không cần nhớ command cứng nhắc. Phản hồi tự nhiên: *"ok"*, *"làm đi"*, *"duyệt"*, *"tiếp tục"*, *"triển khai"*. Hoặc shortcut:
-- `/approve` — duyệt thông minh, tự tiến giai đoạn (Product → Plan → Build).
-- `/ok`, `/run`, `/go` — chạy lớp thực thi sẵn sàng tiếp theo.
-- `/plan` — alias của `/plan3`.
+### 💬 2. Zero-Friction Natural Interaction
+No more memorizing rigid commands. Respond naturally in conversation or use ergonomic shortcuts:
+- **Natural replies accepted**: *"ok"*, *"làm đi"*, *"duyệt"*, *"tiếp tục"*, *"triển khai"*.
+- **Ergonomic Shortcuts**:
+  - `/approve`: Smart approval that automatically advances the current phase (Product → Plan → Build).
+  - `/ok`, `/run`, `/go`: Instantly trigger the next ready execution layer.
+  - `/plan`: Shortcut alias for `/plan3`.
 
-### 🛡️ 3. Guardrails cho model giá rẻ (AATP Standards)
-Ràng buộc để model rẻ/nhanh hoạt động **không ảo giác**:
-- **≤ 200 dòng / task** — mỗi work order bị giới hạn nghiêm ngặt.
-- **≤ 5 file working set** — worker bị giới hạn vật lý `allowed_files <= 5`.
-- **≤ 80 dòng patch diff** — diff nguyên tử nhỏ, tránh regression dây chuyền.
-- **Ba yếu tố bắt buộc**: Context → Constraint → Criteria.
+### 🛡️ 3. Low-Cost & Low-Context Model Guardrails (AATP Standards)
+Strict constraints designed to make cheap/fast models perform with zero hallucinations:
+- **≤ 200 Lines / Task**: Every work order spec is strictly bounded (≤ 200 lines).
+- **≤ 5 Files Working Set**: Workers are physically restricted to `allowed_files <= 5`.
+- **≤ 80 Lines Patch Diff**: Small, atomic diffs prevent cascading regressions.
+- **Three Elements Mandate**: Every task enforces **Context** → **Constraint** → **Criteria**.
 
-### 🧠 4. Danh mục kỹ năng JIT 4 tầng (36+ skills)
-Đầy đủ kỹ năng full-stack enterprise mà không phình token:
-1. **Tầng 1 (lọc theo phase/role)**: worker chỉ nhận skill đúng giai đoạn.
-2. **Tầng 2 (phát hiện stack)**: tự phát hiện repo (FastAPI, Next.js, Cloudflare, Postgres…) và cắt stack không liên quan.
-3. **Tầng 3 (chỉ mục mỏng)**: chỉ tiêm metadata 1 dòng (~150 token).
-4. **Tầng 4 (tải sâu theo yêu cầu)**: sub-agent lấy nội dung chi tiết qua `foundry_skill_read({ ids: [...] })`.
+### 🧠 4. 4-Tier Just-In-Time (JIT) Skill Catalog (36+ Curated Skills)
+Full-stack enterprise engineering skills without token bloating:
+1. **Tier 1 (Phase & Role Filter)**: Workers only receive skills relevant to their specific phase (Implementation, Review, Design).
+2. **Tier 2 (Stack Detection)**: Auto-detects repository stack (FastAPI, Next.js, Cloudflare, Postgres, etc.) and prunes irrelevant stacks.
+3. **Tier 3 (Thin Catalog Index)**: Only 1-line metadata headers are injected (~150 tokens).
+4. **Tier 4 (On-Demand Deep Load)**: Sub-agents fetch full detailed guides on-demand via `foundry_skill_read({ ids: [...] })`.
 
 ---
 
-## 3. Tác dụng & giá trị mang lại
+## 3. Benefits & value
 
-| Nỗi đau | OMP Foundry giải quyết bằng |
+| Pain point | How OMP Foundry solves it |
 | :--- | :--- |
-| Agent lặng lẽ viết lại kiến trúc sau context dilution | `MASTER_PLAN` bị **khóa mật mã**; mọi ghi đè bị `PLAN_CONFLICT` từ chối trước khi apply. |
-| Worker sửa file ngoài task | `PATH_GATE` + `AATP_SCOPE` chỉ cho phép đúng `allowed_files`; vượt quá → rejected. |
-| Agent tự duyệt code của chính nó | Bắt buộc **reviewer độc lập** + khớp SHA-256 evidence. |
-| Ảo giác dependency / skip test | Work order bị giới hạn ≤5 file, ≤200 dòng, có `verification` và `acceptance` bắt buộc. |
-| Không chứng minh được ai làm gì | **Provenance ledger**: mỗi commit được gắn với ticket, scope hash, verification hash. |
-| Push/deploy nhầm lên production | `RELEASE_GATE`: agent **luôn bị từ chối** publish/push; chỉ người mới release. |
+| Agent silently rewrites architecture after context dilution | `MASTER_PLAN` is **cryptographically locked**; any overwrite is rejected with `PLAN_CONFLICT` before apply. |
+| Worker edits files outside its task | `PATH_GATE` + `AATP_SCOPE` allow only the exact `allowed_files`; anything else → rejected. |
+| Agent self-approves its own code | Mandatory **independent reviewer** + SHA-256 evidence match. |
+| Hallucinated dependencies / skipped tests | Work orders are bounded to ≤5 files, ≤200 lines, with mandatory `verification` and `acceptance`. |
+| No proof of who did what | **Provenance ledger**: every commit is tied to a ticket, scope hash, and verification hash. |
+| Accidental push/deploy to production | `RELEASE_GATE`: agent **release is always denied**; only a human releases. |
 
 ---
 
-## 4. Giải quyết vấn đề thế nào?
+## 4. How does it solve the problem?
 
-Triết lý cốt lõi: **Guardrails Over Memory** — rủi ro được đẩy ra khỏi prompt, vào một **runtime cửa an toàn (fail-closed)** được mã hóa cứng.
+Core philosophy: **Guardrails Over Memory** — risk is moved out of the prompt and into a hardened, deterministic, **fail-closed** runtime gate.
 
-### Các cổng thực thi — mọi cổng đều fail-closed
+### Hard Execution Boundaries — every gate is fail-closed
 
-| Agent có thể cố… | Foundry thực thi |
+| What a model might attempt... | What OMP Foundry enforces |
 | :--- | :--- |
-| Ghi đè `MASTER_PLAN`/`PRODUCT` đã khóa | ⛔ `BLOCKED: PLAN_CONFLICT. MASTER_PLAN is locked.` |
-| Sửa work order AATP đã niêm phong | ⛔ `AATP_SPEC_GATE: specs are sealed for this plan.` |
-| Patch file ngoài `allowed_files` | ⛔ **Bị từ chối trước khi chạm cây repo** — tree không bao giờ bị động. |
-| Directory traversal (`..`, symlink) | ⛔ `PATH_GATE: path escapes the repository boundary.` |
-| Giấu mutation trong shell (`sed -i`, `echo >`) | ⛔ `BASH_GATE: arbitrary mutating shell is denied.` |
-| Chạy `eval`, `node -e`, `python -c` | ⛔ `EVAL_GATE: execution denied for entire session.` |
-| Tự duyệt code của chính mình | ⛔ Reviewer độc lập bắt buộc + SHA-256 evidence match. |
-| `git push` / publish / deploy | ⛔ `RELEASE_GATE: agent release is always denied.` |
+| Rewrite locked `MASTER_PLAN` or `PRODUCT` | ⛔ `BLOCKED: PLAN_CONFLICT. MASTER_PLAN is locked.` |
+| Edit a sealed `docs/AATP/*` work order | ⛔ `AATP_SPEC_GATE: specs are sealed for this plan.` |
+| Patch files outside `allowed_files` | ⛔ **Rejected before apply** — repository tree is never touched. |
+| Directory traversal via `..` or symlinks | ⛔ `PATH_GATE: path escapes the repository boundary.` |
+| Hide mutations in shell (`sed -i`, `echo >`) | ⛔ `BASH_GATE: arbitrary mutating shell is denied.` |
+| Run `eval`, `node -e`, `python -c` | ⛔ `EVAL_GATE: execution denied for entire session.` |
+| Mutate code via LSP (`rename`, `codeAction`) | ⛔ `LSP_GATE: mutating LSP actions are runtime-gated.` |
+| Self-approve its own code changes | ⛔ Independent reviewer required + SHA-256 evidence match. |
+| `git push` / publish / deploy to production | ⛔ `RELEASE_GATE: agent release is always denied.` |
 
-### Cơ chế bảo mật thực tế (đã implement trong code)
-- **Capability token**: mỗi stage/compiler nhận token 32-byte random, **buộc theo session** — parent/orchestrator không dùng được token rò rỉ → `CAPABILITY_DENIED` / `CIRCUIT_BREAKER`.
-- **Chống path/symlink/TOCTOU**: `safeRepoPath` từ chối scheme `file://`, ký tự điều khiển, và duyệt từng thành phần bắt symlink; patch được re-hash sau validation.
-- **Git hardening**: tước `GIT_DIR/GIT_CONFIG*/GIT_*` redirectors, set `core.hooksPath` → nonexistent, `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0` → chặn hook/config injection.
-- **Provenance ledger**: so khớp chính xác lịch sử git `baseline..head` với `governed_commits` — không commit lạ, không commit bị viết lại.
-- **Credential sanitize**: môi trường verify dùng HOME/TMP disposable, không kế thừa secret operator.
+### Real security mechanisms (implemented in code)
+- **Capability token**: each stage/compiler receives a 32-byte random token, **bound to its session** — a parent or orchestrator cannot use a leaked token → `CAPABILITY_DENIED` / `CIRCUIT_BREAKER`.
+- **Path/symlink/TOCTOU defense**: `safeRepoPath` rejects `file://` schemes, control characters, and walks every path component to catch symlinks; patches are re-hashed after validation.
+- **Git hardening**: strips `GIT_DIR/GIT_CONFIG*/GIT_*` redirectors, sets `core.hooksPath` → nonexistent, `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0` → blocks hook/config injection.
+- **Provenance ledger**: exactly matches the git history `baseline..head` against `governed_commits` — no foreign commit, no rewritten commit slips through.
+- **Credential sanitization**: the verification environment uses a disposable HOME/TMP and never inherits operator secrets.
 
 ---
 
-## 5. Quy trình làm việc hàng ngày
+## 5. Everyday workflow
 
 ```text
-/foundry <ý tưởng sản phẩm hoặc tính năng>
+/foundry <Your product or feature idea>
 ```
 ```text
-1. 💡 Product Phase   → Định nghĩa yêu cầu trong docs/PRODUCT.md → Gõ "ok" hoặc /approve
-2. 🏛️ Master Plan 3  → Draft (1/3) → Redteam (2/3) → Synth & AATP (3/3)
-3. 🔒 Plan Lock       → Xem docs/MASTER_PLAN.md → "ok" hoặc /approve
-4. ⚙️ Isolated Build  → Worker thực thi trong diff ≤ 80 dòng
-5. 🔍 Independent QA  → Xác minh xác định & peer review độc lập
-6. 🚀 Human Release   → Chạy /release-check, rồi deploy từ shell của bạn
+1. 💡 Product Phase    → Define requirements in docs/PRODUCT.md → Type "ok" or /approve
+2. 🏛️ Master Plan 3   → Draft (1/3) → Redteam (2/3) → Synth & AATP (3/3)
+3. 🔒 Plan Lock        → Review docs/MASTER_PLAN.md → Type "ok" or /approve
+4. ⚙️ Isolated Build   → Workers implement tasks in <= 80 line diffs
+5. 🔍 Independent QA   → Deterministic verification & peer review
+6. 🚀 Human Release    → Run /release-check and deploy safely from your shell
 ```
 
 ---
 
-## 6. Cài đặt
+## 6. Installation
 
-Foundry là một **plugin/extension của Oh My Pi**. Link trực tiếp vào OMP:
+Foundry is an **Oh My Pi plugin/extension**. Link it directly into OMP:
 
 ```bash
 git clone https://github.com/oaichu/omp-foundry
@@ -154,18 +158,18 @@ cd omp-foundry
 omp plugin link .
 ```
 
-Xác nhận plugin đã active:
+Verify the plugin is active:
 ```bash
 omp plugin list
 # ● omp-foundry@0.8.0
 ```
 
-Khi một repo được khởi tạo, Foundry tự động:
-- Tạo `docs/PRODUCT.md`, `docs/MASTER_PLAN.md`, `docs/DESIGN.md` (từ template).
-- Ghi marker `docs/.foundry-governed` và `.omp/foundry-state.yml`.
-- Thêm 10 role model `foundry_*` vào `~/.omp/agent/config.yml` (không ghi đè lựa chọn có sẵn của bạn).
+When a repository is bootstrapped, Foundry automatically:
+- Creates `docs/PRODUCT.md`, `docs/MASTER_PLAN.md`, `docs/DESIGN.md` (from templates).
+- Writes the `docs/.foundry-governed` marker and `.omp/foundry-state.yml`.
+- Adds 10 `foundry_*` model roles to `~/.omp/agent/config.yml` (without overwriting your existing choices).
 
-> Cấu hình model: Foundry đăng ký 10 role toàn cục trong `~/.omp/agent/config.yml`. Bạn gán model nhẹ cho drafting, model nặng cho reasoning:
+> **Model configuration:** Foundry registers ten global model roles in `~/.omp/agent/config.yml`. Assign lightweight models for drafting and heavy models for reasoning:
 > ```yaml
 > modelRoles:
 >   foundry_plan: "gemini-2.5-flash"     # Plan drafting
@@ -177,75 +181,75 @@ Khi một repo được khởi tạo, Foundry tự động:
 
 ---
 
-## 7. Gỡ bỏ
+## 7. Uninstallation
 
-Foundry được thiết kế để **gỡ sạch không để lại side-effect** lên code của bạn.
+Foundry is designed to **uninstall cleanly with no side effects** on your code.
 
-**Bước 1 — Gỡ plugin khỏi OMP:**
+**Step 1 — Unlink the plugin from OMP:**
 ```bash
 omp plugin unlink omp-foundry
 ```
 
-**Bước 2 (tùy chọn) — Dọn dẹp cấu hình:**
-- Xóa các role `foundry_*` khỏi `~/.omp/agent/config.yml` (chúng được thêm tự động khi cài; xóa thủ công nếu không dùng nữa).
-- Xóa thư mục repo clone `omp-foundry/` nếu muốn.
+**Step 2 (optional) — Clean up configuration:**
+- Remove the `foundry_*` roles from `~/.omp/agent/config.yml` (they were added automatically on install; delete manually if no longer needed).
+- Remove the cloned `omp-foundry/` directory if desired.
 
-**Bước 3 (tùy chọn) — Dọn dẹp artifact trong project:**
-> Gỡ plugin **không** xóa file governance của project. Nếu muốn xóa hoàn toàn dấu vết Foundry trong repo của bạn:
+**Step 3 (optional) — Clean up project artifacts:**
+> Unlinking the plugin does **not** delete the project's governance files. If you want to remove all Foundry traces from your repo:
 ```bash
 rm -rf docs/PRODUCT.md docs/MASTER_PLAN.md docs/DESIGN.md \
        docs/planning docs/AATP docs/reports docs/.foundry-governed \
        .omp/foundry-state.yml .omp/foundry-state.yml.* \
        .omp/config.yml
 ```
-> ⚠️ Chỉ chạy bước 3 khi bạn chắc chắn không cần lịch sử kế hoạch AATP nữa. Các file `docs/PRODUCT.md`, `docs/MASTER_PLAN.md` là **tài sản sản phẩm** — giữ lại nếu muốn.
+> ⚠️ Only run Step 3 when you are sure you no longer need the AATP planning history. `docs/PRODUCT.md` and `docs/MASTER_PLAN.md` are **product assets** — keep them if you want.
 
 ---
 
-## 8. Bảng lệnh nhanh
+## 8. Command reference
 
-| Lệnh | Nhóm | Mô tả |
+| Command | Category | Description |
 | :--- | :--- | :--- |
-| `/foundry` | **Core** | Tự bootstrap repo nếu cần, rồi tiếp bước hợp lệ tiếp theo |
-| `/approve` | **Natural** | Duyệt thông minh cho giai đoạn hiện tại (Product hoặc Plan) |
-| `/ok` · `/run` · `/go` | **Natural** | Kích hoạt lớp thực thi sẵn sàng tiếp theo |
-| `/plan` · `/plan3` | **Planning** | Bắt đầu/tiếp tục chu trình Master Plan 3 giai đoạn |
-| `/plan-revise` | **Planning** | Mở lại plan đã khóa (vô hiệu hóa DAG downstream cũ) |
-| `/debug` | **Superpowers**| Chạy quy trình debug 5 bước có hệ thống |
-| `/build` | **Execution**| Chạy worker cách ly từ DAG AATP đã niêm phong |
-| `/review [ID]` | **Quality** | Chạy peer review độc lập cho work order hoàn thành |
-| `/verify` | **Quality** | Chạy bộ xác minh xác định (QA) |
-| `/release-check` | **Release** | Rút ra độ sẵn sàng release từ bằng chứng mật mã |
-| `/foundry-doctor` | **Diagnostic**| Kiểm tra hợp đồng cách ly worker & sẵn sàng role model |
+| `/foundry` | **Core** | Auto-bootstrap this repo if needed, then resume the next step |
+| `/approve` | **Natural** | Smart approval for current phase (Product or Plan) |
+| `/ok` · `/run` · `/go` | **Natural** | Trigger the next ready execution layer |
+| `/plan` · `/plan3` | **Planning** | Start/resume 3-Stage Master Plan cycle |
+| `/plan-revise` | **Planning** | Reopen locked plan (invalidates stale downstream DAG) |
+| `/debug` | **Superpowers**| Run systematic 5-Step root cause isolation workflow |
+| `/build` | **Execution**| Run ready isolated workers from the sealed AATP DAG |
+| `/review [ID]` | **Quality** | Run independent peer review for a completed work order |
+| `/verify` | **Quality** | Run deterministic test and verification suite |
+| `/release-check` | **Release** | Derive release readiness from verifiable cryptographic evidence |
+| `/foundry-doctor` | **Diagnostic**| Check worker isolation contract and model-role readiness |
 
 ---
 
-## 9. Kiến trúc & thành phần cốt lõi
+## 9. Architecture & core components
 
-| Module (`src/`) | Trách nhiệm |
+| Module (`src/`) | Responsibility |
 | :--- | :--- |
-| `index.ts` | Đăng ký extension, dispatch lifecycle, capability broker, các cổng tool |
-| `gates.ts` / `permissions.ts` | Cổng duyệt product/plan/design & chặn tool/file/bash/lsp |
-| `patch-gate.ts` | Validate, apply, commit patch nguyên tử có TOCTOU + provenance |
-| `aatp.ts` | Work-order DAG, validate scope/risk/coverage, ticket state machine |
-| `plan3.ts` | Vòng đời 3 giai đoạn Plan3 + artifact hashing |
-| `state-machine.ts` / `schema.ts` | State YAML có migration schema v6, fail-closed |
+| `index.ts` | Registers the extension, dispatches lifecycle, capability broker, tool gates |
+| `gates.ts` / `permissions.ts` | Product/plan/design approval gates & tool/file/bash/lsp blocking |
+| `patch-gate.ts` | Validate, apply, commit atomic patches with TOCTOU + provenance |
+| `aatp.ts` | Work-order DAG, scope/risk/coverage validation, ticket state machine |
+| `plan3.ts` | Plan3 3-stage lifecycle + artifact hashing |
+| `state-machine.ts` / `schema.ts` | YAML state with schema v6 migrations, fail-closed |
 | `release.ts` | Provenance ledger, release derivation, governed-commit exact-match |
-| `git-runtime.ts` | Git sandbox: tước env redirectors, hook-path injection block |
-| `verify-runner.ts` | Thực thi verify trong môi trường disposable, executable trusted |
-| `skills/*` | Detector stack, registry, phase/role filter, JIT resolver |
+| `git-runtime.ts` | Git sandbox: strips env redirectors, blocks hook-path injection |
+| `verify-runner.ts` | Runs verification in a disposable environment with trusted executables |
+| `skills/*` | Stack detector, registry, phase/role filter, JIT resolver |
 
 ---
 
-## 10. Kiểm thử & Xác minh
+## 10. Testing & verification
 
-Foundry được bao phủ bởi bộ test chuyên sâu cho mọi boundary bảo mật, bất biến AST, patch gate và lifecycle hook:
+Foundry is tested with an exhaustive suite covering all security boundaries, AST invariants, patch gates, and runtime lifecycle hooks:
 
 ```bash
-# Chạy toàn bộ test suite (132 tests, 18 suites)
+# Run the complete test suite (132 tests, 18 suites)
 npx bun test
 
-# Typecheck strict (TypeScript strict + noUnusedLocals/Parameters)
+# Run TypeScript strict typecheck
 npx bun run typecheck
 ```
 
@@ -256,29 +260,29 @@ npx bun run typecheck
 Ran 132 tests across 18 files.
 ```
 
-> Build/typecheck đã được xác minh xanh (`tsc --noEmit` qua) trong quá trình audit. Test execution chính thức chạy trên CI của dự án.
+> Build/typecheck was verified green (`tsc --noEmit` passes) during audit. The official test execution runs on the project's CI.
 
 ---
 
-## 11. Hạn chế đã biết
+## 11. Known limitations
 
-- **Verification chạy code do repo kiểm soát**: `/verify` và `foundry_exec` thực thi `scripts.test`/`scripts.build` của repo — tức chạy code tùy ý của repo. Môi trường được cách ly credential nhưng **không có filesystem sandbox mặc định**. Đây là thiết kế trusted-host có chủ đích.
-  - ✅ Khi audit repo không tin cậy, bật: `FOUNDRY_VERIFY_REQUIRE_SANDBOX=1` + `FOUNDRY_VERIFY_SANDBOX_EXECUTABLE=<wrapper tin cậy>`.
-- **Verify Android/Windows qua `gradlew`**: executor từ chối mọi executable nằm trong repo (để tránh chạy binary do repo cung cấp), nên các step `./gradlew` được detector quảng cáo hiện **không thể thực thi** (fail-closed, an toàn, nhưng là gap logic sẽ được sửa sau).
-- **Update-check**: so sánh version cài đặt với tag release trên GitHub; cần quyền mạng khi chạy `/foundry-version`.
+- **Verification runs repo-controlled scripts**: `/verify` and `foundry_exec` execute the repo's `scripts.test` / `scripts.build` — i.e. arbitrary repo code. The environment is credential-isolated but has **no filesystem sandbox by default**. This is a deliberate trusted-host design.
+  - ✅ When auditing an untrusted repo, enable: `FOUNDRY_VERIFY_REQUIRE_SANDBOX=1` + `FOUNDRY_VERIFY_SANDBOX_EXECUTABLE=<trusted wrapper>`.
+- **Android/Windows verification via `gradlew`**: the executor rejects any executable located inside the repository (to avoid running repo-supplied binaries), so the `./gradlew` steps advertised by the detector currently **cannot execute** (fail-closed and safe, but a logic gap to be addressed later).
+- **Update check**: compares the installed version against the GitHub release tag and requires network access when running `/foundry-version`.
 
 ---
 
-## 12. Ủng hộ dự án
+## 12. Support the project
 
-Nếu OMP Foundry cứu bạn khỏi những lần viết lại kiến trúc lúc 2 giờ sáng và cấp quy trình AI có kỷ luật, hãy ủng hộ duy trì:
+If OMP Foundry saves you from 2 a.m. architecture rewrites and powers your disciplined AI workflows, please consider supporting ongoing maintenance:
 
 <div align="center">
   <a href="https://ko-fi.com/oaichu" target="_blank" rel="noopener noreferrer">
     <img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Buy Me A Coffee at ko-fi.com" height="46" style="border: 0px; height: 46px; border-radius: 8px; box-shadow: 0 4px 14px rgba(255, 94, 91, 0.35);" />
   </a>
   <br/><br/>
-  <em>Mỗi ly cà phê tiếp sức phát triển liên tục, thêm worker, và công cụ AI có quản trị. Cảm ơn bạn! ☕✨</em>
+  <em>Every cup of coffee fuels continuous development, new workers, and governed AI tooling. Thank you! ☕✨</em>
 </div>
 
 <p align="center">
