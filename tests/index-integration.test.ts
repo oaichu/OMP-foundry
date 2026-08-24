@@ -134,8 +134,8 @@ describe("extension integration smoke", () => {
 		writeFileSync(join(cwd, "docs", "AATP", "AATP-old.md"), "old\n");
 		writeFileSync(join(cwd, "docs", "DESIGN.md"), "# design\n");
 		const state = defaultState();
-		state.product.status = "approved";
-		state.master_plan.status = "locked";
+		state.product.status = "approved"; state.product.sha256 = "123";
+		state.master_plan.status = "locked"; state.master_plan.sha256 = "123";
 		state.phase = "design";
 		state.design.required = true;
 		saveState(cwd, state);
@@ -156,8 +156,8 @@ describe("extension integration smoke", () => {
 		writeFileSync(join(cwd, "docs", "PRODUCT.md"), "# Product\nlocked evidence\n");
 		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "# Master plan\nlocked evidence\n");
 		const state = defaultState();
-		state.product.status = "approved";
-		state.master_plan.status = "locked";
+		state.product.status = "approved"; state.product.sha256 = "123";
+		state.master_plan.status = "locked"; state.master_plan.sha256 = "123";
 		state.design.required = false;
 		state.design.status = "not_required";
 		state.phase = "aatp";
@@ -189,7 +189,7 @@ describe("extension integration smoke", () => {
 		mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
 		writeFileSync(join(cwd, "docs", "PRODUCT.md"), "# Product\n");
 		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "# Master plan\n");
-		const state = defaultState(); state.product.status = "approved"; state.master_plan.status = "locked"; state.design.status = "not_required"; state.phase = "aatp";
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.master_plan.status = "locked"; state.master_plan.sha256 = "123"; state.design.status = "not_required"; state.phase = "aatp";
 		expect(lockArtifactHash(cwd, state, "product")).toBe(true); expect(lockArtifactHash(cwd, state, "master_plan")).toBe(true); saveState(cwd, state);
 		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
 		await taskHook({ toolName: "task", toolCallId: "provider-compiler", input: { agent: "aatp-compiler", task: "compile AATP" } }, ctx(cwd));
@@ -213,7 +213,7 @@ describe("extension integration smoke", () => {
 		mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
 		writeFileSync(join(cwd, "docs", "PRODUCT.md"), "product\n");
 		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "plan\n");
-		const state = defaultState(); state.product.status = "approved"; state.master_plan.status = "locked"; state.design.status = "not_required"; state.phase = "aatp";
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.master_plan.status = "locked"; state.master_plan.sha256 = "123"; state.design.status = "not_required"; state.phase = "aatp";
 		expect(lockArtifactHash(cwd, state, "product")).toBe(true); expect(lockArtifactHash(cwd, state, "master_plan")).toBe(true); saveState(cwd, state);
 		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0];
 		await taskHook({ toolName: "task", toolCallId: "cap-compiler", input: { agent: "aatp-compiler", task: "compile AATP" } }, ctx(cwd));
@@ -235,7 +235,7 @@ describe("extension integration smoke", () => {
 	test("Plan3 capability is delivered from session_init and parent guesses cannot write", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-capability-"));
 		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
-		const state = defaultState(); state.product.status = "approved"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
 		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0];
 		await taskHook({ toolName: "task", toolCallId: "plan-capability", input: { agent: "plan-drafter", task: "draft the locked plan" } }, ctx(cwd));
 		const prompt = await agentHook({}, ctx(cwd, "plan-session", "plan-drafter"));
@@ -252,7 +252,7 @@ describe("extension integration smoke", () => {
 	test("Plan3 stage watchdog aborts a stalled stage without advancing state", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-watchdog-"));
 		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
-		const state = defaultState(); state.product.status = "approved"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
 		const { handlers } = harness();
 		const taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
 		await taskHook({ toolName: "task", toolCallId: "stalled-plan", input: { agent: "plan-drafter", task: "draft the plan" } }, ctx(cwd));
@@ -270,7 +270,7 @@ describe("extension integration smoke", () => {
 	test("Plan3 advances after a terminal capability write despite a provider post-write failure", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-provider-recovery-"));
 		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
-		const state = defaultState(); state.product.status = "approved"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
 		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
 		await taskHook({ toolName: "task", toolCallId: "provider-plan", input: { agent: "plan-drafter", task: "draft the plan" } }, ctx(cwd));
 		const prompt = await agentHook({}, ctx(cwd, "plan-session", "plan-drafter"));
@@ -288,7 +288,7 @@ describe("extension integration smoke", () => {
 	test("capability writers are hidden and stop repeated guessed-token loops", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-capability-breaker-"));
 		mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
-		const state = defaultState(); state.product.status = "approved"; state.master_plan.status = "locked"; state.design.status = "not_required"; state.phase = "aatp"; saveState(cwd, state);
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.master_plan.status = "locked"; state.master_plan.sha256 = "123"; state.design.status = "not_required"; state.phase = "aatp"; saveState(cwd, state);
 		const { tools } = harness();
 		expect(tools.get("foundry_plan_write")!.hidden).toBe(true);
 		expect(tools.get("foundry_aatp_write")!.hidden).toBe(true);
@@ -305,7 +305,7 @@ describe("extension integration smoke", () => {
 
 	test("invalid compiler output stays unsealed and is archived for a clean retry", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-aatp-invalid-")); mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
-		const state = defaultState(); state.product.status = "approved"; state.master_plan.status = "locked"; state.design.status = "not_required"; state.phase = "aatp"; saveState(cwd, state);
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.master_plan.status = "locked"; state.master_plan.sha256 = "123"; state.design.status = "not_required"; state.phase = "aatp"; saveState(cwd, state);
 		const { handlers } = harness(), taskHook = handlers.get("tool_call")![0], resultHook = handlers.get("tool_result")![0];
 		await taskHook({ toolName: "task", toolCallId: "invalid-compiler", input: { agent: "aatp-compiler", task: "Compile the complete project AATP DAG" } }, ctx(cwd));
 		writeFileSync(join(cwd, "docs", "AATP", "AATP-002.md"), "---\nid: AATP-002\nobjective: incomplete\ndependencies: []\nallowed_files:\n  - src/example.ts\nforbidden_files:\n  - docs/MASTER_PLAN.md\nrisk: normal\n---\n");
@@ -328,8 +328,8 @@ describe("extension integration smoke", () => {
 	test("plan revise invalidates the prior design lock and AATP epoch", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-revise-"));
 		const state = defaultState();
-		state.product.status = "approved";
-		state.master_plan.status = "locked";
+		state.product.status = "approved"; state.product.sha256 = "123";
+		state.master_plan.status = "locked"; state.master_plan.sha256 = "123";
 		state.master_plan.sha256 = "old-plan";
 		state.design = { required: false, status: "locked", version: "1.0", sha256: "old-design" };
 		state.aatp.epoch = "old-epoch";
@@ -384,7 +384,7 @@ describe("extension integration smoke", () => {
 		writeFileSync(join(cwd, "docs", "planning", "PLAN_REVIEW.md"), "# Review\n");
 
 		const state = defaultState();
-		state.product.status = "approved";
+		state.product.status = "approved"; state.product.sha256 = "123";
 		state.mode = "plan3";
 		state.phase = "planning";
 		state.planning.stage = "synth";

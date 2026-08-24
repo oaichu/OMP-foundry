@@ -67,7 +67,7 @@ import { roleOf } from "./skills/phase-filter";
 import { loadRegistry } from "./skills/registry";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
-import { loadState, loadStateResult, recountTickets, saveState, stateFileExists } from "./state-machine";
+import { loadState, loadStateResult, recountTickets, saveState, stateFileExists, productReady } from "./state-machine";
 import { type CompanyState, type ConflictKind, type Plan3Stage, defaultState } from "./types";
 import { checkForUpdate, versionReport } from "./update-check";
 import { applyQa, executeVerifyStep, runDeclaredVerification, runVerify } from "./verify-runner";
@@ -840,14 +840,14 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 
 	pi.registerTool({ name: "foundry_approve", label: "Foundry Approve", description: "Smart approve: call this tool if the user naturally confirms/approves the product or plan in conversation (e.g., 'ok', 'yes', 'làm đi').", loadMode: "essential", approval: "write", parameters: z.object({ phase: z.string().optional() }), async execute(_id, params, _session, _user, ctx) {
 		const which = (params.phase || "").trim().toLowerCase(), state = loadState(ctx.cwd);
-		if (which === "product" || (!which && state.product.status !== "approved")) {
+		if (which === "product" || (!which && !productReady(state))) {
 			if (!lockArtifactHash(ctx.cwd, state, "product")) return { content: [{ type: "text", text: "PRODUCT_GATE: docs/PRODUCT.md must exist and be non-empty before approval." }], isError: true };
 			state.product.status = "approved"; state.phase = "planning"; enterPlan3(state); invalidateQa(state); persist(ctx.cwd, state);
 			orchestrate(pi, "PRODUCT approved.", "Product approved. Running Plan3...");
 			enterOrResumePlan3(pi, ctx.cwd, state);
 			return { content: [{ type: "text", text: "Product phase approved successfully." }] };
 		}
-		if (which === "plan" || (!which && state.product.status === "approved")) {
+		if (which === "plan" || (!which && productReady(state))) {
 			if (state.mode === "plan3" && state.planning.stage !== "awaiting_lock") return { content: [{ type: "text", text: "PLAN3_GATE: plan approval requires a completed Draft → Redteam → Synth cycle." }], isError: true };
 			if (!plan3ArtifactsMatch(ctx.cwd, state)) return { content: [{ type: "text", text: "PLAN3_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan3 or restore the accepted artifacts." }], isError: true };
 			if (!lockArtifactHash(ctx.cwd, state, "master_plan")) return { content: [{ type: "text", text: "PLAN_GATE: docs/MASTER_PLAN.md must exist and be non-empty before lock." }], isError: true };
@@ -914,14 +914,14 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	} });
 	const approveHandler = async (args: string, ctx: { cwd: string; ui: { notify: (message: string, level?: "error" | "info" | "warning") => void } }) => {
 		const which = args.trim().toLowerCase(), state = loadState(ctx.cwd);
-		if (which === "product" || which === "approve-product" || (!which && state.product.status !== "approved")) {
+		if (which === "product" || which === "approve-product" || (!which && !productReady(state))) {
 			if (!lockArtifactHash(ctx.cwd, state, "product")) { ctx.ui.notify("PRODUCT_GATE: docs/PRODUCT.md must exist and be non-empty before approval.", "error"); return; }
 			state.product.status = "approved"; state.phase = "planning"; enterPlan3(state); invalidateQa(state); persist(ctx.cwd, state);
 			orchestrate(pi, "PRODUCT approved.", "Product approved. Running Plan3...");
 			enterOrResumePlan3(pi, ctx.cwd, state);
 			return;
 		}
-		if (which === "plan" || which === "approve-plan" || (!which && state.product.status === "approved")) {
+		if (which === "plan" || which === "approve-plan" || (!which && productReady(state))) {
 			if (state.mode === "plan3" && state.planning.stage !== "awaiting_lock") { ctx.ui.notify("PLAN3_GATE: plan approval requires a completed Draft → Redteam → Synth cycle.", "warning"); return; }
 			if (!plan3ArtifactsMatch(ctx.cwd, state)) { ctx.ui.notify("PLAN3_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan3 or restore the accepted artifacts.", "error"); return; }
 			if (!lockArtifactHash(ctx.cwd, state, "master_plan")) { ctx.ui.notify("PLAN_GATE: docs/MASTER_PLAN.md must exist and be non-empty before lock.", "error"); return; }

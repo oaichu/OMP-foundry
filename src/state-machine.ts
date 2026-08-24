@@ -266,9 +266,9 @@ export function saveState(cwd: string, state: CompanyState): void {
 		throw error;
 	}
 }
-export function planLocked(state: CompanyState): boolean { return state.master_plan.status === "locked"; }
-export function productReady(state: CompanyState): boolean { return state.product.status === "approved" || state.product.status === "locked"; }
-export function designAllowsUi(state: CompanyState): boolean { return !state.design.required || state.design.status === "locked" || state.design.status === "not_required"; }
+export function planLocked(state: CompanyState): boolean { return state.master_plan.status === "locked" && !!state.master_plan.sha256; }
+export function productReady(state: CompanyState): boolean { return (state.product.status === "approved" || state.product.status === "locked") && !!state.product.sha256; }
+export function designAllowsUi(state: CompanyState): boolean { return !state.design.required || state.design.status === "not_required" || (state.design.status === "locked" && !!state.design.sha256); }
 export function recountTickets(state: CompanyState): void {
 	const list = Object.values(state.tickets), manifest = state.aatp.manifest_sha256;
 	state.aatp = { total: list.length, ready: list.filter((t) => t.status === "ready").length, active: list.filter((t) => t.status === "active").length, completed: list.filter((t) => t.status === "completed").length, blocked: list.filter((t) => t.status === "blocked").length, manifest_sha256: manifest, epoch: state.aatp.epoch, baseline_sha: state.aatp.baseline_sha, governed_commits: state.aatp.governed_commits };

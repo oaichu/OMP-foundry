@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0 — release version sync
+
+- Synchronize the internal `FOUNDRY_VERSION` constant with the package/release version (`0.8.0`); previously the governance state was stamped `0.7.4` and the update checker reported a false "update available".
+- Add this changelog entry so the released version is documented.
+
 ## 0.7.4 — reliable bounded Plan3 stages
 
 - keep Draft, Redteam, and Synth at maximum reasoning while removing nested planning helpers and broad tool expansion;
