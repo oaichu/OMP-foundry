@@ -8,6 +8,7 @@ export const CONTEXT_POLICY = [
 	"3. Criteria: explicit verification commands (typecheck, lint, test).",
 	"4. Low-Cost Model Execution: zero hallucination, strict boundary adherence, no unauthorized refactoring.",
 	"5. Natural UX: user may approve with natural responses ('ok', 'yes', 'approve', 'proceed').",
+	"6. Language Matching: ALWAYS mirror the user's spoken language. If the user speaks Vietnamese, you MUST reply, explain, and report in Vietnamese.",
 ].join(" ");
 
 export function phasePrompt(state: CompanyState): string {
