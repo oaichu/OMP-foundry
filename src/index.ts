@@ -252,7 +252,7 @@ function requestAatpCompile(pi: ExtensionAPI, cwd: string, state: CompanyState, 
 	const modelGate = plan3ModelsReady(cwd);
 	if (modelGate) { orchestrate(pi, "AATP compiler model role is not ready.", `${modelGate}\nConfigure foundry_synth in ~/.omp/agent/config.yml or this project's .omp/config.yml.`); return; }
 	orchestrate(pi, "Compile the project-wide AATP DAG.", [
-		"Spawn exactly one blocking aatp-compiler using @foundry_synth.",
+		"Spawn exactly one blocking aatp-compiler using @foundry_synth. It MUST write all AATP-*.md work orders FIRST. It MUST write docs/AATP/INDEX.md ABSOLUTELY LAST as the terminal artifact.",
 		"Run the compiler in the parent governance context (do not set isolated=true); generated implementation workers are isolated later.",
 		"It may write only docs/AATP/AATP-*.md and docs/AATP/INDEX.md; use exact repository-relative paths, never globs or ..; do not implement.",
 		"Foundry will validate dependencies, scope, risk, security_sensitive, acceptance, and executable verification IDs, then seal the manifest before workers run.",

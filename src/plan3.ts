@@ -58,7 +58,7 @@ export function plan3Instruction(state: CompanyState): string {
 	const agent = PLAN3_AGENTS[stage];
 	const artifact = PLAN3_ARTIFACTS[stage];
 	if (stage === "synth") {
-		return `Spawn exactly one blocking ${agent}. It synthesizes ${artifact} and writes initial AATP work orders (docs/AATP/AATP-*.md, <=200 lines, <=5 files per task). Read skill://master-plan-method. Do not spawn another Plan3 stage until this task settles.`;
+		return `Spawn exactly one blocking ${agent}. It synthesizes ${artifact} and writes initial AATP work orders (docs/AATP/AATP-*.md, <=200 lines, <=5 files per task). It MUST write all AATP-*.md work orders FIRST, and write docs/MASTER_PLAN.md ABSOLUTELY LAST as the terminal artifact. Read skill://master-plan-method. Do not spawn another Plan3 stage until this task settles.`;
 	}
 	return `Spawn exactly one blocking ${agent}. It owns only ${artifact}. Read skill://master-plan-method. Use grep/glob first, then bounded reads (path:start-end, max 200 lines); do one evidence pass and write the artifact immediately. Do not spawn another Plan3 stage until this task settles.`;
 }
