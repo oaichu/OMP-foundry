@@ -94,7 +94,14 @@ export function loadRegistry(root: string): SkillManifest[] {
 			text = readFileSync(file, "utf8");
 		} catch { continue; }
 		const parsed = parseManifest(file, text);
-		if (parsed) out.push(parsed);
+		if (parsed) {
+			if (parsed.layer !== "L1") {
+				const when = parsed.activate_when;
+				const empty = !when.dependencies?.length && !when.files?.length && !when.stacks?.length && !when.languages?.length;
+				if (empty) console.warn(`[Foundry Skill Registry] Warning: ${parsed.id} (Layer ${parsed.layer}) has no activate_when conditions and will never auto-resolve.`);
+			}
+			out.push(parsed);
+		}
 	}
 	return out;
 }

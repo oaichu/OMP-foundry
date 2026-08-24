@@ -20,7 +20,7 @@ export function parseTagFromUrl(url: string): string | undefined {
 function parseSemver(version: string): { core: number[]; pre: string[] | null } {
 	const clean = version.replace(/^v/, "").split("+")[0];
 	const [corePart, prePart] = clean.split("-");
-	const core = corePart.split(".").map((p) => Number.parseInt(p, 10) || 0);
+	const core = corePart.split(".").map((p) => parseInt(p, 10) || 0);
 	while (core.length < 3) core.push(0);
 	return { core, pre: prePart ? prePart.split(".") : null };
 }
@@ -51,11 +51,9 @@ export async function resolveOmpVersion(): Promise<string> {
 	catch { return "unknown"; }
 }
 export function defaultCachePath(): string {
-	if (process.env.FOUNDRY_UPDATE_CACHE) return process.env.FOUNDRY_UPDATE_CACHE;
 	return join(homedir(), ".omp", "cache", "foundry-update.json");
 }
 async function xdgCachePath(): Promise<string> {
-	if (process.env.FOUNDRY_UPDATE_CACHE) return process.env.FOUNDRY_UPDATE_CACHE;
 	try { const { getFastembedCacheDir } = (await import("@oh-my-pi/pi-utils/dirs")) as { getFastembedCacheDir: () => string }; return join(dirname(getFastembedCacheDir()), "foundry-update.json"); }
 	catch { return defaultCachePath(); }
 }

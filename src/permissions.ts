@@ -44,6 +44,7 @@ export interface ToolInput {
 	path?: unknown; file?: unknown; dst?: unknown; paths?: unknown; input?: unknown; command?: unknown; code?: unknown;
 	action?: unknown; apply?: unknown; agent?: unknown; task?: unknown; tasks?: unknown; isolated?: unknown;
 	pattern?: unknown; cwd?: unknown; directory?: unknown; root?: unknown; base?: unknown; uri?: unknown; textDocument?: unknown;
+	url?: unknown; query?: unknown;
 }
 export interface DenyContext {
 	activeTickets?: AatpTicket[]; stateBroken?: string;
@@ -140,6 +141,21 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 	// Extension tools and the task dispatcher are known control-plane tools.
 	// Unknown tools that advertise mutation semantics fail closed; ordinary
 	// OMP read/fetch tools remain compatible with the extension.
+	if (toolName === "fetch" || toolName === "web_fetch" || toolName === "web_search") {
+		const target = String(input.url ?? input.uri ?? input.query ?? input.path ?? "");
+		try {
+			const urls = target.match(/https?:\/\/[^\s"']+/g) || [target];
+			for (const u of urls) {
+				if (!/^https?:\/\//i.test(u)) continue;
+				const host = new URL(u).hostname.toLowerCase();
+				if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0.0.0.0" ||
+					/^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host) ||
+					/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) || host.endsWith(".local")) {
+					return { block: true, reason: "NETWORK_GATE: fetch target must not be a loopback or private network address." };
+				}
+			}
+		} catch { /* malformed URLs are handled by the tool */ }
+	}
 	if (toolName === "foundry_init") return { block: true, reason: "FOUNDRY_INIT_GATE: initialization is human-command-only; use /foundry-init or /foundry." };
 	if (!FILE_MUTATING.has(toolName) && !SAFE_CONTROL_TOOLS.has(toolName) && !FOUNDRY_CONTROL_TOOLS.has(toolName) && !READ_PATH_TOOLS.has(toolName) && toolName !== "bash" && toolName !== "lsp") {
 		return { block: true, reason: "TOOL_GATE: unknown mutation-capable tool is denied in Foundry." };

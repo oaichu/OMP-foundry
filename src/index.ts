@@ -1,4 +1,4 @@
-import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync, openSync, fstatSync, writeSync, closeSync, constants as fsConstants } from "node:fs";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -282,10 +282,16 @@ function atomicGovernedWrite(target: string, content: string): string | undefine
 		catch (error) {
 			const code = (error as NodeJS.ErrnoException).code;
 			if (code !== "EEXIST" && code !== "EPERM" && code !== "ENOTEMPTY") throw error;
-			const current = lstatSync(target);
-			if (current.isSymbolicLink() || !current.isFile()) throw new Error("target changed to a non-regular file");
-			writeFileSync(target, content, { encoding: "utf8", flag: "w" });
-			unlinkSync(temp);
+			let fd: number | undefined;
+			try {
+				fd = openSync(target, fsConstants.O_WRONLY | fsConstants.O_TRUNC | (fsConstants.O_NOFOLLOW || 0));
+				const current = fstatSync(fd);
+				if (!current.isFile()) throw new Error("target changed to a non-regular file");
+				writeSync(fd, content, null, "utf8");
+				unlinkSync(temp);
+			} finally {
+				if (fd !== undefined) closeSync(fd);
+			}
 		}
 		return undefined;
 	} catch (error) {
@@ -340,12 +346,16 @@ function resultForPlan(results: ReturnType<typeof extractTaskResults>, pending: 
  * smuggle production source changes around the AATP gate. */
 function visibleWorktreeFingerprint(cwd: string): string {
 	const paths = gitChangedPaths(cwd).sort();
+	let totalBytes = 0;
+	const MAX_FINGERPRINT_TOTAL = 32 * 1024 * 1024; // 32 MiB
 	return hashEvidence(...paths.flatMap((path) => {
 		const file = safeRepoPath(cwd, path);
 		if (!file) return [path, "<path-gate>"];
 		try {
 			const stat = lstatSync(file);
 			if (stat.isSymbolicLink() || !stat.isFile() || stat.size > 4 * 1024 * 1024) return [path, `<unhashed:${stat.size}>`];
+			if (totalBytes + stat.size > MAX_FINGERPRINT_TOTAL) return [path, "<size-limit-reached>"];
+			totalBytes += stat.size;
 			return [path, readFileSync(file, "base64")];
 		}
 		catch { return [path, "<missing>"]; }
