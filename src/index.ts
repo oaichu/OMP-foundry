@@ -67,7 +67,7 @@ import { roleOf } from "./skills/phase-filter";
 import { loadRegistry } from "./skills/registry";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
-import { loadState, loadStateResult, recountTickets, saveState, stateFileExists, productReady } from "./state-machine";
+import { loadState, loadStateResult, recountTickets, saveState, stateFileExists, productReady, planLocked, designAllowsUi } from "./state-machine";
 import { type CompanyState, type ConflictKind, type Plan3Stage, defaultState } from "./types";
 import { checkForUpdate, versionReport } from "./update-check";
 import { applyQa, executeVerifyStep, runDeclaredVerification, runVerify } from "./verify-runner";
@@ -189,7 +189,6 @@ function abortAfterTerminalCapabilityWrite(ctx: unknown): void {
 
 function persist(cwd: string, state: CompanyState): CompanyState { saveState(cwd, state); return state; }
 function orchestrate(pi: ExtensionAPI, title: string, body: string): void { pi.sendUserMessage([title, "", body, "", CONTEXT_POLICY].join("\n")); }
-function productOk(state: CompanyState): boolean { return state.product.status === "approved" || state.product.status === "locked"; }
 function statusOf(state: CompanyState): string { return state.mode === "plan3" ? `${plan3Status(state)} plan=${state.master_plan.status}` : `${state.phase} plan=${state.master_plan.status} design=${state.design.status}`; }
 function commitGovernanceBaseline(cwd: string): string | undefined { const result = prepareImplementationBaseline(cwd); return result.ok ? undefined : result.reason; }
 function safeState(cwd: string): SafeState {
@@ -314,7 +313,7 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 		return;
 	}
 	const state = loaded.state;
-	if (!productOk(state)) { orchestrate(pi, "Finish the product.", "Spawn blocking product-analyst. Wait for /foundry-approve product. Do not plan or code."); return; }
+	if (!productReady(state)) { orchestrate(pi, "Finish the product.", "Spawn blocking product-analyst. Wait for /foundry-approve product. Do not plan or code."); return; }
 	if (state.master_plan.status !== "locked") { enterOrResumePlan3(pi, cwd, state); return; }
 	if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") { orchestrate(pi, "Design is required.", "Spawn blocking design-foundation, build a real preview, then wait for /design approve or /design skip."); return; }
 	if (!state.aatp.manifest_sha256) { requestAatpCompile(pi, cwd, state, false); return; }
@@ -634,6 +633,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (event.toolName === "task") {
 			const raw = event.input && typeof event.input === "object" ? event.input as Record<string, unknown> : {};
 			const items = taskItems(raw);
+			const globalKey = taskKey(event, ctx.cwd);
 			if (items.length === 0 || items.length > 32) return { block: true, reason: "TASK_GATE: task dispatch must contain 1–32 recognized agent items." };
 			const unknown = items.filter((item) => !TASK_AGENTS.has(item.agent));
 			if (unknown.length) return { block: true, reason: `TASK_GATE: unknown or unauthorized agent(s): ${unknown.map((item) => item.agent || "(missing)").join(", ")}.` };
@@ -704,8 +704,31 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				if (!headAtDispatch) return { block: true, reason: "PROVENANCE_GATE: unable to capture repository HEAD before dispatch." };
 				pending.set(key, { bindings: parsed.bindings, startedClean: true, headAtDispatch });
 			}
-			const isolated = forceIsolatedTaskInput(raw);
-			if (isolated) return { input: isolated };
+			let modified = raw;
+			if (globalKey) {
+				const aatpRun = pendingAatp.get(globalKey);
+				if (aatpRun) {
+					const tasks = Array.isArray(modified.tasks) ? [...modified.tasks] : [];
+					const item = tasks[aatpRun.index];
+					if (item && typeof item === "object") {
+						const ins = typeof item.instructions === "string" ? item.instructions : "";
+						tasks[aatpRun.index] = { ...item, instructions: `[AATP_COMPILER_CAPABILITY]: You hold the cryptographic write capability for this run.\nYou MUST use the 'foundry_aatp_write' tool to write unsealed AATP files.\nYour capability token is: ${aatpRun.capability}\nProvide this exact token in the 'capability' argument for every foundry_aatp_write call.\n\n${ins}` };
+						modified = { ...modified, tasks };
+					}
+				}
+				const planRun = pendingPlan.get(globalKey);
+				if (planRun) {
+					const tasks = Array.isArray(modified.tasks) ? [...modified.tasks] : [];
+					const item = tasks[planRun.index];
+					if (item && typeof item === "object") {
+						const ins = typeof item.instructions === "string" ? item.instructions : "";
+						tasks[planRun.index] = { ...item, instructions: `[PLAN3_CAPABILITY]: You hold the cryptographic write capability for this run.\nYou MUST use the 'foundry_plan_write' tool to write unsealed Plan3 artifacts.\nYour capability token is: ${planRun.capability}\nProvide this exact token in the 'capability' argument for every foundry_plan_write call.\n\n${ins}` };
+						modified = { ...modified, tasks };
+					}
+				}
+			}
+			const isolated = forceIsolatedTaskInput(modified);
+			if (isolated || modified !== raw) return { input: isolated ?? modified };
 		}
 		const activeTickets = Object.values(loaded.state.tickets).filter((t) => t.status === "active");
 		return denyToolCall(event.toolName, (event.input ?? {}) as ToolInput, loaded.state, { stateBroken: loaded.broken, activeTickets, canonicalize: (raw) => canonicalRepoPath(ctx.cwd, raw) });
@@ -973,7 +996,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("release-check", { description: "Derived release gate; agent release commands remain denied", handler: async (_args, ctx) => {
 		const state = loadState(ctx.cwd); recountTickets(state); const ready = deriveRelease(ctx.cwd, state); if (ready) state.phase = "release"; persist(ctx.cwd, state);
 		const report = [
-			`${productOk(state) ? "✓" : "✗"} PRODUCT`, `${state.master_plan.status === "locked" ? "✓" : "✗"} PLAN locked`, `${!state.design.required || state.design.status === "locked" || state.design.status === "not_required" ? "✓" : "✗"} DESIGN`,
+			`${productReady(state) ? "✓" : "✗"} PRODUCT`, `${planLocked(state) ? "✓" : "✗"} PLAN locked`, `${designAllowsUi(state) ? "✓" : "✗"} DESIGN`,
 			`${state.aatp.manifest_sha256 && state.aatp.manifest_sha256 === aatpManifestHash(ctx.cwd) ? "✓" : "✗"} AATP specs sealed`, `${state.aatp.total > 0 && state.aatp.completed === state.aatp.total && state.aatp.blocked === 0 ? "✓" : "✗"} AATP complete`,
 			`${Object.values(state.tickets).every((t) => t.review === "APPROVE" && (t.review_by === "reviewer" || t.review_by === "security-reviewer") && t.review_evidence_sha256) && Object.keys(state.tickets).length > 0 ? "✓" : "✗"} independent reviews`, `${governedCommitLedgerFresh(ctx.cwd, state, gitHead(ctx.cwd)) ? "✓" : "✗"} provenance ledger`, `${state.qa.status === "pass" ? "✓" : "✗"} QA pass @ ${state.qa.tree_sha || "no-sha"}`, `${workingTreeClean(ctx.cwd) ? "✓" : "✗"} clean tree`,
 		].join("\n");
