@@ -14,7 +14,7 @@ function trackedFiles(cwd: string, paths: string[]): string[] {
 }
 
 /** Hash the current committed contents covered by an AATP scope. */
-export function scopeHash(cwd: string, paths: string[]): string {
+function scopeHash(cwd: string, paths: string[]): string {
 	const requested = paths.map((raw) => canonicalRepoPath(cwd, raw)).filter((path): path is string => path !== null);
 	if (requested.length === 0) return "";
 	const files = new Set<string>(trackedFiles(cwd, requested));
@@ -74,15 +74,6 @@ export function dependencyScopeHash(state: CompanyState, ticket: Pick<AatpTicket
 	return hash.digest("hex");
 }
 
-export function currentTreeSha(cwd: string): string {
-	const result = gitCall(cwd, ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" });
-	return result.status === 0 ? result.stdout.trim() : "";
-}
-
-export function currentHead(cwd: string): string {
-	const result = gitCall(cwd, ["rev-parse", "HEAD"], { encoding: "utf8" });
-	return result.status === 0 ? result.stdout.trim() : "";
-}
 
 export function provenanceEvidence(...parts: Array<string | undefined>): string {
 	const hash = createHash("sha256");

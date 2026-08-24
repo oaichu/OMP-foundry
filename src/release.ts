@@ -7,7 +7,7 @@ import type { CompanyState } from "./types";
 import { gitCall } from "./git-runtime";
 import { dependencyScopeHash, ticketScopeHash } from "./provenance";
 
-export function sha256File(cwd: string, rel: string): string {
+function sha256File(cwd: string, rel: string): string {
 	const file = safeRepoPath(cwd, rel);
 	if (!file) return "";
 	try {
@@ -27,7 +27,7 @@ export function gitHead(cwd: string): string {
 }
 
 const FOUNDRY_OWNED = [/^\.omp\/(?:foundry|company)-state\.ya?ml$/i, /^\.omp\/(?:foundry|company)-state\.ya?ml(?:\..+\.tmp|\.pre-v\d+\.bak)$/i, /^docs\/reports\/qa\.md$/i];
-export function isFoundryOwned(rel: string): boolean {
+function isFoundryOwned(rel: string): boolean {
 	const normalized = rel.trim().replace(/\\/g, "/").replace(/^"|"$/g, "");
 	return FOUNDRY_OWNED.some((re) => re.test(normalized));
 }

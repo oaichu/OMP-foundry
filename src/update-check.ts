@@ -50,14 +50,14 @@ export async function resolveOmpVersion(): Promise<string> {
 	try { const mod = (await import("@oh-my-pi/pi-utils/dirs")) as { VERSION?: string }; return mod.VERSION ?? "unknown"; }
 	catch { return "unknown"; }
 }
-export function defaultCachePath(): string {
+function defaultCachePath(): string {
 	return join(homedir(), ".omp", "cache", "foundry-update.json");
 }
 async function xdgCachePath(): Promise<string> {
 	try { const { getFastembedCacheDir } = (await import("@oh-my-pi/pi-utils/dirs")) as { getFastembedCacheDir: () => string }; return join(dirname(getFastembedCacheDir()), "foundry-update.json"); }
 	catch { return defaultCachePath(); }
 }
-export function readCache(path: string): UpdateCache | undefined {
+function readCache(path: string): UpdateCache | undefined {
 	try {
 		const text = readFileSync(path, "utf8");
 		if (Buffer.byteLength(text, "utf8") > MAX_CACHE_BYTES) return undefined;
@@ -66,11 +66,11 @@ export function readCache(path: string): UpdateCache | undefined {
 	}
 	catch { return undefined; }
 }
-export function writeCache(path: string, cache: UpdateCache): boolean {
+function writeCache(path: string, cache: UpdateCache): boolean {
 	try { const text = `${JSON.stringify(cache)}\n`; if (Buffer.byteLength(text, "utf8") > MAX_CACHE_BYTES) return false; mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text, "utf8"); return true; }
 	catch { return false; }
 }
-export async function fetchLatestTag(): Promise<string | undefined> {
+async function fetchLatestTag(): Promise<string | undefined> {
 	const response = await fetch(LATEST_RELEASE, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(4000), headers: { Accept: "text/html" } });
 	if (!response.ok) return undefined;
 	try {

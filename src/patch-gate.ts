@@ -57,7 +57,7 @@ export function prepareImplementationBaseline(cwd: string): { ok: boolean; reaso
 	if (result.status !== 0) return { ok: false, reason: `BASELINE_COMMIT_FAILED: ${result.stderr.trim() || result.stdout.trim()}` };
 	return { ok: true, committed: true };
 }
-export function ticketIdsFromText(text: string): string[] { return [...new Set((text.match(/\bAATP-[A-Za-z0-9_-]+/gi) ?? []).map((id) => id.toUpperCase()))]; }
+function ticketIdsFromText(text: string): string[] { return [...new Set((text.match(/\bAATP-[A-Za-z0-9_-]+/gi) ?? []).map((id) => id.toUpperCase()))]; }
 export function taskItems(input: Record<string, unknown>): TaskItem[] {
 	if (Array.isArray(input.tasks)) return input.tasks.flatMap((raw, index) => { if (!raw || typeof raw !== "object") return []; const item = raw as Record<string, unknown>; return [{ index, agent: String(item.agent ?? "").trim().toLowerCase(), task: String(item.task ?? "").trim(), isolated: item.isolated === true }]; });
 	if (typeof input.agent === "string" || typeof input.task === "string") return [{ index: 0, agent: String(input.agent ?? "").trim().toLowerCase(), task: String(input.task ?? "").trim(), isolated: input.isolated === true }];
@@ -112,7 +112,7 @@ function regularPatchFile(path: string | undefined): path is string {
 	if (!path || /[\u0000-\u001f\u007f]/.test(path)) return false;
 	try { const stat = lstatSync(path); return stat.isFile() && !stat.isSymbolicLink(); } catch { return false; }
 }
-export function readPatchArtifact(path: string | undefined): string {
+function readPatchArtifact(path: string | undefined): string {
 	if (!regularPatchFile(path)) return "";
 	try {
 		const stat = lstatSync(path);
