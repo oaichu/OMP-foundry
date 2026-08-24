@@ -352,7 +352,7 @@ export function writeAatpIndex(cwd: string, tasks: AatpTask[]): void {
 
 export function routeAgent(risk: string): string {
 	const r = risk.toLowerCase();
-	if (r === "trivial" || r === "low") return "smol-implementer";
+	if (r === "trivial" || r === "low") return "implementer";
 	if (r === "difficult" || r === "hard" || r === "critical") return "hard-implementer";
 	// Unknown risk must never silently downgrade to the cheap/default worker.
 	return r === "normal" ? "implementer" : "hard-implementer";
