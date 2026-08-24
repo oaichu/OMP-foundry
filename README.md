@@ -172,7 +172,7 @@ In any project repository, run:
 | **`/foundry [prompt]`** | **Core** | Auto-bootstraps project governance or resumes the next logical step. |
 | **`/approve`** | **Ergonomics** | Smart context-aware approval for Product, Plan, and Design gates. |
 | **`/ok` · `/run` · `/go`** | **Ergonomics** | Natural conversation shortcuts to trigger the next execution layer. |
-| **`/plan` · `/plan`** | **Planning** | Start or resume the 3-Stage Master Plan consensus engine. |
+| **`/plan`** | **Planning** | Start or resume the 3-Stage Master Plan consensus engine. |
 | **`/plan-revise`** | **Planning** | Human-only command to unlock the master plan and safely re-plan. |
 | **`/aatp`** | **AATP** | Spawns the synthesis compiler to generate the project-wide dependency DAG. |
 | **`/aatp-seal`** | **AATP** | **Instant 1-second seal** for manual transplants or pre-generated DAGs. |
