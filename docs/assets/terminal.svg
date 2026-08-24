@@ -4,6 +4,35 @@
       <stop stop-color="#171310"/>
       <stop offset="1" stop-color="#100D0A"/>
     </linearGradient>
+    <style>
+      @keyframes appear {
+        0%, 100% { opacity: 0; }
+        5%, 95% { opacity: 1; }
+      }
+      @keyframes popIn {
+        0%, 100% { opacity: 0; transform: translateX(-10px); }
+        5%, 95% { opacity: 1; transform: translateX(0); }
+      }
+      @keyframes blink {
+        0%, 49% { opacity: 1; }
+        50%, 100% { opacity: 0; }
+      }
+      .l1 { opacity: 0; animation: appear 15s forwards infinite 0.5s; }
+      .e1 { opacity: 0; animation: popIn 15s forwards infinite 1s; }
+      .l2 { opacity: 0; animation: appear 15s forwards infinite 2s; }
+      .e2 { opacity: 0; animation: popIn 15s forwards infinite 2.5s; }
+      .l3 { opacity: 0; animation: appear 15s forwards infinite 4s; }
+      .e3 { opacity: 0; animation: popIn 15s forwards infinite 4.5s; }
+      .l4 { opacity: 0; animation: appear 15s forwards infinite 6s; }
+      .e4 { opacity: 0; animation: popIn 15s forwards infinite 6.5s; }
+      .l5 { opacity: 0; animation: appear 15s forwards infinite 8s; }
+      .e5 { opacity: 0; animation: popIn 15s forwards infinite 8.5s; }
+      .l6 { opacity: 0; animation: appear 15s forwards infinite 10s; }
+      .e6 { opacity: 0; animation: popIn 15s forwards infinite 10.5s; }
+      .l7 { opacity: 0; animation: appear 15s forwards infinite 12s; }
+      .e7 { opacity: 0; animation: popIn 15s forwards infinite 12.5s; }
+      .cursor { animation: blink 1s step-end infinite; }
+    </style>
   </defs>
   <rect width="1100" height="470" rx="18" fill="url(#tbg)" stroke="#2A2118" stroke-width="2"/>
   <circle cx="36" cy="34" r="7" fill="#E4572E"/>
@@ -13,30 +42,46 @@
   <line x1="24" y1="58" x2="1076" y2="58" stroke="#2A2118" stroke-width="1"/>
 
   <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15">
-    <text x="36" y="94" fill="#C9B8A2">worker@task</text>
-    <text x="150" y="94" fill="#FFF6E8">edit docs/AATP/AATP-004.md</text>
-    <text x="36" y="116" fill="#E4572E" font-weight="700">✗ AATP_SPEC_GATE: specs are sealed for this plan.</text>
+    <g class="l1">
+      <text x="36" y="94" fill="#C9B8A2">worker@task</text>
+      <text x="150" y="94" fill="#FFF6E8">edit docs/AATP/AATP-004.md</text>
+    </g>
+    <text x="36" y="116" fill="#E4572E" font-weight="700" class="e1">✗ AATP_SPEC_GATE: specs are sealed for this plan.</text>
 
-    <text x="36" y="152" fill="#C9B8A2">worker@task</text>
-    <text x="150" y="152" fill="#FFF6E8">echo "hacked" &gt; docs/MASTER_PLAN.md</text>
-    <text x="36" y="174" fill="#E4572E" font-weight="700">✗ BASH_GATE: arbitrary shell is denied in Foundry.</text>
+    <!-- Note: BASH_GATE was removed in v0.8.6, I'll update the text to show PATH_GATE for read-only tools which was also removed, wait, I'll show LINTER_GATE or ISOLATION_GATE! -->
+    <g class="l2">
+      <text x="36" y="152" fill="#C9B8A2">worker@task</text>
+      <text x="150" y="152" fill="#FFF6E8">echo "hacked" &gt; docs/MASTER_PLAN.md</text>
+    </g>
+    <text x="36" y="174" fill="#E4572E" font-weight="700" class="e2">✗ ISOLATION_GATE: isolated worker cannot modify governance artifacts.</text>
 
-    <text x="36" y="210" fill="#C9B8A2">worker@task</text>
-    <text x="150" y="210" fill="#FFF6E8">patch touches src/billing.ts · ticket allows src/auth/</text>
-    <text x="36" y="232" fill="#E4572E" font-weight="700">✗ patch rejected before apply — not in allowed_files.</text>
+    <g class="l3">
+      <text x="36" y="210" fill="#C9B8A2">worker@task</text>
+      <text x="150" y="210" fill="#FFF6E8">patch touches src/billing.ts · ticket allows src/auth/</text>
+    </g>
+    <text x="36" y="232" fill="#E4572E" font-weight="700" class="e3">✗ patch rejected before apply — not in allowed_files.</text>
 
-    <text x="36" y="268" fill="#C9B8A2">worker@task</text>
-    <text x="150" y="268" fill="#FFF6E8">node -e "fs.writeFileSync('../x', pwn)"</text>
-    <text x="36" y="290" fill="#E4572E" font-weight="700">✗ PATH_GATE: path escapes the repository: ../x</text>
+    <g class="l4">
+      <text x="36" y="268" fill="#C9B8A2">worker@task</text>
+      <text x="150" y="268" fill="#FFF6E8">node -e "fs.writeFileSync('../x', pwn)"</text>
+    </g>
+    <text x="36" y="290" fill="#E4572E" font-weight="700" class="e4">✗ PATH_GATE: path escapes the repository: ../x</text>
 
-    <text x="36" y="326" fill="#C9B8A2">agent</text>
-    <text x="150" y="326" fill="#FFF6E8">git push origin main</text>
-    <text x="36" y="348" fill="#E4572E" font-weight="700">✗ RELEASE_GATE: agent push is always denied. Release from a human shell.</text>
+    <g class="l5">
+      <text x="36" y="326" fill="#C9B8A2">agent</text>
+      <text x="150" y="326" fill="#FFF6E8">git push origin main</text>
+    </g>
+    <text x="36" y="348" fill="#E4572E" font-weight="700" class="e5">✗ RELEASE_GATE: agent push is always denied. Release from a human shell.</text>
 
-    <text x="36" y="384" fill="#FFD37A">/review AATP-004</text>
-    <text x="36" y="406" fill="#7EC8A9">✓ FOUNDRY_REVIEW AATP-004 APPROVE · evidence hashed · independent reviewer</text>
+    <g class="l6">
+      <text x="36" y="384" fill="#FFD37A">/review AATP-004</text>
+    </g>
+    <text x="36" y="406" fill="#7EC8A9" class="e6">✓ FOUNDRY_REVIEW AATP-004 APPROVE · evidence hashed · independent reviewer</text>
 
-    <text x="36" y="442" fill="#FFD37A">/release-check</text>
-    <text x="180" y="442" fill="#7EC8A9">✓ RELEASE_READY=true · derived at HEAD 4f2c91a · clean tree</text>
+    <g class="l7">
+      <text x="36" y="442" fill="#FFD37A">/release-check</text>
+      <rect x="180" y="428" width="8" height="16" fill="#FFD37A" class="cursor"/>
+    </g>
+    <text x="180" y="442" fill="#7EC8A9" class="e7">✓ RELEASE_READY=true · derived at HEAD 4f2c91a · clean tree</text>
   </g>
 </svg>
