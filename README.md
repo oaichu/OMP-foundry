@@ -112,17 +112,9 @@ Foundry enforces **fail-closed runtime boundaries**:
 ## 🚀 30-Second Quickstart
 
 ### 1. Install & Link Plugin
-```bash
-git clone https://github.com/oaichu/omp-foundry
-cd omp-foundry
-omp plugin link .
-```
-
-Verify installation:
-```bash
-omp plugin list
-# ● omp-foundry@0.8.6 (active)
-```
+<p align="center">
+  <img src="docs/assets/quickstart.svg" width="100%" alt="Quickstart Installation"/>
+</p>
 
 ### 2. Initialize a Project
 In any project repository, run:
@@ -166,35 +158,17 @@ In any project repository, run:
 
 Foundry packages **36+ enterprise engineering skills** without bloating your model's context window:
 
-```text
-┌─────────────────────────────────────────────────────────────┐
-│ Tier 1: Phase & Role Filter (Implementation vs Review vs QA)│
-├─────────────────────────────────────────────────────────────┤
-│ Tier 2: Stack Auto-Detection (FastAPI, Next.js, Postgres...)│
-├─────────────────────────────────────────────────────────────┤
-│ Tier 3: Thin Catalog Index (~150 token header injection)    │
-├─────────────────────────────────────────────────────────────┤
-│ Tier 4: On-Demand Deep Load (Subagents fetch via JIT tool)  │
-└─────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/assets/jit-catalog.svg" width="100%" alt="4-Tier JIT Skill Catalog"/>
+</p>
 
 ---
 
 ## 🧩 Architecture & Codebase Map
 
-```text
-src/
-├── index.ts             # Plugin entrypoint, lifecycle hooks, tool registration
-├── gates.ts             # Approval gates, state guards, phase transitions
-├── permissions.ts       # Path canonicalization & mutation boundaries
-├── aatp.ts              # Work-order DAG engine, dependency graph & tickets
-├── plan.ts             # 3-Stage Master Plan lifecycle (Draft, Redteam, Synth)
-├── patch-gate.ts        # Unified diff parsing, <=80 line cap & atomic commit
-├── release.ts           # Provenance ledger & release derivation
-├── git-runtime.ts       # Hardened Git environment & hook sanitization
-├── verify-runner.ts     # Disposable QA test execution sandbox
-└── skills/              # JIT skill registry, stack detector & parsers
-```
+<p align="center">
+  <img src="docs/assets/architecture.svg" width="100%" alt="Architecture & Codebase Map"/>
+</p>
 
 ---
 
@@ -202,20 +176,9 @@ src/
 
 OMP Foundry is backed by an exhaustive, green-field integration test suite ensuring zero regressions:
 
-```bash
-# Run all 128 tests across 18 suites with Bun
-npx bun test
-
-# Run strict TypeScript typechecking
-npx bun run typecheck
-```
-
-```text
-  128 pass
-  0 fail
-  438 expect() calls
-Ran 128 tests across 18 files. [1.76s]
-```
+<p align="center">
+  <img src="docs/assets/test-suite.svg" width="100%" alt="OMP Foundry Test Suite Output"/>
+</p>
 
 ---
 

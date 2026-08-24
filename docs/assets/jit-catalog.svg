@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 280" role="img" aria-label="4-Tier JIT Skill Catalog">
+  <defs>
+    <style>
+      .bg { fill: #0D0D0D; stroke: #262626; stroke-width: 1; }
+      .box { fill: #1A1410; stroke: #2A2118; stroke-width: 2; rx: 8; transition: all 0.3s; }
+      .t1 { stroke: #E4572E; }
+      .t2 { stroke: #FF9F1C; }
+      .t3 { stroke: #FFB020; }
+      .t4 { stroke: #7EC8A9; }
+      
+      .text-title { font-family: 'Inter', system-ui, sans-serif; font-size: 16px; font-weight: 700; fill: #FFF6E8; }
+      .text-sub { font-family: 'Inter', system-ui, sans-serif; font-size: 13px; fill: #C9B8A2; }
+      
+      @keyframes slideIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .layer1 { animation: slideIn 0.8s ease-out forwards 0.2s; opacity: 0; }
+      .layer2 { animation: slideIn 0.8s ease-out forwards 0.4s; opacity: 0; }
+      .layer3 { animation: slideIn 0.8s ease-out forwards 0.6s; opacity: 0; }
+      .layer4 { animation: slideIn 0.8s ease-out forwards 0.8s; opacity: 0; }
+    </style>
+  </defs>
+  
+  <rect width="800" height="280" rx="8" class="bg"/>
+  
+  <circle cx="20" cy="20" r="6" fill="#404040"/>
+  <circle cx="40" cy="20" r="6" fill="#404040"/>
+  <circle cx="60" cy="20" r="6" fill="#404040"/>
+  <text x="400" y="24" fill="#555" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="600">jit-resolver</text>
+
+  <g transform="translate(100, 50)">
+    <!-- Line connector -->
+    <path d="M 300 0 v 200" stroke="#333" stroke-width="2" stroke-dasharray="4 4"/>
+    
+    <g class="layer1">
+      <rect x="0" y="10" width="600" height="40" class="box t1"/>
+      <text x="20" y="35" class="text-title">Tier 1: Phase &amp; Role Filter</text>
+      <text x="580" y="35" class="text-sub" text-anchor="end">Implementation vs Review vs QA</text>
+    </g>
+    
+    <g class="layer2">
+      <rect x="20" y="60" width="560" height="40" class="box t2"/>
+      <text x="40" y="85" class="text-title">Tier 2: Stack Auto-Detection</text>
+      <text x="560" y="85" class="text-sub" text-anchor="end">FastAPI, Next.js, Postgres...</text>
+    </g>
+
+    <g class="layer3">
+      <rect x="40" y="110" width="520" height="40" class="box t3"/>
+      <text x="60" y="135" class="text-title">Tier 3: Thin Catalog Index</text>
+      <text x="540" y="135" class="text-sub" text-anchor="end">~150 token header injection</text>
+    </g>
+
+    <g class="layer4">
+      <rect x="60" y="160" width="480" height="40" class="box t4"/>
+      <text x="80" y="185" class="text-title">Tier 4: On-Demand Deep Load</text>
+      <text x="520" y="185" class="text-sub" text-anchor="end">Subagents fetch via JIT tool</text>
+    </g>
+  </g>
+</svg>

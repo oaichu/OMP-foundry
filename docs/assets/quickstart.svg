@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 240" role="img" aria-label="Quickstart Terminal">
+  <defs>
+    <style>
+      .bg { fill: #0D0D0D; stroke: #262626; stroke-width: 1; }
+      .text { font-family: 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', Menlo, Consolas, monospace; font-size: 15px; }
+      .prompt { fill: #E4572E; font-weight: bold; }
+      .cmd { fill: #FFF6E8; }
+      .highlight { fill: #FFB020; }
+      .gray { fill: #888888; }
+      .success { fill: #7EC8A9; font-weight: bold; }
+      
+      @keyframes type1 { 0%, 10% { opacity: 0; } 15%, 100% { opacity: 1; } }
+      @keyframes type2 { 0%, 25% { opacity: 0; } 30%, 100% { opacity: 1; } }
+      @keyframes type3 { 0%, 40% { opacity: 0; } 45%, 100% { opacity: 1; } }
+      @keyframes type4 { 0%, 55% { opacity: 0; } 60%, 100% { opacity: 1; } }
+      @keyframes type5 { 0%, 70% { opacity: 0; } 75%, 100% { opacity: 1; } }
+      
+      .l1 { animation: type1 8s forwards infinite; }
+      .l2 { animation: type2 8s forwards infinite; }
+      .l3 { animation: type3 8s forwards infinite; }
+      .l4 { animation: type4 8s forwards infinite; }
+      .l5 { animation: type5 8s forwards infinite; }
+    </style>
+  </defs>
+  
+  <rect width="800" height="240" rx="8" class="bg"/>
+  
+  <circle cx="20" cy="20" r="6" fill="#404040"/>
+  <circle cx="40" cy="20" r="6" fill="#404040"/>
+  <circle cx="60" cy="20" r="6" fill="#404040"/>
+  <text x="400" y="24" fill="#555" font-family="sans-serif" font-size="12" text-anchor="middle" font-weight="600">bash — install</text>
+  
+  <g class="text" transform="translate(30, 70)">
+    <g class="l1">
+      <text y="0"><tspan class="prompt">❯</tspan> <tspan class="cmd">git clone https://github.com/oaichu/omp-foundry</tspan></text>
+    </g>
+    <g class="l2">
+      <text y="30"><tspan class="prompt">❯</tspan> <tspan class="cmd">cd omp-foundry</tspan></text>
+    </g>
+    <g class="l3">
+      <text y="60"><tspan class="prompt">❯</tspan> <tspan class="cmd">omp plugin link .</tspan></text>
+      <text y="85" class="gray">✓ Plugin linked successfully.</text>
+    </g>
+    <g class="l4">
+      <text y="125"><tspan class="prompt">❯</tspan> <tspan class="cmd">omp plugin list</tspan></text>
+    </g>
+    <g class="l5">
+      <text y="150" class="success">● omp-foundry<tspan class="gray">@latest (active)</tspan></text>
+    </g>
+  </g>
+</svg>
