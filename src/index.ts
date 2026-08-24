@@ -516,7 +516,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		for (const failureKey of broker.failures.keys()) if (failureKey === key || failureKey.startsWith(`${key}\u0000`)) broker.failures.delete(failureKey);
 	};
 	const expired = (run: CapabilityRun): boolean => Date.now() - run.createdAt > CAPABILITY_TTL_MS;
-	pi.registerTool({ name: "foundry_aatp_write", label: "Foundry AATP Write", description: "Compiler-only atomic writer for unsealed AATP work orders; explicitly listed only for the spawned aatp-compiler.", hidden: true, loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
+	pi.registerTool({ name: "foundry_aatp_write", label: "Foundry AATP Write", description: "Compiler-only atomic writer for unsealed AATP work orders; explicitly listed only for the spawned aatp-compiler.", hidden: false, loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
 		const loaded = safeState(ctx.cwd);
 		if (loaded.broken || loaded.missing || loaded.state.phase !== "aatp" || loaded.state.aatp.manifest_sha256) return { isError: true, content: [{ type: "text", text: "AATP_COMPILER_GATE: compiler writer is available only during an unsealed AATP phase." }] };
 		const baseKey = capabilityKey("AATP", ctx.cwd, loaded.state.aatp.epoch);
@@ -560,7 +560,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (hasIndex && hasWorkOrder) abortAfterTerminalCapabilityWrite(ctx);
 		return { content: [{ type: "text", text: `AATP_WRITE_OK: ${rel}` }] };
 	} });
-	pi.registerTool({ name: "foundry_plan_write", label: "Foundry Plan Write", description: "Active Plan3-stage atomic writer; explicitly listed only for the spawned planning stage agent.", hidden: true, loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
+	pi.registerTool({ name: "foundry_plan_write", label: "Foundry Plan Write", description: "Active Plan3-stage atomic writer; explicitly listed only for the spawned planning stage agent.", hidden: false, loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
 		const loaded = safeState(ctx.cwd);
 		if (loaded.broken || loaded.missing || loaded.state.mode !== "plan3" || loaded.state.phase !== "planning") return { isError: true, content: [{ type: "text", text: "PLAN3_GATE: plan writer is available only during an active Plan3 stage." }] };
 		const stage = loaded.state.planning.stage as ActivePlanStage;

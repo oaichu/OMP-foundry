@@ -290,8 +290,8 @@ describe("extension integration smoke", () => {
 		mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
 		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.master_plan.status = "locked"; state.master_plan.sha256 = "123"; state.design.status = "not_required"; state.phase = "aatp"; saveState(cwd, state);
 		const { tools } = harness();
-		expect(tools.get("foundry_plan_write")!.hidden).toBe(true);
-		expect(tools.get("foundry_aatp_write")!.hidden).toBe(true);
+		expect(tools.get("foundry_plan_write")!.hidden).toBe(false);
+		expect(tools.get("foundry_aatp_write")!.hidden).toBe(false);
 		for (let attempt = 0; attempt < 2; attempt += 1) {
 			const denied = await tools.get("foundry_aatp_write")!.execute("guess", { path: "docs/AATP/AATP-001.md", content: "must not write\n", capability: `guess-${attempt}` }, "session", null, ctx(cwd, "orchestrator"));
 			expect(denied.isError).toBe(true);
