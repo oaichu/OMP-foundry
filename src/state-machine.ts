@@ -10,7 +10,7 @@ import {
 	FOUNDRY_MODES,
 	FOUNDRY_VERSION,
 	PHASES,
-	PLAN3_STAGES,
+	PLAN_STAGES,
 	QA_STATUSES,
 	REVIEW_VERDICTS,
 	STATE_PATHS,
@@ -139,7 +139,7 @@ export function parseState(yaml: string, opts: { allowLegacy?: boolean } = {}): 
 	base.mode = mustEnum(pick(yaml, "mode") ?? "normal", FOUNDRY_MODES, "mode");
 	base.phase = mustEnum(pick(yaml, "phase"), PHASES, "phase");
 	const planning = pickBlock(yaml, "planning"), product = pickBlock(yaml, "product"), plan = pickBlock(yaml, "master_plan"), design = pickBlock(yaml, "design"), aatp = pickBlock(yaml, "aatp"), qa = pickBlock(yaml, "qa"), release = pickBlock(yaml, "release"), conflict = pickBlock(yaml, "conflict");
-	base.planning.stage = mustEnum(pick(planning, "stage") ?? "idle", PLAN3_STAGES, "planning.stage");
+	base.planning.stage = mustEnum(pick(planning, "stage") ?? "idle", PLAN_STAGES, "planning.stage");
 	base.planning.epoch = pick(planning, "epoch") ?? "";
 	base.planning.draft_sha256 = pick(planning, "draft_sha256") ?? "";
 	base.planning.review_sha256 = pick(planning, "review_sha256") ?? "";

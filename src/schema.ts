@@ -81,7 +81,16 @@ function migrateV5ToV6(yaml: string): string {
 	state.last_written_by = FOUNDRY_VERSION;
 	return serializeState(state);
 }
-const MIGRATIONS: Record<number, (yaml: string) => string> = { 0: migrateV0ToV1, 1: migrateV1ToV2, 2: migrateV2ToV3, 3: migrateV3ToV4, 4: migrateV4ToV5, 5: migrateV5ToV6 };
+function migrateV6ToV7(yaml: string): string {
+	let text = yaml;
+	// Direct text replacement because parseState might enforce new validation
+	text = text.replace(/mode:\s*['"]?plan['"]?/g, 'mode: "plan"');
+	const state = parseState(text);
+	state.schema_version = 7;
+	state.last_written_by = FOUNDRY_VERSION;
+	return serializeState(state);
+}
+const MIGRATIONS: Record<number, (yaml: string) => string> = { 0: migrateV0ToV1, 1: migrateV1ToV2, 2: migrateV2ToV3, 3: migrateV3ToV4, 4: migrateV4ToV5, 5: migrateV5ToV6, 6: migrateV6ToV7 };
 export function migrateToCurrent(yaml: string): { yaml: string; state: CompanyState; from: number; didMigrate: boolean } {
 	const from = detectSchemaVersion(yaml);
 	if (from > CURRENT_STATE_SCHEMA) throw new SchemaTooNewError(from, CURRENT_STATE_SCHEMA);

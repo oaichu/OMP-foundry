@@ -51,16 +51,16 @@ import {
 } from "./patch-gate";
 import { canonicalRepoPath, safeRepoPath } from "./paths";
 import {
-	abortPlan3,
-	completePlan3Stage,
-	enterPlan3,
-	expectedPlan3Agent,
-	hashPlan3Artifact,
-	plan3ArtifactsMatch,
-	plan3Instruction,
-	plan3Status,
-	PLAN3_ARTIFACTS,
-} from "./plan3";
+	abortPlan,
+	completePlanStage,
+	enterPlan,
+	expectedPlanAgent,
+	hashPlanArtifact,
+	planArtifactsMatch,
+	planInstruction,
+	planStatus,
+	PLAN_ARTIFACTS,
+} from "./plan";
 import { artifactsMatch, deriveRelease, gitHead, governedCommitLedgerFresh, invalidateQa, lockArtifactHash, workingTreeClean } from "./release";
 import { dependencyScopeHash, ticketScopeHash } from "./provenance";
 import { roleOf } from "./skills/phase-filter";
@@ -68,7 +68,7 @@ import { loadRegistry } from "./skills/registry";
 import { resolveSkillManifests, skillPackPrompt } from "./skills/resolver";
 import { detectStack } from "./stack-detector";
 import { loadState, loadStateResult, recountTickets, saveState, stateFileExists, productReady, planLocked, designAllowsUi } from "./state-machine";
-import { type CompanyState, type ConflictKind, type Plan3Stage, defaultState } from "./types";
+import { type CompanyState, type ConflictKind, type PlanStage, defaultState } from "./types";
 import { checkForUpdate, versionReport } from "./update-check";
 import { applyQa, executeVerifyStep, runDeclaredVerification, runVerify } from "./verify-runner";
 
@@ -91,7 +91,7 @@ const MAX_STAGE_TIMEOUT_MS = 30 * 60 * 1000;
 const CAPABILITY_BROKER_SYMBOL = Symbol.for("omp-foundry.capability-broker");
 
 type PendingRun = { bindings: TaskBinding[]; startedClean: boolean; headAtDispatch: string };
-type ActivePlanStage = Exclude<Plan3Stage, "idle" | "awaiting_lock">;
+type ActivePlanStage = Exclude<PlanStage, "idle" | "awaiting_lock">;
 type CapabilityRun = { epoch: string; index: number; cwd: string; capability: string; createdAt: number; sessionId?: string; invalidAttempts: number; revoked: boolean; timedOut?: boolean; writeHashes?: Map<string, string> };
 type PendingPlanRun = CapabilityRun & { stage: ActivePlanStage; agent: string; beforeHash?: string };
 type PendingAatpRun = CapabilityRun & { agent: typeof AATP_COMPILER };
@@ -143,7 +143,7 @@ function capabilityAgentName(event: unknown, ctx: unknown): string {
 	return "";
 }
 
-function capabilityKey(kind: "PLAN3" | "AATP", cwd: string, epoch: string, stage = ""): string {
+function capabilityKey(kind: "PLAN" | "AATP", cwd: string, epoch: string, stage = ""): string {
 	return `${kind}\u0000${cwd}\u0000${epoch}\u0000${stage}`;
 }
 
@@ -189,7 +189,7 @@ function abortAfterTerminalCapabilityWrite(ctx: unknown): void {
 
 function persist(cwd: string, state: CompanyState): CompanyState { saveState(cwd, state); return state; }
 function orchestrate(pi: ExtensionAPI, title: string, body: string): void { pi.sendUserMessage([title, "", body, "", CONTEXT_POLICY].join("\n")); }
-function statusOf(state: CompanyState): string { return state.mode === "plan3" ? `${plan3Status(state)} plan=${state.master_plan.status}` : `${state.phase} plan=${state.master_plan.status} design=${state.design.status}`; }
+function statusOf(state: CompanyState): string { return state.mode === "plan" ? `${planStatus(state)} plan=${state.master_plan.status}` : `${state.phase} plan=${state.master_plan.status} design=${state.design.status}`; }
 function commitGovernanceBaseline(cwd: string): string | undefined { const result = prepareImplementationBaseline(cwd); return result.ok ? undefined : result.reason; }
 function safeState(cwd: string): SafeState {
 	let missing = false;
@@ -214,26 +214,26 @@ function taskKey(event: { toolCallId?: string }, cwd: string): string | undefine
 }
 function compilerActiveFor(pending: Map<string, PendingAatpRun>, cwd: string): boolean { return [...pending.values()].some((run) => run.cwd === cwd); }
 function planActiveFor(pending: Map<string, PendingPlanRun>, cwd: string): boolean { return [...pending.values()].some((run) => run.cwd === cwd); }
-function plan3ModelsReady(cwd: string): string | undefined {
+function planModelsReady(cwd: string): string | undefined {
 	const roles = checkFoundryProjectRoles(cwd);
 	return roles.ok ? undefined : roles.reason ?? "FOUNDRY_MODEL_ROLES_REQUIRED";
 }
-function plan3PriorEvidenceMatches(cwd: string, state: CompanyState): boolean {
+function planPriorEvidenceMatches(cwd: string, state: CompanyState): boolean {
 	if (state.planning.stage === "draft") return true;
-	if (!state.planning.draft_sha256 || hashPlan3Artifact(cwd, "draft") !== state.planning.draft_sha256) return false;
+	if (!state.planning.draft_sha256 || hashPlanArtifact(cwd, "draft") !== state.planning.draft_sha256) return false;
 	if (state.planning.stage === "redteam") return true;
-	if (!state.planning.review_sha256 || hashPlan3Artifact(cwd, "redteam") !== state.planning.review_sha256) return false;
+	if (!state.planning.review_sha256 || hashPlanArtifact(cwd, "redteam") !== state.planning.review_sha256) return false;
 	return true;
 }
-function enterOrResumePlan3(pi: ExtensionAPI, cwd: string, state: CompanyState, restart = false): void {
-	const modelGate = plan3ModelsReady(cwd);
-	if (modelGate) { orchestrate(pi, "Plan3 model roles are not ready.", `${modelGate}\nConfigure modelRoles in ~/.omp/agent/config.yml or this project's .omp/config.yml.`); return; }
-	enterPlan3(state, restart);
+function enterOrResumePlan(pi: ExtensionAPI, cwd: string, state: CompanyState, restart = false): void {
+	const modelGate = planModelsReady(cwd);
+	if (modelGate) { orchestrate(pi, "Plan model roles are not ready.", `${modelGate}\nConfigure modelRoles in ~/.omp/agent/config.yml or this project's .omp/config.yml.`); return; }
+	enterPlan(state, restart);
 	persist(cwd, state);
-	orchestrate(pi, plan3Status(state), plan3Instruction(state));
+	orchestrate(pi, planStatus(state), planInstruction(state));
 }
 
-/** Start the post-lock AATP compiler using the same synthesis capability as Plan3. */
+/** Start the post-lock AATP compiler using the same synthesis capability as Plan. */
 function requestAatpCompile(pi: ExtensionAPI, cwd: string, state: CompanyState, reset = true): void {
 	const gate = requireDesignIfUi(state);
 	if (gate) {
@@ -249,7 +249,7 @@ function requestAatpCompile(pi: ExtensionAPI, cwd: string, state: CompanyState, 
 	state.aatp.manifest_sha256 = "";
 	state.aatp.epoch = randomUUID();
 	persist(cwd, state);
-	const modelGate = plan3ModelsReady(cwd);
+	const modelGate = planModelsReady(cwd);
 	if (modelGate) { orchestrate(pi, "AATP compiler model role is not ready.", `${modelGate}\nConfigure foundry_synth in ~/.omp/agent/config.yml or this project's .omp/config.yml.`); return; }
 	orchestrate(pi, "Compile the project-wide AATP DAG.", [
 		"Spawn exactly one blocking aatp-compiler using @foundry_synth. It MUST write all AATP-*.md work orders FIRST. It MUST write docs/AATP/INDEX.md ABSOLUTELY LAST as the terminal artifact.",
@@ -314,7 +314,7 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 	}
 	const state = loaded.state;
 	if (!productReady(state)) { orchestrate(pi, "Finish the product.", "Spawn blocking product-analyst. Wait for /foundry-approve product. Do not plan or code."); return; }
-	if (state.master_plan.status !== "locked") { enterOrResumePlan3(pi, cwd, state); return; }
+	if (state.master_plan.status !== "locked") { enterOrResumePlan(pi, cwd, state); return; }
 	if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") { orchestrate(pi, "Design is required.", "Spawn blocking design-foundation, build a real preview, then wait for /design approve or /design skip."); return; }
 	if (!state.aatp.manifest_sha256) { requestAatpCompile(pi, cwd, state, false); return; }
 	const tasks = hydrateAatp(cwd, state);
@@ -488,10 +488,10 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		}
 		return current;
 	};
-	const capabilityError = (kind: "PLAN3" | "AATP", key: string, active?: CapabilityRun, revokeActive = true, ctx?: unknown) => {
+	const capabilityError = (kind: "PLAN" | "AATP", key: string, active?: CapabilityRun, revokeActive = true, ctx?: unknown) => {
 		const guard = capabilityFailure(key, active, revokeActive);
-		const prefix = kind === "PLAN3" ? "PLAN3" : "AATP_COMPILER";
-		const restart = kind === "PLAN3" ? "/plan" : "/aatp";
+		const prefix = kind === "PLAN" ? "PLAN" : "AATP_COMPILER";
+		const restart = kind === "PLAN" ? "/plan" : "/aatp";
 		if (guard.tripped || active?.revoked) {
 			try { (ctx as { abort?: () => void } | undefined)?.abort?.(); } catch { /* abort is best-effort; the terminal result remains authoritative */ }
 			return {
@@ -506,9 +506,9 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 			details: { code: `${prefix}_CAPABILITY_DENIED`, retryable: false, recovery: "respawn_stage_agent", attempts: guard.attempts, remaining: Math.max(0, CAPABILITY_FAILURE_LIMIT - guard.attempts) },
 		};
 	};
-	const capabilityCircuit = (kind: "PLAN3" | "AATP") => {
-		const prefix = kind === "PLAN3" ? "PLAN3" : "AATP_COMPILER";
-		const restart = kind === "PLAN3" ? "/plan" : "/aatp";
+	const capabilityCircuit = (kind: "PLAN" | "AATP") => {
+		const prefix = kind === "PLAN" ? "PLAN" : "AATP_COMPILER";
+		const restart = kind === "PLAN" ? "/plan" : "/aatp";
 		return { isError: true, content: [{ type: "text" as const, text: `${prefix}_CAPABILITY_CIRCUIT_BREAKER: this capability run was revoked after invalid attempts or expiry. Do not retry or guess. Re-run ${restart} to spawn a fresh stage agent and receive a new capability.` }], details: { code: `${prefix}_CAPABILITY_CIRCUIT_BREAKER`, retryable: false, recovery: "respawn_stage_agent" } };
 	};
 	const resetCapabilityFailure = (key: string): void => {
@@ -559,33 +559,33 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (hasIndex && hasWorkOrder) abortAfterTerminalCapabilityWrite(ctx);
 		return { content: [{ type: "text", text: `AATP_WRITE_OK: ${rel}` }] };
 	} });
-	pi.registerTool({ name: "foundry_plan_write", label: "Foundry Plan Write", description: "Active Plan3-stage atomic writer; explicitly listed only for the spawned planning stage agent.", hidden: false, loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
+	pi.registerTool({ name: "foundry_plan_write", label: "Foundry Plan Write", description: "Active Plan-stage atomic writer; explicitly listed only for the spawned planning stage agent.", hidden: false, loadMode: "essential", approval: "write", parameters: z.object({ path: z.string(), content: z.string(), capability: z.string() }), async execute(_id, params, _session, _user, ctx) {
 		const loaded = safeState(ctx.cwd);
-		if (loaded.broken || loaded.missing || loaded.state.mode !== "plan3" || loaded.state.phase !== "planning") return { isError: true, content: [{ type: "text", text: "PLAN3_GATE: plan writer is available only during an active Plan3 stage." }] };
+		if (loaded.broken || loaded.missing || loaded.state.mode !== "plan" || loaded.state.phase !== "planning") return { isError: true, content: [{ type: "text", text: "PLAN_GATE: plan writer is available only during an active Plan stage." }] };
 		const stage = loaded.state.planning.stage as ActivePlanStage;
-		const baseKey = capabilityKey("PLAN3", ctx.cwd, loaded.state.planning.epoch, stage);
+		const baseKey = capabilityKey("PLAN", ctx.cwd, loaded.state.planning.epoch, stage);
 		const active = [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability !== "" && candidate.epoch === loaded.state.planning.epoch && candidate.stage === stage);
 		const run = [...pendingPlan.values()].find((candidate) => candidate.cwd === ctx.cwd && candidate.capability === params.capability && candidate.epoch === loaded.state.planning.epoch && candidate.stage === stage);
 		const callerSession = capabilitySessionId(ctx);
 		const attemptKey = capabilityAttemptKey(baseKey, callerSession);
 		const ownerMatches = !active?.sessionId || callerSession === active.sessionId;
 		if (run && expired(run)) run.revoked = true;
-		if (!run || run.revoked || (run.sessionId !== undefined && callerSession !== run.sessionId)) return capabilityError("PLAN3", attemptKey, active ?? run, ownerMatches, ctx);
+		if (!run || run.revoked || (run.sessionId !== undefined && callerSession !== run.sessionId)) return capabilityError("PLAN", attemptKey, active ?? run, ownerMatches, ctx);
 		resetCapabilityFailure(baseKey); run.invalidAttempts = 0;
-		const expected = PLAN3_ARTIFACTS[run.stage], rel = canonicalRepoPath(ctx.cwd, params.path);
+		const expected = PLAN_ARTIFACTS[run.stage], rel = canonicalRepoPath(ctx.cwd, params.path);
 		const isAatpInSynth = run.stage === "synth" && rel !== null && /^docs\/aatp\/(?:aatp-[^/]+\.md|index\.md)$/i.test(rel);
-		if (!rel || (rel.toLowerCase() !== expected.toLowerCase() && !isAatpInSynth)) return { isError: true, content: [{ type: "text", text: `PLAN3_PATH_GATE: active stage may write only ${expected}${run.stage === "synth" ? " or docs/AATP/AATP-*.md" : ""}.` }] };
-		if (typeof params.content !== "string" || Buffer.byteLength(params.content, "utf8") > 256 * 1024) return { isError: true, content: [{ type: "text", text: "PLAN3_RESOURCE_GATE: one planning artifact is limited to 256 KiB." }] };
+		if (!rel || (rel.toLowerCase() !== expected.toLowerCase() && !isAatpInSynth)) return { isError: true, content: [{ type: "text", text: `PLAN_PATH_GATE: active stage may write only ${expected}${run.stage === "synth" ? " or docs/AATP/AATP-*.md" : ""}.` }] };
+		if (typeof params.content !== "string" || Buffer.byteLength(params.content, "utf8") > 256 * 1024) return { isError: true, content: [{ type: "text", text: "PLAN_RESOURCE_GATE: one planning artifact is limited to 256 KiB." }] };
 		const target = safeRepoPath(ctx.cwd, rel);
-		if (!target) return { isError: true, content: [{ type: "text", text: "PLAN3_PATH_GATE: planning target crosses a symlink or leaves the repository." }] };
+		if (!target) return { isError: true, content: [{ type: "text", text: "PLAN_PATH_GATE: planning target crosses a symlink or leaves the repository." }] };
 		const writeError = atomicGovernedWrite(target, params.content);
-		if (writeError) return { isError: true, content: [{ type: "text", text: `PLAN3_WRITE_FAILED: ${writeError}` }] };
+		if (writeError) return { isError: true, content: [{ type: "text", text: `PLAN_WRITE_FAILED: ${writeError}` }] };
 		recordCapabilityWrite(run, rel, params.content);
 		// When the terminal stage artifact (e.g. docs/MASTER_PLAN.md) is written, stop child agent.
 		if (rel.toLowerCase() === expected.toLowerCase()) {
 			abortAfterTerminalCapabilityWrite(ctx);
 		}
-		return { content: [{ type: "text", text: `PLAN3_WRITE_OK: ${rel}` }] };
+		return { content: [{ type: "text", text: `PLAN_WRITE_OK: ${rel}` }] };
 	} });
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -620,7 +620,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (planRun && sessionId) planRun.sessionId ??= sessionId;
 		if (compiler) armStageWatchdog(compiler, ctx);
 		if (planRun) armStageWatchdog(planRun, ctx);
-		const capabilityHint = compiler ? `\nCompiler capability (use only with foundry_aatp_write): ${compiler.capability}` : planRun ? `\nPlan3 capability (use only with foundry_plan_write): ${planRun.capability}` : "";
+		const capabilityHint = compiler ? `\nCompiler capability (use only with foundry_aatp_write): ${compiler.capability}` : planRun ? `\nPlan capability (use only with foundry_plan_write): ${planRun.capability}` : "";
 		return { message: { customType: CUSTOM, content: broken ? `Foundry state corrupt: ${broken}` : `${phasePrompt(state)} ${statusOf(state)}.\n${skillPackPrompt(pack, skillState.phase)}${capabilityHint}`, display: true, details: { ...state, skills: pack.map((s) => s.id) } } };
 	});
 
@@ -650,23 +650,23 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				resetCapabilityFailure(capabilityKey("AATP", ctx.cwd, loaded.state.aatp.epoch));
 				pendingAatp.set(key, { agent: AATP_COMPILER, index: compilerItems[0].index, cwd: ctx.cwd, epoch: loaded.state.aatp.epoch, capability: randomBytes(32).toString("hex"), createdAt: Date.now(), invalidAttempts: 0, revoked: false, writeHashes: new Map() });
 			}
-			if (loaded.state.mode === "plan3") {
+			if (loaded.state.mode === "plan") {
 				const planItems = items.filter((item) => PLAN_AGENTS.has(item.agent));
 				if (planItems.length > 0) {
-					const expected = expectedPlan3Agent(loaded.state);
-					if (!expected) return { block: true, reason: `PLAN3_GATE: no planning agent is allowed at stage ${loaded.state.planning.stage}.` };
-					if (items.length !== 1 || planItems.length !== 1 || planItems[0].agent !== expected) return { block: true, reason: `PLAN3_GATE: stage ${loaded.state.planning.stage} requires exactly one blocking ${expected}; no other Plan3 stage may run.` };
-					if (!plan3PriorEvidenceMatches(ctx.cwd, loaded.state)) return { block: true, reason: "PLAN3_EVIDENCE_GATE: a prior stage artifact changed after it was accepted. Restart /plan or restore the artifact." };
+					const expected = expectedPlanAgent(loaded.state);
+					if (!expected) return { block: true, reason: `PLAN_GATE: no planning agent is allowed at stage ${loaded.state.planning.stage}.` };
+					if (items.length !== 1 || planItems.length !== 1 || planItems[0].agent !== expected) return { block: true, reason: `PLAN_GATE: stage ${loaded.state.planning.stage} requires exactly one blocking ${expected}; no other Plan stage may run.` };
+					if (!planPriorEvidenceMatches(ctx.cwd, loaded.state)) return { block: true, reason: "PLAN_EVIDENCE_GATE: a prior stage artifact changed after it was accepted. Restart /plan or restore the artifact." };
 					const key = taskKey(event, ctx.cwd);
-					if (!key) return { block: true, reason: "PLAN3_GATE: planning task must expose a unique toolCallId." };
-					if (pendingPlan.has(key)) return { block: true, reason: "PLAN3_GATE: duplicate planning task id is not replayable." };
-					if (planActiveFor(pendingPlan, ctx.cwd)) return { block: true, reason: "PLAN3_GATE: one blocking Plan3 stage task may run per project." };
+					if (!key) return { block: true, reason: "PLAN_GATE: planning task must expose a unique toolCallId." };
+					if (pendingPlan.has(key)) return { block: true, reason: "PLAN_GATE: duplicate planning task id is not replayable." };
+					if (planActiveFor(pendingPlan, ctx.cwd)) return { block: true, reason: "PLAN_GATE: one blocking Plan stage task may run per project." };
 					const stage = loaded.state.planning.stage as ActivePlanStage;
-					resetCapabilityFailure(capabilityKey("PLAN3", ctx.cwd, loaded.state.planning.epoch, stage));
-					pendingPlan.set(key, { stage, epoch: loaded.state.planning.epoch, agent: expected, index: planItems[0].index, cwd: ctx.cwd, beforeHash: hashPlan3Artifact(ctx.cwd, stage), capability: randomBytes(32).toString("hex"), createdAt: Date.now(), invalidAttempts: 0, revoked: false, writeHashes: new Map() });
+					resetCapabilityFailure(capabilityKey("PLAN", ctx.cwd, loaded.state.planning.epoch, stage));
+					pendingPlan.set(key, { stage, epoch: loaded.state.planning.epoch, agent: expected, index: planItems[0].index, cwd: ctx.cwd, beforeHash: hashPlanArtifact(ctx.cwd, stage), capability: randomBytes(32).toString("hex"), createdAt: Date.now(), invalidAttempts: 0, revoked: false, writeHashes: new Map() });
 				}
 			}
-			if (items.some((item) => item.agent === AATP_COMPILER || PLAN_AGENTS.has(item.agent)) && loaded.state.mode !== "plan3" && !(loaded.state.phase === "aatp" && !loaded.state.aatp.manifest_sha256)) return { block: true, reason: "TASK_GATE: planning/compiler agents are only legal in their owning phase." };
+			if (items.some((item) => item.agent === AATP_COMPILER || PLAN_AGENTS.has(item.agent)) && loaded.state.mode !== "plan" && !(loaded.state.phase === "aatp" && !loaded.state.aatp.manifest_sha256)) return { block: true, reason: "TASK_GATE: planning/compiler agents are only legal in their owning phase." };
 			if (items.some((item) => item.agent === "product-analyst") && loaded.state.phase !== "discovery") return { block: true, reason: "TASK_GATE: product-analyst is only legal during discovery." };
 			if (items.some((item) => item.agent === "design-foundation") && (loaded.state.phase !== "design" || loaded.state.design.status === "locked")) return { block: true, reason: "TASK_GATE: design-foundation is only legal while design is unlocked." };
 			if (governedTask(raw)) {
@@ -722,7 +722,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 					const item = tasks[planRun.index];
 					if (item && typeof item === "object") {
 						const ins = typeof item.instructions === "string" ? item.instructions : "";
-						tasks[planRun.index] = { ...item, instructions: `[PLAN3_CAPABILITY]: You hold the cryptographic write capability for this run.\nYou MUST use the 'foundry_plan_write' tool to write unsealed Plan3 artifacts.\nYour capability token is: ${planRun.capability}\nProvide this exact token in the 'capability' argument for every foundry_plan_write call.\n\n${ins}` };
+						tasks[planRun.index] = { ...item, instructions: `[PLAN_CAPABILITY]: You hold the cryptographic write capability for this run.\nYou MUST use the 'foundry_plan_write' tool to write unsealed Plan artifacts.\nYour capability token is: ${planRun.capability}\nProvide this exact token in the 'capability' argument for every foundry_plan_write call.\n\n${ins}` };
 						modified = { ...modified, tasks };
 					}
 				}
@@ -742,20 +742,20 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (planRun) {
 			clearStageWatchdog(planRun);
 			pendingPlan.delete(key);
-			if (planRun.revoked) return capabilityCircuit("PLAN3");
+			if (planRun.revoked) return capabilityCircuit("PLAN");
 			const currentPlanState = loadState(ctx.cwd);
-			if (currentPlanState.planning.epoch !== planRun.epoch || currentPlanState.planning.stage !== planRun.stage) return { isError: true, content: [{ type: "text" as const, text: "PLAN3_EPOCH_GATE: stale planning capability result rejected; restart the current Plan3 stage." }] };
+			if (currentPlanState.planning.epoch !== planRun.epoch || currentPlanState.planning.stage !== planRun.stage) return { isError: true, content: [{ type: "text" as const, text: "PLAN_EPOCH_GATE: stale planning capability result rejected; restart the current Plan stage." }] };
 			const result = resultForPlan(extractTaskResults(event.details), planRun);
 			const taskFailed = !result || result.exitCode !== 0 || Boolean(result.error) || result.aborted === true;
-			const terminalWrite = capabilityWriteMatches(ctx.cwd, planRun, PLAN3_ARTIFACTS[planRun.stage]);
+			const terminalWrite = capabilityWriteMatches(ctx.cwd, planRun, PLAN_ARTIFACTS[planRun.stage]);
 			if (taskFailed && !terminalWrite) {
-				const prefix = planRun.timedOut ? `PLAN3_STAGE_TIMEOUT: ${planRun.stage} exceeded ${Math.round(stageTimeoutMs() / 60000)} minutes` : `PLAN3_STAGE_FAILED: ${planRun.stage} did not complete`;
+				const prefix = planRun.timedOut ? `PLAN_STAGE_TIMEOUT: ${planRun.stage} exceeded ${Math.round(stageTimeoutMs() / 60000)} minutes` : `PLAN_STAGE_FAILED: ${planRun.stage} did not complete`;
 				return { isError: true, content: [{ type: "text" as const, text: `${prefix}; stage remains unchanged. Respawn the same stage once with a fresh child context; do not restart completed stages or guess a capability.` }] };
 			}
-			const artifactHash = hashPlan3Artifact(ctx.cwd, planRun.stage);
-			if (!artifactHash || artifactHash === planRun.beforeHash) return { isError: true, content: [{ type: "text" as const, text: `PLAN3_ARTIFACT_GATE: ${planRun.stage} artifact was not newly produced by the task.` }] };
-			const state = loadState(ctx.cwd), completed = completePlan3Stage(ctx.cwd, state, planRun.stage, artifactHash);
-			if (!completed.ok) return { isError: true, content: [{ type: "text" as const, text: completed.reason ?? "PLAN3_STAGE_GATE" }] };
+			const artifactHash = hashPlanArtifact(ctx.cwd, planRun.stage);
+			if (!artifactHash || artifactHash === planRun.beforeHash) return { isError: true, content: [{ type: "text" as const, text: `PLAN_ARTIFACT_GATE: ${planRun.stage} artifact was not newly produced by the task.` }] };
+			const state = loadState(ctx.cwd), completed = completePlanStage(ctx.cwd, state, planRun.stage, artifactHash);
+			if (!completed.ok) return { isError: true, content: [{ type: "text" as const, text: completed.reason ?? "PLAN_STAGE_GATE" }] };
 			if (planRun.stage === "synth") {
 				try {
 					const specs = listAatpSpecs(ctx.cwd);
@@ -774,8 +774,8 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				} catch { /* if no AATP specs were written in synth, manual /aatp remains available */ }
 			}
 			persist(ctx.cwd, state); ctx.ui.setStatus("foundry", statusOf(state));
-			const recovery = taskFailed ? "PLAN3_STAGE_RECOVERED: terminal artifact was written through the stage capability before the provider task stopped.\n" : "";
-			return { content: [{ type: "text" as const, text: `${recovery}${plan3Status(state)}\n${plan3Instruction(state)}` }] };
+			const recovery = taskFailed ? "PLAN_STAGE_RECOVERED: terminal artifact was written through the stage capability before the provider task stopped.\n" : "";
+			return { content: [{ type: "text" as const, text: `${recovery}${planStatus(state)}\n${planInstruction(state)}` }] };
 		}
 		const aatpRun = pendingAatp.get(key);
 		if (aatpRun) {
@@ -865,19 +865,19 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const which = (params.phase || "").trim().toLowerCase(), state = loadState(ctx.cwd);
 		if (which === "product" || (!which && !productReady(state))) {
 			if (!lockArtifactHash(ctx.cwd, state, "product")) return { content: [{ type: "text", text: "PRODUCT_GATE: docs/PRODUCT.md must exist and be non-empty before approval." }], isError: true };
-			state.product.status = "approved"; state.phase = "planning"; enterPlan3(state); invalidateQa(state); persist(ctx.cwd, state);
-			orchestrate(pi, "PRODUCT approved.", "Product approved. Running Plan3...");
-			enterOrResumePlan3(pi, ctx.cwd, state);
+			state.product.status = "approved"; state.phase = "planning"; enterPlan(state); invalidateQa(state); persist(ctx.cwd, state);
+			orchestrate(pi, "PRODUCT approved.", "Product approved. Running Plan...");
+			enterOrResumePlan(pi, ctx.cwd, state);
 			return { content: [{ type: "text", text: "Product phase approved successfully." }] };
 		}
 		if (which === "plan" || (!which && productReady(state))) {
-			if (state.mode === "plan3" && state.planning.stage !== "awaiting_lock") return { content: [{ type: "text", text: "PLAN3_GATE: plan approval requires a completed Draft → Redteam → Synth cycle." }], isError: true };
-			if (!plan3ArtifactsMatch(ctx.cwd, state)) return { content: [{ type: "text", text: "PLAN3_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan3 or restore the accepted artifacts." }], isError: true };
+			if (state.mode === "plan" && state.planning.stage !== "awaiting_lock") return { content: [{ type: "text", text: "PLAN_GATE: plan approval requires a completed Draft → Redteam → Synth cycle." }], isError: true };
+			if (!planArtifactsMatch(ctx.cwd, state)) return { content: [{ type: "text", text: "PLAN_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan or restore the accepted artifacts." }], isError: true };
 			if (!lockArtifactHash(ctx.cwd, state, "master_plan")) return { content: [{ type: "text", text: "PLAN_GATE: docs/MASTER_PLAN.md must exist and be non-empty before lock." }], isError: true };
 			state.master_plan.status = "locked"; state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version; state.conflict = { kind: "none", reason: "" }; state.mode = "normal"; invalidateQa(state); persist(ctx.cwd, state);
 			if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") {
 				state.phase = "design"; resetAatp(state); persist(ctx.cwd, state);
-				orchestrate(pi, "PLAN LOCKED by user.", "Plan3 evidence accepted. Continue with /design; after design gate Foundry runs /build automatically.");
+				orchestrate(pi, "PLAN LOCKED by user.", "Plan evidence accepted. Continue with /design; after design gate Foundry runs /build automatically.");
 			} else {
 				if (state.aatp.manifest_sha256) advanceFoundry(pi, ctx.cwd, "");
 				else requestAatpCompile(pi, ctx.cwd, state);
@@ -903,17 +903,17 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	} });
 	pi.registerCommand("foundry-version", { description: "Show Foundry/OMP versions and latest stable tag", handler: async (_args, ctx) => { const result = await checkForUpdate({ force: true }); if (result.notify) ctx.ui.notify(result.notify, "info"); orchestrate(pi, "Foundry version", versionReport(result)); } });
 
-	const plan3Handler = async (args: string, ctx: { cwd: string; ui: { notify: (message: string, level?: "error" | "info" | "warning") => void } }) => {
+	const planHandler = async (args: string, ctx: { cwd: string; ui: { notify: (message: string, level?: "error" | "info" | "warning") => void } }) => {
 		const state = loadState(ctx.cwd), missing = requireProduct(state);
 		if (missing) { ctx.ui.notify(missing, "warning"); return; }
 		const sub = args.trim().toLowerCase();
-		if (sub === "status") { orchestrate(pi, plan3Status(state), state.mode === "plan3" ? plan3Instruction(state) : "Plan3 is not active."); return; }
-		if (sub === "abort") { abortPlan3(state); persist(ctx.cwd, state); orchestrate(pi, "Plan3 aborted by user.", "Planning stage authority is cleared. The plan remains unlocked unless it was already locked."); return; }
-		if (state.master_plan.status === "locked") { ctx.ui.notify("PLAN_GATE: master plan is locked. Use /plan-revise before starting a new Plan3 cycle.", "warning"); return; }
-		enterOrResumePlan3(pi, ctx.cwd, state, sub === "restart");
+		if (sub === "status") { orchestrate(pi, planStatus(state), state.mode === "plan" ? planInstruction(state) : "Plan is not active."); return; }
+		if (sub === "abort") { abortPlan(state); persist(ctx.cwd, state); orchestrate(pi, "Plan aborted by user.", "Planning stage authority is cleared. The plan remains unlocked unless it was already locked."); return; }
+		if (state.master_plan.status === "locked") { ctx.ui.notify("PLAN_GATE: master plan is locked. Use /plan-revise before starting a new Plan cycle.", "warning"); return; }
+		enterOrResumePlan(pi, ctx.cwd, state, sub === "restart");
 	};
-	pi.registerCommand("plan", { description: "Enter/resume governed Draft → Redteam → Synth planning mode", handler: plan3Handler });
-	pi.registerCommand("plan-revise", { description: "Human-only: reopen locked plan and restart Plan3", handler: async (args, ctx) => {
+	pi.registerCommand("plan", { description: "Enter/resume governed Draft → Redteam → Synth planning mode", handler: planHandler });
+	pi.registerCommand("plan-revise", { description: "Human-only: reopen locked plan and restart Plan", handler: async (args, ctx) => {
 		const state = loadState(ctx.cwd);
 		state.master_plan.status = "draft";
 		state.master_plan.sha256 = "";
@@ -923,9 +923,9 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		state.design = { required: true, version: state.design.version, status: "missing", sha256: "" };
 		resetAatp(state);
 		invalidateQa(state);
-		enterPlan3(state, true);
+		enterPlan(state, true);
 		persist(ctx.cwd, state);
-		orchestrate(pi, "PLAN reopened by user.", `${plan3Status(state)}\n${plan3Instruction(state)}\nDownstream design/AATP/reviews/QA were invalidated. Run /design approve or /design skip after the new plan is locked.`);
+		orchestrate(pi, "PLAN reopened by user.", `${planStatus(state)}\n${planInstruction(state)}\nDownstream design/AATP/reviews/QA were invalidated. Run /design approve or /design skip after the new plan is locked.`);
 	} });
 
 	pi.registerCommand("design", { description: "Design foundation after plan lock", handler: async (args, ctx) => {
@@ -939,19 +939,19 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const which = args.trim().toLowerCase(), state = loadState(ctx.cwd);
 		if (which === "product" || which === "approve-product" || (!which && !productReady(state))) {
 			if (!lockArtifactHash(ctx.cwd, state, "product")) { ctx.ui.notify("PRODUCT_GATE: docs/PRODUCT.md must exist and be non-empty before approval.", "error"); return; }
-			state.product.status = "approved"; state.phase = "planning"; enterPlan3(state); invalidateQa(state); persist(ctx.cwd, state);
-			orchestrate(pi, "PRODUCT approved.", "Product approved. Running Plan3...");
-			enterOrResumePlan3(pi, ctx.cwd, state);
+			state.product.status = "approved"; state.phase = "planning"; enterPlan(state); invalidateQa(state); persist(ctx.cwd, state);
+			orchestrate(pi, "PRODUCT approved.", "Product approved. Running Plan...");
+			enterOrResumePlan(pi, ctx.cwd, state);
 			return;
 		}
 		if (which === "plan" || which === "approve-plan" || (!which && productReady(state))) {
-			if (state.mode === "plan3" && state.planning.stage !== "awaiting_lock") { ctx.ui.notify("PLAN3_GATE: plan approval requires a completed Draft → Redteam → Synth cycle.", "warning"); return; }
-			if (!plan3ArtifactsMatch(ctx.cwd, state)) { ctx.ui.notify("PLAN3_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan3 or restore the accepted artifacts.", "error"); return; }
+			if (state.mode === "plan" && state.planning.stage !== "awaiting_lock") { ctx.ui.notify("PLAN_GATE: plan approval requires a completed Draft → Redteam → Synth cycle.", "warning"); return; }
+			if (!planArtifactsMatch(ctx.cwd, state)) { ctx.ui.notify("PLAN_EVIDENCE_GATE: planning artifacts changed after their stage completed. Restart Plan or restore the accepted artifacts.", "error"); return; }
 			if (!lockArtifactHash(ctx.cwd, state, "master_plan")) { ctx.ui.notify("PLAN_GATE: docs/MASTER_PLAN.md must exist and be non-empty before lock.", "error"); return; }
 			state.master_plan.status = "locked"; state.master_plan.version = state.master_plan.version === "0" ? "1.0" : state.master_plan.version; state.conflict = { kind: "none", reason: "" }; state.mode = "normal"; invalidateQa(state); persist(ctx.cwd, state);
 			if (state.design.required && state.design.status !== "locked" && state.design.status !== "not_required") {
 				state.phase = "design"; resetAatp(state); persist(ctx.cwd, state);
-				orchestrate(pi, "PLAN LOCKED by user.", "Plan3 evidence accepted. Continue with /design; after design gate Foundry runs /build automatically.");
+				orchestrate(pi, "PLAN LOCKED by user.", "Plan evidence accepted. Continue with /design; after design gate Foundry runs /build automatically.");
 			} else {
 				if (state.aatp.manifest_sha256) {
 					advanceFoundry(pi, ctx.cwd, "");

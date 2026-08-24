@@ -3,64 +3,64 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { denyToolCall } from "../src/permissions";
-import { abortPlan3, completePlan3Stage, enterPlan3, expectedPlan3Agent, plan3ArtifactsMatch, plan3Status } from "../src/plan3";
+import { abortPlan, completePlanStage, enterPlan, expectedPlanAgent, planArtifactsMatch, planStatus } from "../src/plan";
 import { defaultState } from "../src/types";
 
 function project(): string {
-	const dir = mkdtempSync(join(tmpdir(), "foundry-plan3-"));
+	const dir = mkdtempSync(join(tmpdir(), "foundry-plan-"));
 	mkdirSync(join(dir, "docs", "planning"), { recursive: true });
 	return dir;
 }
 
-describe("Plan3 governed mode", () => {
+describe("Plan governed mode", () => {
 	test("persists exact Draft -> Redteam -> Synth -> human-lock sequence", () => {
 		const cwd = project(), state = defaultState();
 		state.product.status = "approved";
-		enterPlan3(state);
-		expect(state.mode).toBe("plan3");
+		enterPlan(state);
+		expect(state.mode).toBe("plan");
 		expect(state.planning.stage).toBe("draft");
-		expect(expectedPlan3Agent(state)).toBe("plan-drafter");
-		expect(plan3Status(state)).toContain("PLAN3 1/3");
+		expect(expectedPlanAgent(state)).toBe("plan-drafter");
+		expect(planStatus(state)).toContain("PLAN 1/3");
 
 		writeFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "draft\n");
-		expect(completePlan3Stage(cwd, state, "draft").ok).toBe(true);
+		expect(completePlanStage(cwd, state, "draft").ok).toBe(true);
 		expect(state.planning.stage).toBe("redteam");
-		expect(expectedPlan3Agent(state)).toBe("plan-redteam");
+		expect(expectedPlanAgent(state)).toBe("plan-redteam");
 
 		writeFileSync(join(cwd, "docs", "planning", "PLAN_REVIEW.md"), "review\n");
-		expect(completePlan3Stage(cwd, state, "redteam").ok).toBe(true);
+		expect(completePlanStage(cwd, state, "redteam").ok).toBe(true);
 		expect(state.planning.stage).toBe("synth");
-		expect(expectedPlan3Agent(state)).toBe("plan-synth");
+		expect(expectedPlanAgent(state)).toBe("plan-synth");
 
 		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "final\n");
-		expect(completePlan3Stage(cwd, state, "synth").ok).toBe(true);
+		expect(completePlanStage(cwd, state, "synth").ok).toBe(true);
 		expect(state.planning.stage).toBe("awaiting_lock");
-		expect(plan3ArtifactsMatch(cwd, state)).toBe(true);
+		expect(planArtifactsMatch(cwd, state)).toBe(true);
 	});
 
 	test("artifact drift invalidates human-lock evidence", () => {
 		const cwd = project(), state = defaultState();
-		enterPlan3(state);
-		writeFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "draft\n"); completePlan3Stage(cwd, state, "draft");
-		writeFileSync(join(cwd, "docs", "planning", "PLAN_REVIEW.md"), "review\n"); completePlan3Stage(cwd, state, "redteam");
-		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "final\n"); completePlan3Stage(cwd, state, "synth");
+		enterPlan(state);
+		writeFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "draft\n"); completePlanStage(cwd, state, "draft");
+		writeFileSync(join(cwd, "docs", "planning", "PLAN_REVIEW.md"), "review\n"); completePlanStage(cwd, state, "redteam");
+		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "final\n"); completePlanStage(cwd, state, "synth");
 		writeFileSync(join(cwd, "docs", "planning", "PLAN_REVIEW.md"), "tampered\n");
-		expect(plan3ArtifactsMatch(cwd, state)).toBe(false);
+		expect(planArtifactsMatch(cwd, state)).toBe(false);
 	});
 
 	test("stage completion rechecks the artifact hash at the lock boundary", () => {
-		const cwd = project(), state = defaultState(); enterPlan3(state);
+		const cwd = project(), state = defaultState(); enterPlan(state);
 		writeFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "draft\n");
-		expect(completePlan3Stage(cwd, state, "draft", "stale-hash").ok).toBe(false);
+		expect(completePlanStage(cwd, state, "draft", "stale-hash").ok).toBe(false);
 		expect(state.planning.stage).toBe("draft");
 	});
 
 	test("abort clears stale stage evidence", () => {
 		const state = defaultState();
-		enterPlan3(state);
+		enterPlan(state);
 		state.planning.draft_sha256 = "draft";
 		state.planning.review_sha256 = "review";
-		abortPlan3(state);
+		abortPlan(state);
 		expect(state.mode).toBe("normal");
 		expect(state.planning.stage).toBe("idle");
 		expect(state.planning.epoch).not.toBe("");
@@ -70,7 +70,7 @@ describe("Plan3 governed mode", () => {
 	});
 
 	test("write authority follows only the active planning artifact", () => {
-		const state = defaultState(); state.product.status = "approved"; enterPlan3(state);
+		const state = defaultState(); state.product.status = "approved"; enterPlan(state);
 		const canonicalize = (raw: string) => raw.toLowerCase();
 		expect(denyToolCall("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md" }, state, { canonicalize })?.reason).toContain("foundry_plan_write");
 		expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, state, { canonicalize })?.reason).toContain("foundry_plan_write");

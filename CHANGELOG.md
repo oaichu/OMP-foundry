@@ -5,7 +5,7 @@
 - Synchronize the internal `FOUNDRY_VERSION` constant with the package/release version (`0.8.0`); previously the governance state was stamped `0.7.4` and the update checker reported a false "update available".
 - Add this changelog entry so the released version is documented.
 
-## 0.7.4 — reliable bounded Plan3 stages
+## 0.7.4 — reliable bounded Plan stages
 
 - keep Draft, Redteam, and Synth at maximum reasoning while removing nested planning helpers and broad tool expansion;
 - add a managed six-minute stage watchdog with configurable bounds so stalled provider streams abort instead of hanging indefinitely;
@@ -15,13 +15,13 @@
 ## 0.7.3 — terminal capability completion
 
 - synchronize the runtime version with the package/release version;
-- stop Plan3/AATP child sessions after their terminal capability writes;
+- stop Plan/AATP child sessions after their terminal capability writes;
 - recover and validate a terminal artifact when an OMP provider reports a post-write task failure;
 - keep invalid, incomplete, or unproven artifacts fail-closed and unsealed.
 
 ## 0.7.2 — capability handoff and circuit-breaker hardening
 
-- Hide Plan3/AATP capability writers from the default orchestrator tool surface while keeping them explicitly available to their declared stage agents.
+- Hide Plan/AATP capability writers from the default orchestrator tool surface while keeping them explicitly available to their declared stage agents.
 - Share short-lived capability state across OMP sub-agent runners and bind writes to the spawned session, so a parent cannot use a leaked token.
 - Detect the real OMP `session_init` agent identity, provide actionable non-retryable errors, and abort/revoke a run after repeated invalid capability attempts.
 - Added integration coverage for parent-token misuse, session-bound handoff, hidden tools, and guessed-token circuit breaking.
@@ -34,7 +34,7 @@
 
 - Added schema v6 provenance fields for implementation, verification, review, dependency, manifest, scope evidence, and a bounded baseline/commit ledger.
 - Descendant AATP work now waits for an approved, provenance-bound dependency; request-changes recursively invalidates descendants.
-- Added dispatch HEAD checks and Plan3/AATP epochs to reject stale worker and compiler capabilities.
+- Added dispatch HEAD checks and Plan/AATP epochs to reject stale worker and compiler capabilities.
 - Added pre-commit execution of declared AATP verification steps with bounded output, sanitized environment, and disposable HOME/TMP.
 - Design preview execution now fails closed if it changes the visible Git worktree; production design-system code must still enter through AATP.
 - Added optional fail-closed external sandbox mode with `FOUNDRY_VERIFY_REQUIRE_SANDBOX=1` and `FOUNDRY_VERIFY_SANDBOX_EXECUTABLE`.

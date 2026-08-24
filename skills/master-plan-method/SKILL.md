@@ -12,7 +12,7 @@ description: "Methodology and rubrics for architecting, red-teaming, and synthes
 
 # master-plan-method
 
-This skill contains planning **methodology only**. It does not own lifecycle, stage transitions, agent spawning, approval, or plan locking. `/plan3` and the Foundry runtime state machine own those concerns.
+This skill contains planning **methodology only**. It does not own lifecycle, stage transitions, agent spawning, approval, or plan locking. `/plan` and the Foundry runtime state machine own those concerns.
 
 ## Architect rubric
 

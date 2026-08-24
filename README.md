@@ -59,7 +59,7 @@
 
 ## 💎 Core Architectural Superpowers
 
-### 🏛️ 1. Plan3: 3-Stage Adversarial Planning
+### 🏛️ 1. Plan: 3-Stage Adversarial Planning
 Instead of letting a single LLM hallucinate architecture in one prompt, Foundry runs a structured, adversarial consensus:
 1. **Architect (`plan-drafter`)**: Derives a scoped structural proposal (`docs/planning/MASTER_PLAN_DRAFT.md`).
 2. **Red Team (`plan-redteam`)**: Attacks architectural assumptions, edge cases, scalability limits, and security vulnerabilities (`docs/planning/PLAN_REVIEW.md`).
@@ -88,7 +88,7 @@ flowchart TD
         A[💡 docs/PRODUCT.md] -->|/approve or 'ok'| B(Phase: PLANNING)
     end
 
-    subgraph Plan3 Engine
+    subgraph Plan Engine
         B --> C[Stage 1: plan-drafter]
         C --> D[Stage 2: plan-redteam]
         D --> E[Stage 3: plan-synth]
@@ -157,7 +157,7 @@ In any project repository, run:
 ### 3. Move with Natural Flow
 ```text
 1. 💡 Review requirements in docs/PRODUCT.md  → Type "ok" or /approve
-2. 🏛️ Plan3 runs (Draft → Redteam → Synth)     → Type "ok" or /approve
+2. 🏛️ Plan runs (Draft → Redteam → Synth)     → Type "ok" or /approve
 3. 📦 AATP DAG compiles work orders           → Type /build
 4. ⚙️ Workers code in isolated <=80 line diffs → Type /verify
 5. 🚀 Check release readiness                 → Type /release-check
@@ -172,7 +172,7 @@ In any project repository, run:
 | **`/foundry [prompt]`** | **Core** | Auto-bootstraps project governance or resumes the next logical step. |
 | **`/approve`** | **Ergonomics** | Smart context-aware approval for Product, Plan, and Design gates. |
 | **`/ok` · `/run` · `/go`** | **Ergonomics** | Natural conversation shortcuts to trigger the next execution layer. |
-| **`/plan` · `/plan3`** | **Planning** | Start or resume the 3-Stage Master Plan consensus engine. |
+| **`/plan` · `/plan`** | **Planning** | Start or resume the 3-Stage Master Plan consensus engine. |
 | **`/plan-revise`** | **Planning** | Human-only command to unlock the master plan and safely re-plan. |
 | **`/aatp`** | **AATP** | Spawns the synthesis compiler to generate the project-wide dependency DAG. |
 | **`/aatp-seal`** | **AATP** | **Instant 1-second seal** for manual transplants or pre-generated DAGs. |
@@ -212,7 +212,7 @@ src/
 ├── gates.ts             # Approval gates, state guards, phase transitions
 ├── permissions.ts       # Path canonicalization & mutation boundaries
 ├── aatp.ts              # Work-order DAG engine, dependency graph & tickets
-├── plan3.ts             # 3-Stage Master Plan lifecycle (Draft, Redteam, Synth)
+├── plan.ts             # 3-Stage Master Plan lifecycle (Draft, Redteam, Synth)
 ├── patch-gate.ts        # Unified diff parsing, <=80 line cap & atomic commit
 ├── release.ts           # Provenance ledger & release derivation
 ├── git-runtime.ts       # Hardened Git environment & hook sanitization

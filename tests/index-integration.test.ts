@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFil
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import registerFoundryExtension from "../src/index";
-import { hashPlan3Artifact } from "../src/plan3";
+import { hashPlanArtifact } from "../src/plan";
 import { lockArtifactHash } from "../src/release";
 import { loadState, saveState } from "../src/state-machine";
 import { defaultState } from "../src/types";
@@ -232,27 +232,27 @@ describe("extension integration smoke", () => {
 		expect(readFileSync(join(cwd, "docs", "AATP", "AATP-001.md"), "utf8")).toContain("AATP-001");
 	});
 
-	test("Plan3 capability is delivered from session_init and parent guesses cannot write", async () => {
+	test("Plan capability is delivered from session_init and parent guesses cannot write", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-capability-"));
 		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
-		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.mode = "plan"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
 		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0];
 		await taskHook({ toolName: "task", toolCallId: "plan-capability", input: { agent: "plan-drafter", task: "draft the locked plan" } }, ctx(cwd));
 		const prompt = await agentHook({}, ctx(cwd, "plan-session", "plan-drafter"));
-		const capability = prompt.message.content.match(/Plan3 capability .*: ([a-f0-9]{64})/)?.[1];
+		const capability = prompt.message.content.match(/Plan capability .*: ([a-f0-9]{64})/)?.[1];
 		expect(capability).toBeTruthy();
 		const denied = await tools.get("foundry_plan_write")!.execute("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md", content: "parent must not write\n", capability }, "session", null, ctx(cwd, "parent-session"));
 		expect(denied.isError).toBe(true);
-		expect(denied.content[0].text).toContain("PLAN3_CAPABILITY_DENIED");
+		expect(denied.content[0].text).toContain("PLAN_CAPABILITY_DENIED");
 		const written = await tools.get("foundry_plan_write")!.execute("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md", content: "# Draft\n", capability }, "session", null, ctx(cwd, "plan-session"));
 		expect(written.isError).not.toBe(true);
 		expect(readFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "utf8")).toContain("Draft");
 	});
 
-	test("Plan3 stage watchdog aborts a stalled stage without advancing state", async () => {
+	test("Plan stage watchdog aborts a stalled stage without advancing state", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-watchdog-"));
 		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
-		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.mode = "plan"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
 		const { handlers } = harness();
 		const taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
 		await taskHook({ toolName: "task", toolCallId: "stalled-plan", input: { agent: "plan-drafter", task: "draft the plan" } }, ctx(cwd));
@@ -262,25 +262,25 @@ describe("extension integration smoke", () => {
 		expect(stalled.wasAborted()).toBe(true);
 		const failed = await resultHook({ toolName: "task", toolCallId: "stalled-plan", details: { results: [{ index: 0, agent: "plan-drafter", exitCode: 1, aborted: true }] } }, stalled);
 		expect(failed.isError).toBe(true);
-		expect(failed.content[0].text).toContain("PLAN3_STAGE_TIMEOUT");
+		expect(failed.content[0].text).toContain("PLAN_STAGE_TIMEOUT");
 		expect(failed.content[0].text).toContain("fresh child context");
 		expect(loadState(cwd).planning.stage).toBe("draft");
 	});
 
-	test("Plan3 advances after a terminal capability write despite a provider post-write failure", async () => {
+	test("Plan advances after a terminal capability write despite a provider post-write failure", async () => {
 		const cwd = mkdtempSync(join(tmpdir(), "foundry-plan-provider-recovery-"));
 		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
-		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.mode = "plan3"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
+		const state = defaultState(); state.product.status = "approved"; state.product.sha256 = "123"; state.mode = "plan"; state.phase = "planning"; state.planning.stage = "draft"; saveState(cwd, state);
 		const { handlers, tools } = harness(), taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
 		await taskHook({ toolName: "task", toolCallId: "provider-plan", input: { agent: "plan-drafter", task: "draft the plan" } }, ctx(cwd));
 		const prompt = await agentHook({}, ctx(cwd, "plan-session", "plan-drafter"));
-		const capability = prompt.message.content.match(/Plan3 capability .*: ([a-f0-9]{64})/)?.[1];
+		const capability = prompt.message.content.match(/Plan capability .*: ([a-f0-9]{64})/)?.[1];
 		expect(capability).toBeTruthy();
 		const written = await tools.get("foundry_plan_write")!.execute("write", { path: "docs/planning/MASTER_PLAN_DRAFT.md", content: "# Draft\n\nComplete planning evidence.\n", capability }, "session", null, ctx(cwd, "plan-session"));
 		expect(written.isError).not.toBe(true);
 		const recovered = await resultHook({ toolName: "task", toolCallId: "provider-plan", details: { results: [{ index: 0, agent: "plan-drafter", id: "plan-1", exitCode: 1, error: "Tool choice 'required' must be specified with 'tools' parameter.", aborted: true }] } }, ctx(cwd));
 		expect(recovered.isError).not.toBe(true);
-		expect(recovered.content[0].text).toContain("PLAN3_STAGE_RECOVERED");
+		expect(recovered.content[0].text).toContain("PLAN_STAGE_RECOVERED");
 		expect(loadState(cwd).planning.stage).toBe("redteam");
 		expect(loadState(cwd).planning.draft_sha256).toMatch(/^[a-f0-9]{64}$/);
 	});
@@ -361,13 +361,13 @@ describe("extension integration smoke", () => {
 		await commands.get("approve")!.handler("", ctx(cwd));
 		const productApproved = loadState(cwd);
 		expect(productApproved.product.status).toBe("approved");
-		expect(productApproved.mode).toBe("plan3");
+		expect(productApproved.mode).toBe("plan");
 
-		// Simulate plan3 reaching awaiting_lock
+		// Simulate plan reaching awaiting_lock
 		productApproved.planning.stage = "awaiting_lock";
-		productApproved.planning.draft_sha256 = hashPlan3Artifact(cwd, "draft")!;
-		productApproved.planning.review_sha256 = hashPlan3Artifact(cwd, "redteam")!;
-		productApproved.planning.final_sha256 = hashPlan3Artifact(cwd, "synth")!;
+		productApproved.planning.draft_sha256 = hashPlanArtifact(cwd, "draft")!;
+		productApproved.planning.review_sha256 = hashPlanArtifact(cwd, "redteam")!;
+		productApproved.planning.final_sha256 = hashPlanArtifact(cwd, "synth")!;
 		saveState(cwd, productApproved);
 
 		await commands.get("approve")!.handler("", ctx(cwd));
@@ -385,18 +385,18 @@ describe("extension integration smoke", () => {
 
 		const state = defaultState();
 		state.product.status = "approved"; state.product.sha256 = "123";
-		state.mode = "plan3";
+		state.mode = "plan";
 		state.phase = "planning";
 		state.planning.stage = "synth";
-		state.planning.draft_sha256 = hashPlan3Artifact(cwd, "draft")!;
-		state.planning.review_sha256 = hashPlan3Artifact(cwd, "redteam")!;
+		state.planning.draft_sha256 = hashPlanArtifact(cwd, "draft")!;
+		state.planning.review_sha256 = hashPlanArtifact(cwd, "redteam")!;
 		saveState(cwd, state);
 
 		const { handlers, tools } = harness();
 		const taskHook = handlers.get("tool_call")![0], agentHook = handlers.get("before_agent_start")![0], resultHook = handlers.get("tool_result")![0];
 		await taskHook({ toolName: "task", toolCallId: "synth-run", input: { agent: "plan-synth", task: "synthesize plan and AATP" } }, ctx(cwd));
 		const prompt = await agentHook({}, ctx(cwd, "synth-session", "plan-synth"));
-		const capability = prompt.message.content.match(/Plan3 capability .*: ([a-f0-9]{64})/)?.[1];
+		const capability = prompt.message.content.match(/Plan capability .*: ([a-f0-9]{64})/)?.[1];
 		expect(capability).toBeTruthy();
 
 		// Write initial AATP spec

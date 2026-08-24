@@ -1,6 +1,6 @@
 ---
 name: plan-synth
-description: "Plan3 stage 3/3 adjudicator. Synthesizes draft + red-team review into MASTER_PLAN and decomposes into initial AATP work orders."
+description: "Plan stage 3/3 adjudicator. Synthesizes draft + red-team review into MASTER_PLAN and decomposes into initial AATP work orders."
 tools: read, grep, glob, foundry_plan_write
 model: "@foundry_synth"
 thinking-level: high

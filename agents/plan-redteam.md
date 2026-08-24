@@ -1,6 +1,6 @@
 ---
 name: plan-redteam
-description: "Plan3 stage 2/3 adversarial critic. Writes PLAN_REVIEW only."
+description: "Plan stage 2/3 adversarial critic. Writes PLAN_REVIEW only."
 tools: read, grep, glob, foundry_plan_write
 model: "@foundry_redteam"
 thinking-level: high

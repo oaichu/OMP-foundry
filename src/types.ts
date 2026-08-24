@@ -8,15 +8,15 @@ export type Phase =
 	| "qa"
 	| "release";
 
-export type FoundryMode = "normal" | "plan3";
-export type Plan3Stage = "idle" | "draft" | "redteam" | "synth" | "awaiting_lock";
+export type FoundryMode = "normal" | "plan";
+export type PlanStage = "idle" | "draft" | "redteam" | "synth" | "awaiting_lock";
 export type ArtifactStatus = "missing" | "draft" | "approved" | "locked" | "not_required";
 export type QaStatus = "pending" | "pass" | "fail";
 export type TicketStatus = "ready" | "active" | "completed" | "blocked";
 export type ReviewVerdict = "none" | "APPROVE" | "REQUEST_CHANGES" | "BLOCK";
 export type ConflictKind = "none" | "PLAN_CONFLICT" | "DESIGN_CONFLICT" | "DEPENDENCY_CONFLICT" | "SCOPE_INSUFFICIENT";
 
-export const CURRENT_STATE_SCHEMA = 6;
+export const CURRENT_STATE_SCHEMA = 7;
 export const FOUNDRY_VERSION = "0.8.0";
 
 export class StateError extends Error {
@@ -55,7 +55,7 @@ export interface CompanyState {
 	last_written_by: string;
 	mode: FoundryMode;
 	phase: Phase;
-	planning: { stage: Plan3Stage; epoch: string; draft_sha256: string; review_sha256: string; final_sha256: string };
+	planning: { stage: PlanStage; epoch: string; draft_sha256: string; review_sha256: string; final_sha256: string };
 	product: { status: ArtifactStatus; sha256: string };
 	master_plan: { version: string; status: ArtifactStatus; sha256: string };
 	design: { required: boolean; version: string; status: ArtifactStatus; sha256: string };
@@ -68,8 +68,8 @@ export interface CompanyState {
 
 export const STATE_REL = ".omp/foundry-state.yml";
 export const PHASES: Phase[] = ["discovery", "planning", "design", "aatp", "implementation", "review", "qa", "release"];
-export const FOUNDRY_MODES: FoundryMode[] = ["normal", "plan3"];
-export const PLAN3_STAGES: Plan3Stage[] = ["idle", "draft", "redteam", "synth", "awaiting_lock"];
+export const FOUNDRY_MODES: FoundryMode[] = ["normal", "plan"];
+export const PLAN_STAGES: PlanStage[] = ["idle", "draft", "redteam", "synth", "awaiting_lock"];
 export const ARTIFACT_STATUSES: ArtifactStatus[] = ["missing", "draft", "approved", "locked", "not_required"];
 export const QA_STATUSES: QaStatus[] = ["pending", "pass", "fail"];
 export const TICKET_STATUSES: TicketStatus[] = ["ready", "active", "completed", "blocked"];

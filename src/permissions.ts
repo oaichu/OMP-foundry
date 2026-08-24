@@ -82,7 +82,7 @@ export function pathAllowed(rel: string, ticket: AatpTicket): boolean {
 function prePlanAllowed(rel: string, state: CompanyState): boolean {
 	if (state.phase === "discovery") return underPrefix(rel, "docs/product.md");
 	if (state.phase !== "planning") return false;
-	if (state.mode !== "plan3") return matchesAny(rel, ["docs/master_plan.md", "docs/planning/"]);
+	if (state.mode !== "plan") return matchesAny(rel, ["docs/master_plan.md", "docs/planning/"]);
 	if (state.planning.stage === "draft") return underPrefix(rel, "docs/planning/master_plan_draft.md");
 	if (state.planning.stage === "redteam") return underPrefix(rel, "docs/planning/plan_review.md");
 	if (state.planning.stage === "synth") return underPrefix(rel, "docs/master_plan.md");
@@ -133,13 +133,13 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 		if (rels.some((rel) => matchesAny(rel, [...LOCKED_PLAN_PATHS, ...LOCKED_PRODUCT_PATHS, ...LOCKED_DESIGN_PATHS, ...LOCKED_AATP_PATHS]))) return { block: true, reason: "ISOLATION_GATE: isolated worker cannot modify governance artifacts." };
 		return;
 	}
-	if (state.mode === "plan3" && state.phase === "planning" && state.planning.stage !== "idle" && state.planning.stage !== "awaiting_lock") {
-		return { block: true, reason: "PLAN3_COMPILER_GATE: native planning-artifact writes are disabled; the active stage agent must use foundry_plan_write." };
+	if (state.mode === "plan" && state.phase === "planning" && state.planning.stage !== "idle" && state.planning.stage !== "awaiting_lock") {
+		return { block: true, reason: "PLAN_COMPILER_GATE: native planning-artifact writes are disabled; the active stage agent must use foundry_plan_write." };
 	}
 	if (!planLocked(state)) {
 		const bad = rels.filter((rel) => !prePlanAllowed(rel, state));
 		if (bad.length) {
-			const stage = state.mode === "plan3" ? ` Plan3 stage=${state.planning.stage}.` : "";
+			const stage = state.mode === "plan" ? ` Plan stage=${state.planning.stage}.` : "";
 			return { block: true, reason: `PLAN_GATE:${stage} pre-lock writes are limited to the active planning artifact; denied ${bad.join(", ")}.` };
 		}
 		return;

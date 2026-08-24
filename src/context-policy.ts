@@ -1,5 +1,5 @@
 import type { CompanyState } from "./types";
-import { plan3Status } from "./plan3";
+import { planStatus } from "./plan";
 
 export const CONTEXT_POLICY = [
 	"Superpowers Policy (Three Elements):",
@@ -11,6 +11,6 @@ export const CONTEXT_POLICY = [
 ].join(" ");
 
 export function phasePrompt(state: CompanyState): string {
-	const mode = state.mode === "plan3" ? ` ${plan3Status(state)}.` : "";
+	const mode = state.mode === "plan" ? ` ${planStatus(state)}.` : "";
 	return `Foundry phase=${state.phase} mode=${state.mode}.${mode} Obey .omp/foundry-state.yml. Runtime state, stage transitions, and locks are extension-owned.`;
 }
