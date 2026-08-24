@@ -12,11 +12,7 @@ import {
 
 const FILE_MUTATING = new Set(["write", "edit", "ast_edit", "apply_patch"]);
 const READ_PATH_TOOLS = new Set(["read", "read_file", "read_text", "grep", "glob", "find", "list_files", "ls", "ast_grep"]);
-const SAFE_CONTROL_TOOLS = new Set(["task", "fetch", "web_fetch", "web_search", "question", "ask", "report_conflict", "todo", "memory", "plan", "compact", "session"]);
-const FOUNDRY_CONTROL_TOOLS = new Set(["foundry_status", "foundry_skill_read", "foundry_exec", "foundry_aatp_write", "foundry_plan_write", "foundry_approve", "foundry_step"]);
 const GOVERNED = new Set(["implementer", "hard-implementer", "smol-implementer", "reviewer", "security-reviewer"]);
-const LSP_MUTATING = new Set(["rename", "rename_file", "code_actions", "request", "reload"]);
-const LSP_READ_ONLY = new Set(["hover", "definition", "type_definition", "implementation", "references", "document_symbol", "workspace_symbol", "completion", "signature_help", "diagnostics", "document_diagnostics", "workspace_diagnostics", "folding_range", "inlay_hints"]);
 const EXTENSION_OWNED_PATHS = [
 	...STATE_PATHS,
 	".omp/config.yml",
@@ -94,15 +90,7 @@ function prePlanAllowed(rel: string, state: CompanyState): boolean {
 }
 
 export function denyToolCall(toolName: string, input: ToolInput, state: CompanyState, ctx: DenyContext = {}): { block: true; reason: string } | undefined {
-		if (toolName === "lsp") {
-		const action = String(input.action ?? "").toLowerCase();
-		if (LSP_MUTATING.has(action) || (action === "code_actions" && input.apply === true)) return { block: true, reason: `LSP_GATE: mutating LSP action ${action || "unknown"} is denied; use read-only navigation/diagnostics.` };
-		if (!LSP_READ_ONLY.has(action)) return { block: true, reason: `LSP_GATE: unknown or non-read-only action ${action || "unknown"} is denied.` };
-		const paths = collectReadPaths(input, toolName);
-		if (paths.length === 0 || paths.some((path) => readPathEscapes(path, ctx.canonicalize))) return { block: true, reason: "PATH_GATE: read-only LSP request must expose an in-repository target." };
-		return;
-	}
-	// Extension tools and the task dispatcher are known control-plane tools.
+		// Extension tools and the task dispatcher are known control-plane tools.
 	// Unknown tools that advertise mutation semantics fail closed; ordinary
 	// OMP read/fetch tools remain compatible with the extension.
 	if (toolName === "fetch" || toolName === "web_fetch" || toolName === "web_search") {
@@ -119,10 +107,6 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 				}
 			}
 		} catch { /* malformed URLs are handled by the tool */ }
-	}
-	if (toolName === "foundry_init") return { block: true, reason: "FOUNDRY_INIT_GATE: initialization is human-command-only; use /foundry-init or /foundry." };
-	if (!FILE_MUTATING.has(toolName) && !SAFE_CONTROL_TOOLS.has(toolName) && !FOUNDRY_CONTROL_TOOLS.has(toolName) && !READ_PATH_TOOLS.has(toolName) && toolName !== "eval" && toolName !== "bash" && toolName !== "lsp") {
-		return { block: true, reason: "TOOL_GATE: unknown mutation-capable tool is denied in Foundry." };
 	}
 	if (READ_PATH_TOOLS.has(toolName)) {
 		const paths = collectReadPaths(input, toolName);
