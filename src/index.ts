@@ -969,6 +969,27 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	pi.registerCommand("run", { description: "Natural shortcut: proceed with next ready Foundry step", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
 	pi.registerCommand("go", { description: "Natural shortcut: proceed with next ready Foundry step", handler: async (args, ctx) => advanceFoundry(pi, ctx.cwd, args) });
 	pi.registerCommand("debug", { description: "Superpowers 5-Step Systematic Debugging", handler: async (_args, _ctx) => orchestrate(pi, "Superpowers 5-Step Debug Protocol.", ["1. Reproduce: Write minimal failing test.", "2. Isolate: Single function in single file.", "3. Hypothesize: State 1 root cause.", "4. Fix Minimal: Patch <= 80 lines.", "5. Verify: Full verification suite."].join("\n")) });
+	
+	pi.registerCommand("aatp-seal", { description: "Manually seal AATP specs if generated offline/transplanted", handler: async (_args, ctx) => {
+		try {
+			const state = loadState(ctx.cwd), specs = listAatpSpecs(ctx.cwd), sourceManifest = aatpManifestHash(ctx.cwd);
+			if (state.phase !== "aatp") { ctx.ui.notify("AATP_COMPILER_GATE: phase must be aatp.", "error"); return; }
+			if (state.aatp.manifest_sha256) { ctx.ui.notify("AATP_COMPILER_GATE: AATP already sealed.", "info"); return; }
+			if (specs.length === 0) { ctx.ui.notify("AATP_COMPILER_GATE: no docs/AATP/AATP-*.md work orders were produced.", "error"); return; }
+			const errors = [...validateAatpSpecs(specs, { strict: true }), ...validateAatpCoverage(ctx.cwd, specs)];
+			if (errors.length) { ctx.ui.notify(`AATP_COMPILER_GATE: ${errors.join("; ")}`, "error"); return; }
+			const manifest = aatpManifestHash(ctx.cwd);
+			if (!sourceManifest || manifest !== sourceManifest) { ctx.ui.notify("AATP_COMPILER_GATE: AATP sources changed while validating; retry compilation.", "error"); return; }
+			resetAatp(state);
+			state.aatp.manifest_sha256 = manifest;
+			if (!state.aatp.manifest_sha256 || !artifactsMatch(ctx.cwd, state)) { state.aatp.manifest_sha256 = ""; ctx.ui.notify("AATP_COMPILER_GATE: locked product/plan/design evidence changed while compiling; restart the human gate.", "error"); return; }
+			seedTickets(state, specs);
+			writeAatpIndex(ctx.cwd, hydrateAatp(ctx.cwd, state));
+			recountTickets(state); invalidateQa(state); persist(ctx.cwd, state); ctx.ui.setStatus("foundry", statusOf(state));
+			orchestrate(pi, "AATP specs sealed.", `AATP_COMPILED: ${specs.length} work orders validated and sealed. Run /build for the ready implementation layer.`);
+		} catch (error) { ctx.ui.notify(`AATP_COMPILER_FAILED: ${error instanceof Error ? error.message : String(error)}`, "error"); }
+	} });
+
 	pi.registerCommand("aatp", { description: "Compile the project-wide AATP DAG with the synthesis capability", handler: async (_args, ctx) => { const state = loadState(ctx.cwd), gate = requireDesignIfUi(state); if (gate) { ctx.ui.notify(gate, "warning"); return; } requestAatpCompile(pi, ctx.cwd, state); } });
 	pi.registerCommand("build", { description: "Run ready isolated workers from the sealed AATP DAG", handler: async (_args, ctx) => {
 		const state = loadState(ctx.cwd), gate = requireDesignIfUi(state); if (gate) { ctx.ui.notify(gate, "warning"); return; }
