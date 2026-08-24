@@ -90,7 +90,7 @@ const MIN_STAGE_TIMEOUT_MS = 2 * 60 * 1000;
 const MAX_STAGE_TIMEOUT_MS = 30 * 60 * 1000;
 const CAPABILITY_BROKER_SYMBOL = Symbol.for("omp-foundry.capability-broker");
 
-type PendingRun = { bindings: TaskBinding[]; startedClean: boolean; headAtDispatch: string };
+type PendingRun = { bindings: TaskBinding[]; startedClean: boolean; headAtDispatch: string; timer?: unknown };
 type ActivePlanStage = Exclude<PlanStage, "idle" | "awaiting_lock">;
 type CapabilityRun = { epoch: string; index: number; cwd: string; capability: string; createdAt: number; sessionId?: string; invalidAttempts: number; revoked: boolean; timedOut?: boolean; writeHashes?: Map<string, string> };
 type PendingPlanRun = CapabilityRun & { stage: ActivePlanStage; agent: string; beforeHash?: string };
@@ -703,7 +703,21 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				recountTickets(state); invalidateQa(state); persist(ctx.cwd, state);
 				const headAtDispatch = gitHead(ctx.cwd);
 				if (!headAtDispatch) return { block: true, reason: "PROVENANCE_GATE: unable to capture repository HEAD before dispatch." };
-				pending.set(key, { bindings: parsed.bindings, startedClean: true, headAtDispatch });
+				const timer = globalThis.setTimeout(() => {
+					pending.delete(key);
+					const s = loadState(ctx.cwd);
+					let changed = false;
+					for (const binding of parsed.bindings) {
+						const t = s.tickets[binding.ticketId];
+						if (t && t.status === "active") {
+							t.status = "ready";
+							changed = true;
+							ctx.ui.notify(`WATCHDOG: ${binding.ticketId} timed out after 10 minutes and was returned to ready.`, "warning");
+						}
+					}
+					if (changed) persist(ctx.cwd, s);
+				}, 10 * 60 * 1000);
+				pending.set(key, { bindings: parsed.bindings, startedClean: true, headAtDispatch, timer });
 			}
 			let modified = raw;
 			if (globalKey) {
@@ -817,8 +831,9 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 				return { content: [{ type: "text" as const, text: `${recovery}AATP_COMPILED: ${specs.length} work orders validated and sealed. Run /build for the ready implementation layer.` }] };
 			} catch (error) { return aatpCompilerError(ctx.cwd, `AATP_COMPILER_FAILED: ${error instanceof Error ? error.message : String(error)}`); }
 		}
-		const run = pending.get(key);
-		if (!run) return;
+		if (!pending.has(key)) return;
+		const run = pending.get(key)!;
+		if (run.timer) globalThis.clearTimeout(run.timer as any);
 		pending.delete(key);
 		if (run.startedClean && (!workingTreeClean(ctx.cwd) || gitHead(ctx.cwd) !== run.headAtDispatch)) {
 			const state = loadState(ctx.cwd);
@@ -1003,6 +1018,14 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const baselineHead = gitHead(ctx.cwd);
 		if (!baselineHead) { ctx.ui.notify("PROVENANCE_GATE: unable to capture the Foundry baseline commit.", "error"); return; }
 		if (!state.aatp.baseline_sha) state.aatp.baseline_sha = baselineHead;
+		let zombies = 0;
+		for (const t of Object.values(state.tickets)) {
+			if (t.status === "active") {
+				t.status = "ready";
+				zombies++;
+			}
+		}
+		if (zombies > 0) ctx.ui.notify(`WATCHDOG: Reset ${zombies} zombie ticket(s) back to ready.`, "warning");
 		seedTickets(state, specs); const tasks = hydrateAatp(ctx.cwd, state), ready = readyIndependent(tasks); state.phase = "implementation"; recountTickets(state); persist(ctx.cwd, state);
 		const lines = ready.map((t) => `- ${t.id} agent=${routeAgent(t.risk)} :: ${t.objective}`);
 		orchestrate(pi, "Run the ready AATP layer.", [`Ready (${ready.length}):`, lines.join("\n") || "(none)", "Call the 'task' tool to spawn one blocking subagent per line using the exact AATP id in the task instructions.", "Do NOT call aatp_begin/complete. Foundry owns lifecycle, patch validation, apply, and commit.", "Worker conflicts must end with: FOUNDRY_CONFLICT <KIND> <reason>."].join("\n"));
