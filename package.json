@@ -17,13 +17,21 @@
     "url": "https://github.com/oaichu/omp-foundry/issues"
   },
   "homepage": "https://github.com/oaichu/omp-foundry#readme",
-  "keywords": ["oh-my-pi", "omp", "foundry", "agent-workflow", "plan-lock", "aatp"],
+  "keywords": [
+    "oh-my-pi",
+    "omp",
+    "foundry",
+    "agent-workflow",
+    "plan-lock",
+    "aatp"
+  ],
   "omp": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "devDependencies": {
     "bun-types": "^1.4.0",
-    "typescript": "^7.0.2",
-    "yaml": "^2.9.0"
+    "typescript": "^7.0.2"
   }
 }
