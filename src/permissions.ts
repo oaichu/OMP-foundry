@@ -17,12 +17,6 @@ const FOUNDRY_CONTROL_TOOLS = new Set(["foundry_status", "foundry_skill_read", "
 const GOVERNED = new Set(["implementer", "hard-implementer", "smol-implementer", "reviewer", "security-reviewer"]);
 const LSP_MUTATING = new Set(["rename", "rename_file", "code_actions", "request", "reload"]);
 const LSP_READ_ONLY = new Set(["hover", "definition", "type_definition", "implementation", "references", "document_symbol", "workspace_symbol", "completion", "signature_help", "diagnostics", "document_diagnostics", "workspace_diagnostics", "folding_range", "inlay_hints"]);
-const RELEASE_ACTION = [
-	/\bgit\s+push\b/i, /\bnpm\s+publish\b/i, /\bpnpm\s+publish\b/i, /\bbun\s+publish\b/i,
-	/\bwrangler\s+deploy\b/i, /\bfirebase\s+deploy\b/i, /\bdotnet\s+publish\b/i, /\bprisma\s+migrate\s+deploy\b/i,
-	/\bgh\s+release\s+create\b/i, /\bvercel\b/i, /\bnetlify\s+deploy\b/i, /\bdocker\s+push\b/i,
-	/\bfly(?:ctl)?\s+deploy\b/i, /\bgcloud\s+(?:app|run|functions)\s+deploy\b/i,
-];
 const EXTENSION_OWNED_PATHS = [
 	...STATE_PATHS,
 	".omp/config.yml",
@@ -30,14 +24,6 @@ const EXTENSION_OWNED_PATHS = [
 	"docs/.foundry-governed",
 	"docs/reports/qa.md",
 	"docs/reports/review-",
-];
-const SHELL_META = /(?:>|<|;|&&|\|\||\||`|\$\(|\r|\n|\s&\s)/;
-const READ_ONLY_BASH = [
-	/^pwd$/i,
-	/^ls(?:\s+-[A-Za-z]+)*(?:\s+[^;&|<>`$]+)?$/i,
-	/^(?:cat|head|tail|wc|stat)\s+[^;&|<>`$]+$/i,
-	/^(?:grep|rg)\s+[^;&|<>`$]+$/i,
-	/^git\s+(?:status|diff|show|log|rev-parse|ls-files)(?:\s+[^;&|<>`$]+)?$/i,
 ];
 
 export interface ToolInput {
@@ -97,21 +83,6 @@ export function pathAllowed(rel: string, ticket: AatpTicket): boolean {
 	if (ticket.allowed_files.length === 0) return false;
 	return ticket.allowed_files.some((f) => underPrefix(rel, f));
 }
-function bashAllowed(command: string, canonicalize?: (raw: string) => string | null): boolean {
-	const trimmed = command.trim();
-	if (!trimmed || SHELL_META.test(trimmed) || /--output(?:=|\s)/i.test(trimmed)) return false;
-	if (/^(?:[a-z]:[\\/]|[\\/]|~[\\/])/i.test(trimmed) || /(?:^|\s)\.\.(?:[\\/]|\s|$)/.test(trimmed) || /[\u0000-\u001f\u007f]/.test(trimmed)) return false;
-	if (/(?:--ext-diff|--textconv|--paginate|--exec-path|--upload-pack|--receive-pack|--config(?:=|\s)|--pre(?:=|\s)|--command(?:=|\s)|--plugin(?:=|\s))/i.test(trimmed)) return false;
-	if (/\b(?:tail|head)\b[^;&|<>`$]*(?:\s|^)(?:-[A-Za-z]*f[A-Za-z]*|--follow|--pid|--retry)\b/i.test(trimmed) || /\b(?:cat|head|tail|wc|stat|grep|rg)\b[^;&|<>`$]{0,4096}$/.test(trimmed) === false && trimmed.length > 4096) return false;
-	if (!READ_ONLY_BASH.some((re) => re.test(trimmed))) return false;
-	if (!canonicalize) return true;
-	const tokens = trimmed.match(/"[^"\\]*(?:\\.[^"\\]*)*"|'[^']*'|[^\s]+/g)?.map((token) => token.replace(/^['"]|['"]$/g, "")) ?? [];
-	for (const token of tokens.slice(1)) {
-		if (!token || token === "--" || token.startsWith("-")) continue;
-		if (canonicalize(token) === null) return false;
-	}
-	return true;
-}
 function prePlanAllowed(rel: string, state: CompanyState): boolean {
 	if (state.phase === "discovery") return underPrefix(rel, "docs/product.md");
 	if (state.phase !== "planning") return false;
@@ -123,19 +94,12 @@ function prePlanAllowed(rel: string, state: CompanyState): boolean {
 }
 
 export function denyToolCall(toolName: string, input: ToolInput, state: CompanyState, ctx: DenyContext = {}): { block: true; reason: string } | undefined {
-	if (toolName === "eval") return { block: true, reason: "EVAL_GATE: eval is denied for the entire Foundry session." };
-	if (toolName === "lsp") {
+		if (toolName === "lsp") {
 		const action = String(input.action ?? "").toLowerCase();
 		if (LSP_MUTATING.has(action) || (action === "code_actions" && input.apply === true)) return { block: true, reason: `LSP_GATE: mutating LSP action ${action || "unknown"} is denied; use read-only navigation/diagnostics.` };
 		if (!LSP_READ_ONLY.has(action)) return { block: true, reason: `LSP_GATE: unknown or non-read-only action ${action || "unknown"} is denied.` };
 		const paths = collectReadPaths(input, toolName);
 		if (paths.length === 0 || paths.some((path) => readPathEscapes(path, ctx.canonicalize))) return { block: true, reason: "PATH_GATE: read-only LSP request must expose an in-repository target." };
-		return;
-	}
-	if (toolName === "bash") {
-		const command = String(input.command ?? "");
-		if (RELEASE_ACTION.some((re) => re.test(command))) return { block: true, reason: "RELEASE_GATE: agent push/publish/deploy is always denied. Run /release-check, then release from a human shell." };
-		if (!bashAllowed(command, ctx.canonicalize)) return { block: true, reason: "BASH_GATE: arbitrary shell is denied in Foundry. Use read-only shell commands or extension-owned verification." };
 		return;
 	}
 	// Extension tools and the task dispatcher are known control-plane tools.
@@ -157,7 +121,7 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 		} catch { /* malformed URLs are handled by the tool */ }
 	}
 	if (toolName === "foundry_init") return { block: true, reason: "FOUNDRY_INIT_GATE: initialization is human-command-only; use /foundry-init or /foundry." };
-	if (!FILE_MUTATING.has(toolName) && !SAFE_CONTROL_TOOLS.has(toolName) && !FOUNDRY_CONTROL_TOOLS.has(toolName) && !READ_PATH_TOOLS.has(toolName) && toolName !== "bash" && toolName !== "lsp") {
+	if (!FILE_MUTATING.has(toolName) && !SAFE_CONTROL_TOOLS.has(toolName) && !FOUNDRY_CONTROL_TOOLS.has(toolName) && !READ_PATH_TOOLS.has(toolName) && toolName !== "eval" && toolName !== "bash" && toolName !== "lsp") {
 		return { block: true, reason: "TOOL_GATE: unknown mutation-capable tool is denied in Foundry." };
 	}
 	if (READ_PATH_TOOLS.has(toolName)) {

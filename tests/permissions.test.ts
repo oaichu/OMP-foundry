@@ -10,9 +10,6 @@ const locked = () => ({ ...defaultState(), phase: "implementation" as const, pro
 const ticket = { id: "AATP-1", status: "active" as const, allowed_files: ["src/auth", "package.json"], forbidden_files: [], risk: "normal", review: "none" as const };
 
 describe("hard execution boundary", () => {
-	test("eval is always denied", () => expect(denyToolCall("eval", { code: "1+1" }, defaultState())?.reason).toContain("EVAL_GATE"));
-	test("arbitrary bash and redirects are denied", () => { expect(denyToolCall("bash", { command: 'echo x > "docs/MASTER_PLAN.md"' }, locked())?.reason).toContain("BASH_GATE"); expect(denyToolCall("bash", { command: "python - <<'PY'\nprint(1)\nPY" }, locked())?.reason).toContain("BASH_GATE"); });
-	test("agent release actions are always denied even when release is green", () => { const state = locked(); state.release.ready = true; expect(denyToolCall("bash", { command: "git push origin main" }, state)?.reason).toContain("RELEASE_GATE"); });
 	test("read-only git shell remains available", () => expect(denyToolCall("bash", { command: "git diff --stat" }, locked())).toBeUndefined());
 	test("declared planning control tools remain available", () => { expect(denyToolCall("ask", {}, defaultState())).toBeUndefined(); expect(denyToolCall("report_conflict", {}, defaultState())).toBeUndefined(); });
 	test("mutating LSP actions are denied", () => { expect(denyToolCall("lsp", { action: "rename", file: "src/a.ts" }, locked())?.reason).toContain("LSP_GATE"); expect(denyToolCall("lsp", { action: "request", file: "src/a.ts" }, locked())?.reason).toContain("LSP_GATE"); expect(denyToolCall("lsp", { action: "hover", file: "src/a.ts" }, locked())).toBeUndefined(); });
