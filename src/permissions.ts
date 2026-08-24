@@ -11,7 +11,6 @@ import {
 } from "./types";
 
 const FILE_MUTATING = new Set(["write", "edit", "ast_edit", "apply_patch"]);
-const READ_PATH_TOOLS = new Set(["read", "read_file", "read_text", "grep", "glob", "find", "list_files", "ls", "ast_grep"]);
 const GOVERNED = new Set(["implementer", "hard-implementer", "smol-implementer", "reviewer", "security-reviewer"]);
 const EXTENSION_OWNED_PATHS = [
 	...STATE_PATHS,
@@ -42,30 +41,6 @@ export function collectPaths(input: ToolInput): string[] {
 		for (const match of input.input.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)) add(match[1]);
 	}
 	return out;
-}
-function collectReadPaths(input: ToolInput, toolName = ""): string[] {
-	const paths = collectPaths(input);
-	for (const value of [input.cwd, input.directory, input.root, input.base]) {
-		if (typeof value === "string" && value.trim()) paths.push(value.trim());
-	}
-	if (toolName === "glob" && typeof input.pattern === "string" && input.pattern.trim()) paths.push(input.pattern.trim());
-	// LSP clients commonly nest the target under textDocument.uri.  Only
-	// inspect the documented path-bearing fields; arbitrary JSON strings must
-	// not become an authorization bypass.
-	const addUri = (value: unknown): void => {
-		if (typeof value === "string" && value.trim()) paths.push(value.trim());
-		else if (value && typeof value === "object") {
-			const record = value as Record<string, unknown>;
-			for (const key of ["uri", "path", "file"]) addUri(record[key]);
-		}
-	};
-	addUri(input.uri); addUri(input.textDocument);
-	return [...new Set(paths)];
-}
-function readPathEscapes(raw: string, canonicalize?: (raw: string) => string | null): boolean {
-	if (!raw.trim() || /[\u0000-\u001f\u007f]/.test(raw)) return true;
-	if (/^(?:[a-z]:[\\/]|[\\/]|~[\\/])/i.test(raw) || /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(raw)) return true;
-	return canonicalize ? canonicalize(raw) === null : false;
 }
 function matchesAny(rel: string, needles: string[]): boolean {
 	// Governance artifact names are intentionally case-insensitive across
@@ -107,11 +82,6 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 				}
 			}
 		} catch { /* malformed URLs are handled by the tool */ }
-	}
-	if (READ_PATH_TOOLS.has(toolName)) {
-		const paths = collectReadPaths(input, toolName);
-		if (paths.length === 0 || paths.some((path) => readPathEscapes(path, ctx.canonicalize))) return { block: true, reason: "PATH_GATE: read-only tool must expose an in-repository target path." };
-		return;
 	}
 	if (!FILE_MUTATING.has(toolName)) return;
 	if (ctx.stateBroken) return { block: true, reason: `STATE_CORRUPT: ${ctx.stateBroken}. Fix .omp/foundry-state.yml.` };
