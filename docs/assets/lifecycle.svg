@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 700" role="img" aria-label="Detailed 6-Phase Governed Lifecycle">
+  <defs>
+    <style>
+      @keyframes flow {
+        to { stroke-dashoffset: -40; }
+      }
+      @keyframes pulse {
+        0%, 100% { filter: drop-shadow(0 0 4px rgba(255,159,28,0.2)); }
+        50% { filter: drop-shadow(0 0 15px rgba(255,159,28,0.9)); }
+      }
+      @keyframes pulseNode {
+        0%, 100% { transform: scale(1); opacity: 0.8; }
+        50% { transform: scale(1.1); opacity: 1; filter: drop-shadow(0 0 8px #FFB020); }
+      }
+      .line { stroke-dasharray: 10 10; animation: flow 1.5s linear infinite; stroke-linecap: round; }
+      .box { transform-origin: center; transition: all 0.3s; }
+      .box:hover { filter: drop-shadow(0 0 15px rgba(255,176,32,0.8)); transform: translateY(-3px); }
+      .node1 { animation: pulseNode 3s infinite 0s; transform-origin: center; }
+      .node2 { animation: pulseNode 3s infinite 0.5s; transform-origin: center; }
+      .node3 { animation: pulseNode 3s infinite 1s; transform-origin: center; }
+      .node4 { animation: pulseNode 3s infinite 1.5s; transform-origin: center; }
+      .node5 { animation: pulseNode 3s infinite 2s; transform-origin: center; }
+      .node6 { animation: pulseNode 3s infinite 2.5s; transform-origin: center; }
+    </style>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="700" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#14110E"/>
+      <stop offset="1" stop-color="#0E0C0A"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <rect width="1000" height="700" rx="20" fill="url(#bg)" stroke="#2A2118" stroke-width="2"/>
+  
+  <!-- Flow Lines -->
+  <path class="line" d="M150 120 v 480" stroke="#4A3B2C" stroke-width="4"/>
+  <path class="line" d="M150 120 h 200" stroke="#FF9F1C" stroke-width="4"/>
+  <path class="line" d="M150 200 h 200" stroke="#FF9F1C" stroke-width="4"/>
+  <path class="line" d="M150 340 h 200" stroke="#FF9F1C" stroke-width="4"/>
+  <path class="line" d="M150 440 h 200" stroke="#FF9F1C" stroke-width="4"/>
+  <path class="line" d="M150 520 h 200" stroke="#FF9F1C" stroke-width="4"/>
+  <path class="line" d="M150 600 h 200" stroke="#E4572E" stroke-width="4"/>
+
+  <!-- Path inner connections -->
+  <path class="line" d="M570 200 h 50" stroke="#FF9F1C" stroke-width="2"/>
+  <path class="line" d="M780 200 h 50" stroke="#FF9F1C" stroke-width="2"/>
+  
+  <path class="line" d="M570 520 h 50" stroke="#7EC8A9" stroke-width="2"/>
+  <path class="line" d="M780 520 h 50" stroke="#7EC8A9" stroke-width="2"/>
+
+  <!-- Left Spine Nodes -->
+  <circle cx="150" cy="120" r="14" fill="#FFB020" class="node1"/>
+  <circle cx="150" cy="200" r="14" fill="#FF9F1C" class="node2"/>
+  <circle cx="150" cy="340" r="14" fill="#E4572E" class="node3"/>
+  <circle cx="150" cy="440" r="14" fill="#7EC8A9" class="node4"/>
+  <circle cx="150" cy="520" r="14" fill="#4B9CBF" class="node5"/>
+  <circle cx="150" cy="600" r="14" fill="#E4572E" class="node6"/>
+
+  <g font-family="ui-sans-serif, system-ui, sans-serif">
+    <!-- Phase 1 -->
+    <g class="box">
+      <rect x="350" y="80" width="600" height="80" rx="12" fill="#2A2118" stroke="#FFB020" stroke-width="2"/>
+      <text x="380" y="115" fill="#FFD37A" font-size="20" font-weight="700">1. Discovery</text>
+      <text x="380" y="140" fill="#C9B8A2" font-size="14">💡 docs/PRODUCT.md → Type "/approve" or "ok"</text>
+    </g>
+
+    <!-- Phase 2 -->
+    <g class="box">
+      <rect x="350" y="180" width="600" height="120" rx="12" fill="#2A2118" stroke="#FF9F1C" stroke-width="2"/>
+      <text x="380" y="215" fill="#FF9F1C" font-size="20" font-weight="700">2. Plan Engine</text>
+      <text x="380" y="240" fill="#C9B8A2" font-size="14">Structured adversarial consensus to lock architecture</text>
+      
+      <rect x="380" y="255" width="160" height="30" rx="6" fill="#1A1410" stroke="#4A3B2C"/>
+      <text x="460" y="275" fill="#FFF6E8" font-size="12" text-anchor="middle">1. plan-drafter</text>
+      
+      <rect x="590" y="255" width="160" height="30" rx="6" fill="#1A1410" stroke="#4A3B2C"/>
+      <text x="670" y="275" fill="#FFF6E8" font-size="12" text-anchor="middle">2. plan-redteam</text>
+
+      <rect x="800" y="255" width="120" height="30" rx="6" fill="#1A1410" stroke="#4A3B2C"/>
+      <text x="860" y="275" fill="#FFF6E8" font-size="12" text-anchor="middle">3. plan-synth</text>
+    </g>
+
+    <!-- Phase 3 -->
+    <g class="box">
+      <rect x="350" y="320" width="600" height="80" rx="12" fill="#2A2118" stroke="#E4572E" stroke-width="2"/>
+      <text x="380" y="355" fill="#E4572E" font-size="20" font-weight="700">3. Design &amp; UI</text>
+      <text x="380" y="380" fill="#C9B8A2" font-size="14">Optional human-approved UI mockups and visual foundations</text>
+    </g>
+
+    <!-- Phase 4 -->
+    <g class="box">
+      <rect x="350" y="420" width="600" height="60" rx="12" fill="#2A2118" stroke="#7EC8A9" stroke-width="2"/>
+      <text x="380" y="455" fill="#7EC8A9" font-size="20" font-weight="700">4. AATP Compilation</text>
+      <text x="590" y="455" fill="#C9B8A2" font-size="14">📦 DAG Sealed &amp; Cryptographically Locked</text>
+    </g>
+
+    <!-- Phase 5 -->
+    <g class="box">
+      <rect x="350" y="500" width="600" height="80" rx="12" fill="#2A2118" stroke="#4B9CBF" stroke-width="2"/>
+      <text x="380" y="535" fill="#4B9CBF" font-size="20" font-weight="700">5. Execution &amp; QA</text>
+      
+      <rect x="380" y="545" width="160" height="24" rx="4" fill="#1A1410" stroke="#4A3B2C"/>
+      <text x="460" y="561" fill="#FFF6E8" font-size="12" text-anchor="middle">⚙️ Isolated Workers</text>
+      
+      <rect x="590" y="545" width="160" height="24" rx="4" fill="#1A1410" stroke="#4A3B2C"/>
+      <text x="670" y="561" fill="#FFF6E8" font-size="12" text-anchor="middle">🔍 Indep. Review</text>
+
+      <rect x="800" y="545" width="120" height="24" rx="4" fill="#1A1410" stroke="#4A3B2C"/>
+      <text x="860" y="561" fill="#FFF6E8" font-size="12" text-anchor="middle">✅ Verify</text>
+    </g>
+
+    <!-- Phase 6 -->
+    <g class="box">
+      <rect x="350" y="600" width="600" height="60" rx="12" fill="#3A1C12" stroke="#E4572E" stroke-width="2"/>
+      <text x="380" y="635" fill="#FFB020" font-size="20" font-weight="700">6. Release</text>
+      <text x="500" y="635" fill="#C9B8A2" font-size="14">🚀 Human Governed Release / Provenance Check</text>
+    </g>
+  </g>
+</svg>

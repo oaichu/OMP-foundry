@@ -1,37 +1,3 @@
-<p align="center">
-  <img src="docs/assets/hero.svg" width="100%" alt="OMP Foundry Banner — Lock the plan. Then pour the code."/>
-</p>
-
-<p align="center">
-  <strong>The Enterprise-Grade AI Software Engineering Framework for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a> & Antigravity</strong><br/>
-  <em>Where architecture is <b>cryptographically locked</b>, execution is <b>micro-isolated</b>, and human intent remains <b>absolute</b>.</em>
-</p>
-
-<p align="center">
-  <a href="https://github.com/oaichu/omp-foundry/releases/latest"><img alt="Release" src="https://img.shields.io/badge/version-v0.8.11-FFB020?style=for-the-badge&logo=git&logoColor=white"/></a>
-  <a href="https://github.com/can1357/oh-my-pi"><img alt="Platform" src="https://img.shields.io/badge/platform-Oh%20My%20Pi%20%7C%20Antigravity-FF9F1C?style=for-the-badge&logo=electron&logoColor=white"/></a>
-  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-128%20passing-7EC8A9?style=for-the-badge&logo=checkmarx&logoColor=white"/></a>
-  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-14110E?style=for-the-badge"/></a>
-  <a href="https://ko-fi.com/oaichu"><img alt="Support" src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffee-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white"/></a>
-</p>
-
----
-
-## 🌟 The Broken Promise of AI Coding (And How We Fix It)
-
-> **The Nightmare:** You ask your AI assistant to build a feature. It writes 500 lines of code. It breaks three existing components. You spend 2 hours debugging its hallucinations. After 10 prompts, it forgets the original architecture and starts producing spaghetti code. You realize you are not a manager—you are babysitting a junior developer with severe amnesia.
-
-> **The Deep Desire:** You want an AI that acts like a **disciplined engineering team**. You want to dictate the product vision, lock the architecture, and let the AI flawlessly execute isolated micro-tasks without *ever* regressing existing code. You want your natural language to be the **absolute, unquestionable final command**.
-
-**OMP Foundry** is the paradigm shift. Unlike standard AI tools that give models unbounded access to mutate your entire codebase, Foundry introduces **Zero-Regression Governance**. It converts your prompts into a 3-Stage Adversarial Plan, breaks work into cryptographically-locked micro-tasks, and sandboxes workers so they physically cannot break what already works.
-
-You are no longer an AI babysitter. **You are the Chief Architect.**
-
-<p align="center">
-  <img src="docs/assets/flow.svg" width="100%" alt="OMP Foundry 6-Stage Engineering Pipeline"/>
-</p>
-
----
 ## 📑 Table of Contents
 
 - [⚡ Why OMP Foundry?](#-why-omp-foundry)
@@ -62,9 +28,6 @@ You are no longer an AI babysitter. **You are the Chief Architect.**
 
 ## 💎 Core Architectural Superpowers
 
-### 👑 The Human Is The Ultimate Boss
-Unlike other rigid frameworks that force you to learn their DSLs or fight their guardrails, **Foundry bows to human authority**. You don't need to be a coder. If the human dictates an architecture change, skips a phase, or overrides a rule via natural language (*"ok"*, *"duyệt"*, *"làm đi"*), **Foundry executes it immediately**. The machine proposes; the human disposes.
-
 ### 🏛️ 1. Plan: 3-Stage Adversarial Planning
 Instead of letting a single LLM hallucinate architecture in one prompt, Foundry runs a structured, adversarial consensus:
 1. **Architect (`plan-drafter`)**: Derives a scoped structural proposal (`docs/planning/MASTER_PLAN_DRAFT.md`).
@@ -88,9 +51,39 @@ Instead of letting a single LLM hallucinate architecture in one prompt, Foundry 
 
 ## 🔄 The 6-Phase Governed Lifecycle
 
-<p align="center">
-  <img src="docs/assets/lifecycle.svg" width="100%" alt="OMP Foundry 6-Stage Engineering Pipeline"/>
-</p>
+```mermaid
+flowchart TD
+    subgraph Discovery
+        A[💡 docs/PRODUCT.md] -->|/approve or 'ok'| B(Phase: PLANNING)
+    end
+
+    subgraph Plan Engine
+        B --> C[Stage 1: plan-drafter]
+        C --> D[Stage 2: plan-redteam]
+        D --> E[Stage 3: plan-synth]
+        E -->|/approve or 'ok'| F[🔒 MASTER_PLAN Locked]
+    end
+
+    subgraph AATP Compilation
+        F --> G[📦 docs/AATP/ Work Orders]
+        G -->|/aatp or /aatp-seal| H[✨ DAG Sealed]
+    end
+
+    subgraph Execution & QA
+        H -->|/build| I[⚙️ Isolated Workers]
+        I -->|/review| J[🔍 Independent Review]
+        J -->|/verify| K[✅ Provenance Verification]
+    end
+
+    subgraph Release
+        K -->|/release-check| L[🚀 Human Governed Release]
+    end
+
+    style A fill:#2A2118,stroke:#FFB020,stroke-width:2px,color:#FFF
+    style F fill:#2A2118,stroke:#FF9F1C,stroke-width:2px,color:#FFF
+    style H fill:#2A2118,stroke:#7EC8A9,stroke-width:2px,color:#FFF
+    style L fill:#3A1C12,stroke:#E4572E,stroke-width:2px,color:#FFF
+```
 
 ---
 
