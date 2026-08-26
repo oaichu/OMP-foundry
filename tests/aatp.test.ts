@@ -7,7 +7,7 @@ import { defaultState } from "../src/types";
 const spec = (id: string, deps: string[] = []) => ({ id, objective: "x", dependencies: deps, allowed_files: [`src/${id.toLowerCase()}`], forbidden_files: [], risk: "normal", path: `docs/AATP/${id}.md` });
 
 describe("aatp authority and sealing", () => {
-	test("routes risk to governed workers and fails unknown risk closed", () => { expect(routeAgent("low")).toBe("implementer"); expect(routeAgent("hard")).toBe("hard-implementer"); expect(routeAgent("normal")).toBe("implementer"); expect(routeAgent("unknown")).toBe("hard-implementer"); });
+	test("routes risk to governed workers and fails unknown risk closed", () => { expect(routeAgent("low")).toBe("smol-implementer"); expect(routeAgent("hard")).toBe("hard-implementer"); expect(routeAgent("normal")).toBe("implementer"); expect(routeAgent("unknown")).toBe("hard-implementer"); });
 	test("status comes from state, not markdown", () => {
 		const dir = mkdtempSync(join(tmpdir(), "foundry-")); mkdirSync(join(dir, "docs", "AATP"), { recursive: true });
 		writeFileSync(join(dir, "docs", "AATP", "AATP-001.md"), "---\nid: AATP-001\nobjective: x\nstatus: ready\nrisk: low\ndependencies:\n  - none\nallowed_files:\n  - src/a\n---\n");
@@ -112,4 +112,12 @@ describe("parent-owned transitions", () => {
 		expect(state.tickets["AATP-2"]?.status).toBe("ready");
 		expect(state.tickets["AATP-3"]?.review).toBe("none");
 	});
+});
+
+test("trivial and low risk route to smol-implementer; retries escalate", () => {
+	expect(routeAgent("trivial")).toBe("smol-implementer");
+	expect(routeAgent("low")).toBe("smol-implementer");
+	expect(routeAgent("normal")).toBe("implementer");
+	expect(routeAgent("low", 1)).toBe("hard-implementer");
+	expect(routeAgent("critical")).toBe("hard-implementer");
 });
