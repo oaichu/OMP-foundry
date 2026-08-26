@@ -1,199 +1,220 @@
-<p align="center">
-  <img src="docs/assets/hero.svg" width="100%" alt="OMP Foundry Banner — Lock the plan. Then pour the code."/>
-</p>
+# OMP Foundry
+
+OMP Foundry is a governed workflow extension for [Oh My Pi](https://github.com/can1357/oh-my-pi). It turns a product request into explicit artifacts, a three-stage plan, bounded AATP work orders, parent-applied patches, verification evidence, and a derived release decision.
+
+It is a workflow and enforcement layer. It is not an operating-system sandbox, a cryptographic signing system, or an automatic replacement for engineering judgment.
 
 <p align="center">
-  <strong>The Enterprise-Grade AI Software Engineering Framework for <a href="https://github.com/can1357/oh-my-pi">Oh My Pi</a> & Antigravity</strong><br/>
-  <em>Where architecture is <b>cryptographically locked</b>, execution is <b>micro-isolated</b>, and human intent remains <b>absolute</b>.</em>
+  <a href="https://github.com/oaichu/OMP-foundry/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/oaichu/OMP-foundry?display_name=tag&sort=semver"/></a>
+  <a href="https://www.npmjs.com/package/omp-foundry"><img alt="npm" src="https://img.shields.io/npm/v/omp-foundry"/></a>
+  <a href="https://github.com/oaichu/OMP-foundry/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/oaichu/OMP-foundry/ci.yml?branch=main&label=CI"/></a>
+  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-14110E"/></a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/oaichu/omp-foundry/releases/latest"><img alt="Release" src="https://img.shields.io/badge/version-v0.8.23-FFB020?style=for-the-badge&logo=git&logoColor=white"/></a>
-  <a href="https://github.com/can1357/oh-my-pi"><img alt="Platform" src="https://img.shields.io/badge/platform-Oh%20My%20Pi%20%7C%20Antigravity-FF9F1C?style=for-the-badge&logo=electron&logoColor=white"/></a>
-  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-148%20passing-7EC8A9?style=for-the-badge&logo=checkmarx&logoColor=white"/></a>
-  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-14110E?style=for-the-badge"/></a>
-  <a href="https://ko-fi.com/oaichu"><img alt="Support" src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffee-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white"/></a>
-</p>
+## What is shipped
 
----
+Version `0.8.23` ships the P0 governance and distribution layer:
 
-## 🌟 The Broken Promise of AI Coding (And How We Fix It)
+- Product → Plan3 → Design → AATP → Build → Review → Verify → Release lifecycle.
+- Draft → Redteam → Synth planning with human plan locking.
+- SHA-256 content evidence for Product, Plan, Design, AATP, review, and verification artifacts.
+- AATP dependency, overlap, path, size, and provenance validation.
+- Parent-owned patch application and commit; workers do not self-apply their patches.
+- Fail-closed governance checks for locked artifacts and known bash/LSP mutation paths.
+- Retry state persisted in `.omp/foundry-state.yml`.
+- Risk routing: trivial/low work starts on `smol-implementer`; retries escalate to `hard-implementer`.
+- npm packaging and GitHub Actions release publishing with npm provenance.
 
-> **The Nightmare:** You ask your AI assistant to build a feature. It writes 500 lines of code. It breaks three existing components. You spend 2 hours debugging its hallucinations. After 10 prompts, it forgets the original architecture and starts producing spaghetti code. You realize you are not a manager—you are babysitting a junior developer with severe amnesia.
+The Fast/Lite/Full router, cost ledger, and `/foundry-stats` are specified in the architecture document but are **not shipped in v0.8.23**. They are the next implementation phases, not current behavior.
 
-> **The Deep Desire:** You want an AI that acts like a **disciplined engineering team**. You want to dictate the product vision, lock the architecture, and let the AI flawlessly execute isolated micro-tasks without *ever* regressing existing code. You want your natural language to be the **absolute, unquestionable final command**.
+## Install and update
 
-**OMP Foundry** is the paradigm shift. Unlike standard AI tools that give models unbounded access to mutate your entire codebase, Foundry introduces **Zero-Regression Governance**. It converts your prompts into a 3-Stage Adversarial Plan, breaks work into cryptographically-locked micro-tasks, and sandboxes workers so they physically cannot break what already works.
+### npm (recommended)
 
-You are no longer an AI babysitter. **You are the Chief Architect.**
+After the package is published:
 
-<p align="center">
-  <img src="docs/assets/flow.svg" width="100%" alt="OMP Foundry 6-Stage Engineering Pipeline"/>
-</p>
-
----
-## 📑 Table of Contents
-
-- [⚡ Why OMP Foundry?](#-why-omp-foundry)
-- [💎 Core Architectural Superpowers](#-core-architectural-superpowers)
-- [🔄 The 6-Phase Governed Lifecycle](#-the-6-phase-governed-lifecycle)
-- [🛡️ Security & Hard Execution Boundaries](#️-security--hard-execution-boundaries)
-- [🚀 30-Second Quickstart](#-30-second-quickstart)
-- [⌨️ Complete Command Reference](#️-complete-command-reference)
-- [🧠 4-Tier Just-In-Time (JIT) Skill Catalog](#-4-tier-just-in-time-jit-skill-catalog)
-- [🧩 Architecture & Codebase Map](#-architecture--codebase-map)
-- [🧪 Verification & Test Suite](#-verification--test-suite)
-- [💖 Back the Project](#-back-the-project)
-
----
-
-## ⚡ Why OMP Foundry?
-
-| Pain Point in AI Coding | How Raw Agents Fail | How OMP Foundry Solves It |
-| :--- | :--- | :--- |
-| **Architectural Drift** | Modifies core schemas mid-task after forgetting initial plan | **Cryptographic Lock**: `MASTER_PLAN.md` is hashed with SHA-256; unauthorized agent edits trigger `PLAN_CONFLICT`. |
-| **Cascading Regressions** | Rewrites 20+ files at once with sprawling 500-line diffs | **Atomic Patch Gate**: Strictly enforces `≤ 80` line unified diffs within predefined `allowed_files` (max 5). |
-| **Self-Approved Hallucinations** | Agent marks its own broken code as "completed" | **Independent Peer Review**: Code must pass an independent reviewer agent + exact verification hashes. |
-| **Rigid / Clunky UX** | Requires typing exact, obscure slash commands | **Natural Interaction**: Reply casually (*"ok"*, *"duyệt"*, *"làm đi"*), or use smart `/approve` shortcuts. |
-| **Offline Sealing Bottlenecks** | Subagents stall or timeout generating huge DAGs | **Instant Transplant & Seal**: Fast manual transplant via `cp` + instant verification with `/aatp-seal`. |
-| **Accidental Production Breakage**| Agent pushes unverified code directly to git/deploy | **Human Release Gate**: Code releases require derived provenance proofs and human authorization. |
-
----
-
-## 💎 Core Architectural Superpowers
-
-### 👑 The Human Is The Ultimate Boss
-Unlike other rigid frameworks that force you to learn their DSLs or fight their guardrails, **Foundry bows to human authority**. You don't need to be a coder. If the human dictates an architecture change, skips a phase, or overrides a rule via natural language (*"ok"*, *"duyệt"*, *"làm đi"*), **Foundry executes it immediately**. The machine proposes; the human disposes.
-
-### 🏛️ 1. Plan: 3-Stage Adversarial Planning
-Instead of letting a single LLM hallucinate architecture in one prompt, Foundry runs a structured, adversarial consensus:
-1. **Architect (`plan-drafter`)**: Derives a scoped structural proposal (`docs/planning/MASTER_PLAN_DRAFT.md`).
-2. **Red Team (`plan-redteam`)**: Attacks architectural assumptions, edge cases, scalability limits, and security vulnerabilities (`docs/planning/PLAN_REVIEW.md`).
-3. **Adjudicator & Synth (`plan-synth`)**: Synthesizes conflicting recommendations into `docs/MASTER_PLAN.md` and generates initial AATP work orders.
-
-### ⚡ 2. Absolute Human Sovereignty & Natural UX
-- **Natural Language Triggers**: The orchestrator understands conversational intent. Type *"ok"*, *"proceed"*, *"do it"*, or *"approve"* to approve phases.
-- **Smart Ergonomic Aliases**:
-  - `/approve`: Context-aware single shortcut that advances Product → Plan → Design → Build.
-  - `/ok` · `/run` · `/go`: Instantly triggers the next ready execution layer.
-  - `/aatp-seal`: Instant 1-second DAG audit & sealing for offline-generated or transplanted work orders.
-
-### 🛡️ 3. AATP (Atomic Architecture Task Protocol)
-- **≤ 200 Lines / Task**: Every work order is tightly scoped and readable in a single context pass.
-- **≤ 5 Files Working Set**: Subagents are physically sandboxed to `allowed_files`.
-- **≤ 80 Lines Diff Cap**: Large changes must be broken into provable, bite-sized commits.
-- **Strict Provenance Ledger**: Every git commit is tied to an active ticket, scope hash, and verification test run.
-
----
-
-## 🔄 The 6-Phase Governed Lifecycle
-
-<p align="center">
-  <img src="docs/assets/lifecycle.svg" width="100%" alt="OMP Foundry 6-Stage Engineering Pipeline"/>
-</p>
-
----
-
-## 🛡️ Security & Hard Execution Boundaries
-
-<p align="center">
-  <img src="docs/assets/terminal.svg" width="100%" alt="Foundry Terminal Enforcement"/>
-</p>
-
-Foundry enforces **fail-closed runtime boundaries**:
-
-- **Cryptographic Capability Broker**: Ephemeral 32-byte cryptographic tokens prevent rogue or parent-leaked subagent mutations.
-- **Path Escape & Symlink Defense**: Strict canonicalization blocks path traversal (`..`), symlink escapes, and out-of-tree writes.
-- **Clean Tree Guarantees**: Workers cannot mutate uncommitted dirty worktrees, preserving git integrity.
-- **Sanitized QA Sandboxing**: The verification runner executes package test scripts in a clean environment without leaking operator credentials.
-
----
-
-## 🚀 30-Second Quickstart
-
-### 1. Install & Link Plugin
-<p align="center">
-  <img src="docs/assets/quickstart.svg" width="100%" alt="Quickstart Installation"/>
-</p>
-
-### 2. Initialize a Project
-In any project repository, run:
 ```text
-/foundry Build a high-performance REST API in FastAPI with PostgreSQL
+omp plugin install omp-foundry
 ```
 
-### 3. Move with Natural Flow
+This is also the update command. Re-running it resolves the latest npm version.
+
+### Git fallback
+
 ```text
-1. 💡 Review requirements in docs/PRODUCT.md  → Type "ok" or /approve
-2. 🏛️ Plan runs (Draft → Redteam → Synth)     → Type "ok" or /approve
-3. 📦 AATP DAG compiles work orders           → Type /build
-4. ⚙️ Workers code in isolated <=80 line diffs → Type /verify
-5. 🚀 Check release readiness                 → Type /release-check
+omp plugin install github:oaichu/omp-foundry#v0.8.23
 ```
 
----
+Use a release tag for reproducibility. Installing `github:oaichu/omp-foundry` without a tag follows the repository default branch and is a development/canary path.
 
-## ⌨️ Complete Command Reference
+Check the installed plugin:
 
-| Command | Category | Purpose |
-| :--- | :--- | :--- |
-| **`/foundry [prompt]`** | **Core** | Auto-bootstraps project governance or resumes the next logical step. |
-| **`/approve`** | **Ergonomics** | Smart context-aware approval for Product, Plan, and Design gates. |
-| **`/ok` · `/run` · `/go`** | **Ergonomics** | Natural conversation shortcuts to trigger the next execution layer. |
-| **`/plan`** | **Planning** | Start or resume the 3-Stage Master Plan consensus engine. |
-| **`/plan-revise`** | **Planning** | Human-only command to unlock the master plan and safely re-plan. |
-| **`/aatp`** | **AATP** | Spawns the synthesis compiler to generate the project-wide dependency DAG. |
-| **`/aatp-seal`** | **AATP** | **Instant 1-second seal** for manual transplants or pre-generated DAGs. |
-| **`/build`** | **Execution** | Dispatches ready, isolated workers to implement active tickets. |
-| **`/review [ID]`** | **Quality** | Triggers an independent reviewer agent to verify code against tickets. |
-| **`/verify`** | **Quality** | Runs deterministic test and QA scripts in a sanitized environment. |
-| **`/release-check`** | **Release** | Computes cryptographic provenance and derives deployment readiness. |
-| **`/debug`** | **Superpowers** | Executes the systematic 5-Step root-cause isolation protocol. |
-| **`/foundry-doctor`** | **Diagnostics**| Validates worker isolation contracts and model-role health. |
-| **`/foundry-version`** | **System** | Checks current version and updates from GitHub releases. |
+```text
+omp plugin list
+omp plugin doctor
+```
 
----
+`omp update --plugins` upgrades marketplace plugins. It is not the update path for this npm/git plugin. Restart OMP after updating so the extension module, commands, hooks, and skills are loaded again.
 
-## 🧠 4-Tier Just-In-Time (JIT) Skill Catalog
+## Quick start
 
-Foundry packages **36+ enterprise engineering skills** without bloating your model's context window:
+From a project repository, start OMP and run:
 
-<p align="center">
-  <img src="docs/assets/jit-catalog.svg" width="100%" alt="4-Tier JIT Skill Catalog"/>
-</p>
+```text
+/foundry Build a REST API with authentication and PostgreSQL
+```
 
----
+Foundry bootstraps the project-local artifacts and asks the product analyst to write `docs/PRODUCT.md`. The normal human-controlled flow is:
 
-## 🧩 Architecture & Codebase Map
+```text
+/approve product
+/plan
+/approve plan
+/design
+/design approve       # or /design skip for a non-UI project
+/aatp
+/build
+/review AATP-<id>
+/verify
+/release-check
+```
 
-<p align="center">
-  <img src="docs/assets/architecture.svg" width="100%" alt="Architecture & Codebase Map"/>
-</p>
+When Plan3 reaches `awaiting_lock`, `/ok`, `/run`, or `/go` performs the same plan-lock operation as `/approve plan`. At other stages these commands only advance to the next legal step; they are not a general natural-language approval parser.
 
----
+## Governed lifecycle
 
-## 🧪 Verification & Test Suite
+| Phase | Artifact or action | Authority |
+|---|---|---|
+| Discovery | `docs/PRODUCT.md` | Product analyst writes; human approves with `/approve product` |
+| Planning | `MASTER_PLAN_DRAFT.md` → `PLAN_REVIEW.md` → `MASTER_PLAN.md` | `plan-drafter`, `plan-redteam`, `plan-synth`; human locks the final plan |
+| Design | `docs/DESIGN.md` and, for UI work, a preview verified by Foundry | `design-foundation`; human uses `/design approve` or `/design skip` |
+| AATP | `docs/AATP/AATP-*.md` and `INDEX.md` | `aatp-compiler` or the explicit human `/aatp-seal` escape hatch |
+| Implementation | Sealed AATP tickets | Isolated worker produces a patch; parent validates, applies, verifies, and commits |
+| Review | `docs/reports/review-<id>.md` | Separate `reviewer` or `security-reviewer` role |
+| QA | Declared verification IDs and `docs/reports/QA.md` | Deterministic commands with real exit codes |
+| Release | Derived readiness state | Human/CI performs any publish or deployment action |
 
-OMP Foundry is backed by an exhaustive, green-field integration test suite ensuring zero regressions:
+Source-of-truth files:
 
-<p align="center">
-  <img src="docs/assets/test-suite.svg" width="100%" alt="OMP Foundry Test Suite Output"/>
-</p>
+```text
+.omp/foundry-state.yml
+docs/PRODUCT.md
+docs/planning/MASTER_PLAN_DRAFT.md
+docs/planning/PLAN_REVIEW.md
+docs/MASTER_PLAN.md
+docs/DESIGN.md
+docs/AATP/
+```
 
----
+## AATP boundaries
 
-## 💖 Back the Project
+Strict AATP validation currently enforces:
 
-If OMP Foundry saves you from 2:00 AM architecture regressions and powers disciplined, predictable AI workflows, consider supporting continuous development:
+- Explicit non-empty `allowed_files`.
+- At most five `allowed_files` per work order.
+- At most 200 declared work-order lines.
+- Explicit acceptance and verification entries.
+- Repository-relative paths without globbing or dot-segment escapes.
+- Valid dependencies, no cycles, and no unsequenced overlapping scopes.
+- Governance artifacts in `forbidden_files`.
+- Risk and security-sensitive routing metadata.
 
-<div align="center">
-  <a href="https://ko-fi.com/oaichu" target="_blank" rel="noopener noreferrer">
-    <img src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Buy Me A Coffee at ko-fi.com" height="48" style="border: 0px; height: 48px; border-radius: 8px; box-shadow: 0 4px 14px rgba(255, 94, 91, 0.35);" />
-  </a>
-  <br/><br/>
-  <em>Every coffee fuels ongoing development of zero-regression agent tooling. Thank you! ☕✨</em>
-</div>
+`allowed_files` may still contain directory prefixes. v0.8.23 does **not** enforce a hard 80-line unified-diff limit; patch validation currently has byte/path/resource limits and exact path/scope checks. A diff that grows beyond the intended ticket should be split or escalated by the future mode router, not rejected under an undocumented line-count claim.
 
-<p align="center">
-  <sub>MIT License · © 2026 OMP Foundry Contributors · <strong>Lock the plan. Then pour the code.</strong></sub>
-</p>
+## Security model and limits
+
+### Protections that are implemented
+
+- Locked artifact content is re-hashed with SHA-256 before downstream transitions.
+- Plan and AATP writer tools require short-lived random bearer capabilities tied to the active stage; they are not signatures or OS capabilities.
+- Repository path canonicalization rejects traversal, symlink escapes, reserved Windows paths, and unsafe patch targets.
+- Patch application checks paths, symlinks, hard links, gitlinks, expected bytes, and the repository HEAD before commit.
+- Governed workers require a clean parent tree and the parent extension owns apply/commit.
+- Outside discovery, the shell gate permits only constrained read-only Git inspection; known compound-command, redirection, subshell, and dangerous Git execution forms are rejected.
+- Verification passes a reduced environment and disposable HOME/TMP paths.
+
+### Explicit limitations
+
+- The default verification runner is a trusted-host operation. It does not provide an OS sandbox unless `FOUNDRY_VERIFY_REQUIRE_SANDBOX=1` and a working external sandbox executable are configured.
+- A content hash stored in extension-owned state is evidence of bytes, not a signed or tamper-proof lock. A process that can bypass the extension can still mutate the repository.
+- `/debug` currently emits the five-step debugging protocol; it is not an automated debugger.
+- `/approve` handles Product and Plan. Design approval remains `/design approve` or `/design skip`.
+- Natural-language words such as `duyệt` are not parsed as a privileged approval command.
+- Do not run `/verify` on an untrusted repository without an external OS sandbox.
+
+## Model and context strategy
+
+The current release keeps expensive reasoning at architectural boundaries and uses cheaper roles for bounded implementation:
+
+| Work | Default role |
+|---|---|
+| Product analysis | `product-analyst` |
+| Plan Draft/Redteam/Synth | `plan-drafter`, `plan-redteam`, `plan-synth` |
+| Trivial/low-risk first attempt | `smol-implementer` |
+| Normal implementation | `implementer` |
+| Difficult, hard, critical, or retried implementation | `hard-implementer` |
+| Normal review | `reviewer` |
+| Security-sensitive or critical review | `security-reviewer` |
+
+Foundry skills are selected just in time by repository facts, lifecycle phase, and agent role. The package contains compact guidance for web, backend, data, cloud, desktop, mobile, systems, AI, UI foundation, verification, testing, debugging, review, security, and architecture. It deliberately does not inject every skill into every prompt. `foundry_skill_read` loads up to three selected skill bodies on demand.
+
+The packaged skill files are concise operational hints, not proof that every stack has a complete enterprise playbook. Project-specific acceptance criteria and verification commands remain authoritative.
+
+## Command reference
+
+| Command | Purpose |
+|---|---|
+| `/foundry [prompt]` | Bootstrap or advance the next legal phase. |
+| `/foundry-init` | Advanced/manual project bootstrap. |
+| `/foundry-doctor` | Check isolation and Foundry model-role availability. |
+| `/foundry-version` | Compare the installed version with the npm registry latest version. |
+| `/plan [status\|abort\|restart]` | Start, inspect, abort, or restart the three-stage Plan cycle. |
+| `/plan-revise` | Human-only plan revision; downstream evidence is invalidated. |
+| `/design [approve\|skip]` | Run or close the Design gate after Plan lock. |
+| `/foundry-approve` / `/approve [product\|plan]` | Human approval for Product or Plan. |
+| `/ok` `/run` `/go` | Advance the workflow; at `awaiting_lock`, lock the completed Plan. |
+| `/aatp` | Run the AATP compiler for the locked architecture. |
+| `/aatp-seal` | Human-controlled validation/sealing path for offline or transplanted AATP specs. |
+| `/build` | Dispatch the next ready isolated implementation layer. |
+| `/review [AATP-ID]` | Dispatch the appropriate independent reviewer. |
+| `/verify` | Run detected verification commands and derive QA state. |
+| `/release-check` | Derive release readiness from artifacts, tickets, reviews, provenance, QA, and tree state. |
+| `/debug` | Show the five-step systematic debugging protocol. |
+
+The extension also exposes read/write tools for status, bootstrap, verification, skill loading, approval, Plan artifact writes, and AATP artifact writes. Plan/AATP writers are intended for their active stage agents, not ordinary project work.
+
+## Verification and development
+
+```bash
+bun install
+bun test
+bun run typecheck
+bun run check:omp-contract
+npm pack --dry-run
+```
+
+The CI workflow runs Bun installation, typecheck, tests, extension syntax smoke, and an Oh My Pi contract check on Linux and Windows.
+
+## Release process
+
+A `v*` tag triggers the GitHub Release workflow. The workflow creates the GitHub release and publishes the package to public npm with provenance. Configure the repository `NPM_TOKEN` secret before pushing a release tag.
+
+For a local release check:
+
+```bash
+npm pack --dry-run
+git tag v<version>
+git push origin main --tags
+```
+
+The update checker uses the npm registry as the latest-version source. GitHub releases remain the release-history and source-code distribution channel.
+
+## Architecture documents
+
+- Design: [`docs/superpowers/specs/2026-08-26-foundry-3-mode-design.md`](docs/superpowers/specs/2026-08-26-foundry-3-mode-design.md)
+- Current P0 plan: [`docs/superpowers/plans/2026-08-26-foundry-p0-hotfixes-npm.md`](docs/superpowers/plans/2026-08-26-foundry-p0-hotfixes-npm.md)
+- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).
