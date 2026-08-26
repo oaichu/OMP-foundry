@@ -422,4 +422,43 @@ describe("extension integration smoke", () => {
 		expect(finalState.aatp.manifest_sha256).toMatch(/^[a-f0-9]{64}$/);
 		expect(finalState.tickets["AATP-001"]).toBeDefined();
 	});
+
+	test("verify refuses ungoverned projects and writes no state", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-ungoverned-verify-"));
+		const notifies: string[] = [];
+		const { commands } = harness();
+		const ungovernedCtx = {
+			...ctx(dir),
+			ui: { notify: (m: string) => notifies.push(m), setStatus() {} },
+		};
+		await commands.get("verify")!.handler("", ungovernedCtx);
+		expect(notifies.some((m) => m.includes("FOUNDRY_GATE"))).toBe(true);
+		expect(existsSync(join(dir, ".omp", "foundry-state.yml"))).toBe(false);
+	});
+
+	test("plan-revise refuses ungoverned projects and writes no state", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-ungoverned-plan-revise-"));
+		const notifies: string[] = [];
+		const { commands } = harness();
+		const ungovernedCtx = {
+			...ctx(dir),
+			ui: { notify: (m: string) => notifies.push(m), setStatus() {} },
+		};
+		await commands.get("plan-revise")!.handler("test reason", ungovernedCtx);
+		expect(notifies.some((m) => m.includes("FOUNDRY_GATE"))).toBe(true);
+		expect(existsSync(join(dir, ".omp", "foundry-state.yml"))).toBe(false);
+	});
+
+	test("release-check refuses ungoverned projects and writes no state", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-ungoverned-release-check-"));
+		const notifies: string[] = [];
+		const { commands } = harness();
+		const ungovernedCtx = {
+			...ctx(dir),
+			ui: { notify: (m: string) => notifies.push(m), setStatus() {} },
+		};
+		await commands.get("release-check")!.handler("", ungovernedCtx);
+		expect(notifies.some((m) => m.includes("FOUNDRY_GATE"))).toBe(true);
+		expect(existsSync(join(dir, ".omp", "foundry-state.yml"))).toBe(false);
+	});
 });

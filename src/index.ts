@@ -930,6 +930,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 	};
 	pi.registerCommand("plan", { description: "Enter/resume governed Draft → Redteam → Synth planning mode", handler: planHandler });
 	pi.registerCommand("plan-revise", { description: "Human-only: reopen locked plan and restart Plan", handler: async (args, ctx) => {
+		if (!stateFileExists(ctx.cwd)) { ctx.ui.notify("FOUNDRY_GATE: this project is not governed by Foundry yet; run /foundry first.", "warning"); return; }
 		const state = loadState(ctx.cwd);
 		state.master_plan.status = "draft";
 		state.master_plan.sha256 = "";
@@ -1029,8 +1030,12 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		const agent = reviewAgentForRisk(target.risk, target.security_sensitive === true);
 		orchestrate(pi, "Independent review.", `Spawn blocking ${agent} for ${target.id}. The review report and final output must contain the same exact marker: FOUNDRY_REVIEW ${target.id} APPROVE|REQUEST_CHANGES|BLOCK. Reviewer cannot call lifecycle tools or modify product code.`);
 	} });
-	pi.registerCommand("verify", { description: "Deterministic QA", handler: async (_args, ctx) => { const state = loadState(ctx.cwd), rows = runVerify(ctx.cwd); applyQa(ctx.cwd, state, rows); deriveRelease(ctx.cwd, state); persist(ctx.cwd, state); orchestrate(pi, `QA ${state.qa.status}`, rows.map((r) => `${r.id}=${r.exitCode}`).join(" ") || "no-commands"); } });
+	pi.registerCommand("verify", { description: "Deterministic QA", handler: async (_args, ctx) => {
+		if (!stateFileExists(ctx.cwd)) { ctx.ui.notify("FOUNDRY_GATE: this project is not governed by Foundry yet; run /foundry first.", "warning"); return; }
+		const state = loadState(ctx.cwd), rows = runVerify(ctx.cwd); applyQa(ctx.cwd, state, rows); deriveRelease(ctx.cwd, state); persist(ctx.cwd, state); orchestrate(pi, `QA ${state.qa.status}`, rows.map((r) => `${r.id}=${r.exitCode}`).join(" ") || "no-commands");
+	} });
 	pi.registerCommand("release-check", { description: "Derived release gate; agent release commands remain denied", handler: async (_args, ctx) => {
+		if (!stateFileExists(ctx.cwd)) { ctx.ui.notify("FOUNDRY_GATE: this project is not governed by Foundry yet; run /foundry first.", "warning"); return; }
 		const state = loadState(ctx.cwd); recountTickets(state); const ready = deriveRelease(ctx.cwd, state); if (ready) state.phase = "release"; persist(ctx.cwd, state);
 		const report = [
 			`${productReady(state) ? "✓" : "✗"} PRODUCT`, `${planLocked(state) ? "✓" : "✗"} PLAN locked`, `${designAllowsUi(state) ? "✓" : "✗"} DESIGN`,
