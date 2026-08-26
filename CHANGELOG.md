@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.23 — P0 kernel hotfixes + npm distribution
+
+- `FOUNDRY_VERSION` is derived from `package.json` (single source; fixes the false "update available" signal).
+- `/ok` `/run` `/go` at `awaiting_lock` now lock the plan instead of restarting Draft and wiping stage hashes.
+- `bash`/`lsp` fail closed outside discovery in governed projects (read-only git allowlist; read-only LSP actions).
+- `ticket.attempts` is persisted across sessions; `trivial`/`low` risk routes to `smol-implementer`.
+- `/plan-revise`, `/verify`, `/release-check` refuse to create state in ungoverned projects.
+- Approve logic deduplicated behind `src/approve.ts` (tool and slash command share one implementation).
+- Update check reads the npm registry; install/update with `omp plugin install omp-foundry`.
+
 ## 0.8.0 — release version sync
 
 - Synchronize the internal `FOUNDRY_VERSION` constant with the package/release version (`0.8.0`); previously the governance state was stamped `0.7.4` and the update checker reported a false "update available".

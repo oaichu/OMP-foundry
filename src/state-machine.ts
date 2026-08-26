@@ -112,6 +112,7 @@ function parseTickets(yaml: string): Record<string, AatpTicket> {
 			risk,
 			security_sensitive: securityRaw === "true",
 			agent,
+			attempts: Number(pick(chunk, "attempts") ?? 0) || 0,
 			review: mustEnum(pick(chunk, "review") ?? "none", REVIEW_VERDICTS, `tickets.${id}.review`),
 			review_by: reviewBy,
 			review_evidence_sha256: reviewEvidence,
@@ -191,6 +192,7 @@ function serializeTickets(tickets: Record<string, AatpTicket>): string[] {
 		lines.push(`  ${id}:`, `    status: ${t.status}`, `    dependencies: ${JSON.stringify(t.dependencies ?? [])}`, `    allowed_files: ${JSON.stringify(t.allowed_files)}`, `    forbidden_files: ${JSON.stringify(t.forbidden_files)}`, `    risk: ${t.risk}`);
 		if (t.security_sensitive) lines.push("    security_sensitive: true");
 		if (t.agent) lines.push(`    agent: ${JSON.stringify(t.agent)}`);
+		if (t.attempts) lines.push(`    attempts: ${t.attempts}`);
 		lines.push(`    review: ${t.review ?? "none"}`);
 		if (t.review_by) lines.push(`    review_by: ${JSON.stringify(t.review_by)}`);
 		if (t.review_evidence_sha256) lines.push(`    review_evidence_sha256: ${JSON.stringify(t.review_evidence_sha256)}`);

@@ -8,9 +8,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/oaichu/omp-foundry/releases/latest"><img alt="Release" src="https://img.shields.io/badge/version-v0.8.11-FFB020?style=for-the-badge&logo=git&logoColor=white"/></a>
+  <a href="https://github.com/oaichu/omp-foundry/releases/latest"><img alt="Release" src="https://img.shields.io/badge/version-v0.8.23-FFB020?style=for-the-badge&logo=git&logoColor=white"/></a>
   <a href="https://github.com/can1357/oh-my-pi"><img alt="Platform" src="https://img.shields.io/badge/platform-Oh%20My%20Pi%20%7C%20Antigravity-FF9F1C?style=for-the-badge&logo=electron&logoColor=white"/></a>
-  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-128%20passing-7EC8A9?style=for-the-badge&logo=checkmarx&logoColor=white"/></a>
+  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-148%20passing-7EC8A9?style=for-the-badge&logo=checkmarx&logoColor=white"/></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-14110E?style=for-the-badge"/></a>
   <a href="https://ko-fi.com/oaichu"><img alt="Support" src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffee-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white"/></a>
 </p>

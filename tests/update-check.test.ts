@@ -136,3 +136,16 @@ describe("update-check failure caching", () => {
 		expect(fetched).toBe(0);
 	});
 });
+
+test("notify text instructs the npm install command", async () => {
+	const dir = mkdtempSync(join(tmpdir(), "foundry-upd-npm-"));
+	const result = await checkForUpdate({
+		now: () => 5_000_000,
+		installed: "0.8.22",
+		cachePath: join(dir, "c.json"),
+		fetchLatest: async () => "0.9.0",
+	});
+	expect(result.newer).toBe(true);
+	expect(result.notify).toContain("omp plugin install omp-foundry");
+	expect(versionReport(result)).toContain("omp plugin install omp-foundry");
+});

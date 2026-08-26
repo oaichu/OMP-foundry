@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { denyToolCall, forceIsolatedTaskInput } from "../src/permissions";
+import { denyToolCall, forceIsolatedTaskInput, isReadOnlyGitCommand } from "../src/permissions";
 import { canonicalRepoPath } from "../src/paths";
 import { defaultState } from "../src/types";
 
@@ -19,4 +19,96 @@ describe("hard execution boundary", () => {
 	test("unsealed AATP native writes are always denied", () => { const state = { ...locked(), phase: "aatp" as const }; expect(denyToolCall("write", { path: "docs/AATP/AATP-1.md" }, state)?.reason).toContain("AATP_COMPILER_GATE"); expect(denyToolCall("write", { path: "docs/AATP/archive/old.md" }, state)?.reason).toContain("AATP_COMPILER_GATE"); });
 	test("isolated child without state cannot touch governance artifacts", () => expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, defaultState(), { isolatedWithoutState: true })?.reason).toContain("ISOLATION_GATE"));
 	test("forces isolation for implementation and review agents", () => { expect(forceIsolatedTaskInput({ agent: "implementer", task: "AATP-1" })?.isolated).toBe(true); const batch = forceIsolatedTaskInput({ tasks: [{ agent: "reviewer", task: "Review AATP-1" }] }); expect((batch?.tasks as Array<{ isolated?: boolean }>)[0]?.isolated).toBe(true); });
+});
+
+describe("shell and LSP gates outside discovery", () => {
+	test("mutating bash is denied when the plan is locked", () => {
+		expect(denyToolCall("bash", { command: "echo hi >> docs/MASTER_PLAN.md" }, locked())?.reason).toContain("BASH_GATE");
+	});
+	test("compound shell commands and operators are denied", () => {
+		expect(denyToolCall("bash", { command: "git diff && rm -rf ." }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git status; echo hi" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git log | sh" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff > out.txt" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff < in.txt" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff $(touch pwn)" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff `touch pwn`" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff\nrm -rf ." }, locked())?.reason).toContain("BASH_GATE");
+	});
+	test("dangerous git flags are denied", () => {
+		expect(denyToolCall("bash", { command: "git diff --ext-diff" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff --output=out.patch" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git -c core.pager=sh diff" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git log --exec=sh" }, locked())?.reason).toContain("BASH_GATE");
+	});
+	test("read-only git remains available", () => {
+		expect(denyToolCall("bash", { command: "git diff --stat" }, locked())).toBeUndefined();
+		expect(denyToolCall("bash", { command: "git status --porcelain" }, locked())).toBeUndefined();
+		expect(denyToolCall("bash", { command: "git log -n 5 --oneline" }, locked())).toBeUndefined();
+		expect(denyToolCall("bash", { command: "git show HEAD" }, locked())).toBeUndefined();
+		expect(denyToolCall("bash", { command: "git --no-pager diff" }, locked())).toBeUndefined();
+	});
+	test("bash stays open during discovery", () => {
+		expect(denyToolCall("bash", { command: "node -v" }, defaultState())).toBeUndefined();
+	});
+	test("mutating LSP actions are denied when locked", () => {
+		expect(denyToolCall("lsp", { action: "rename", file: "src/a.ts" }, locked())?.reason).toContain("LSP_GATE");
+		expect(denyToolCall("lsp", { action: "code_actions", apply: true, file: "src/a.ts" }, locked())?.reason).toContain("LSP_GATE");
+	});
+	test("read-only LSP actions remain available", () => {
+		expect(denyToolCall("lsp", { action: "definition", file: "src/a.ts" }, locked())).toBeUndefined();
+		expect(denyToolCall("lsp", { action: "diagnostics", path: "src/**/*.ts" }, locked())).toBeUndefined();
+	});
+});
+
+describe("isReadOnlyGitCommand", () => {
+	test("allows standard read-only commands and flags", () => {
+		expect(isReadOnlyGitCommand("git diff")).toBe(true);
+		expect(isReadOnlyGitCommand("git diff --stat")).toBe(true);
+		expect(isReadOnlyGitCommand("git diff HEAD~1")).toBe(true);
+		expect(isReadOnlyGitCommand("git status")).toBe(true);
+		expect(isReadOnlyGitCommand("git status --porcelain")).toBe(true);
+		expect(isReadOnlyGitCommand("git log")).toBe(true);
+		expect(isReadOnlyGitCommand("git log -n 5 --oneline")).toBe(true);
+		expect(isReadOnlyGitCommand("git show HEAD")).toBe(true);
+		expect(isReadOnlyGitCommand("git show --name-only")).toBe(true);
+		expect(isReadOnlyGitCommand("git --no-pager diff")).toBe(true);
+		expect(isReadOnlyGitCommand("git --no-pager status")).toBe(true);
+	});
+
+	test("rejects non-git and mutating subcommands", () => {
+		expect(isReadOnlyGitCommand("rm -rf .")).toBe(false);
+		expect(isReadOnlyGitCommand("ls -la")).toBe(false);
+		expect(isReadOnlyGitCommand("git commit -m 'test'")).toBe(false);
+		expect(isReadOnlyGitCommand("git push")).toBe(false);
+		expect(isReadOnlyGitCommand("git checkout main")).toBe(false);
+		expect(isReadOnlyGitCommand("git reset --hard")).toBe(false);
+		expect(isReadOnlyGitCommand("git clean -fd")).toBe(false);
+	});
+
+	test("rejects shell control characters, piping, and command injection", () => {
+		expect(isReadOnlyGitCommand("git diff; rm -rf .")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff && echo pwn")).toBe(false);
+		expect(isReadOnlyGitCommand("git log | cat")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff > out.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff < in.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff $(whoami)")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff `whoami`")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff\nrm -rf .")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff\r\nrm -rf .")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff\0rm -rf .")).toBe(false);
+	});
+
+	test("rejects dangerous execution and output flags", () => {
+		expect(isReadOnlyGitCommand("git diff --ext-diff")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --textconv")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --output=pwn.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --output pwn.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff -o pwn.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --tool=custom")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff -t custom")).toBe(false);
+		expect(isReadOnlyGitCommand("git log --exec=sh")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff -c core.pager=sh")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --config core.pager=sh")).toBe(false);
+	});
 });
