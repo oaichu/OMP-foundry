@@ -286,19 +286,17 @@ Foundry packages **36+ enterprise engineering skills** without bloating your mod
   <img src="docs/assets/architecture.svg" width="100%" alt="Architecture & Codebase Map"/>
 </p>
 
-```text
-src/
-├── index.ts             # Extension entrypoint, lifecycle hooks, command & tool dispatch
-├── gates.ts             # Approval gates, state guards, phase transitions
-├── permissions.ts       # Path canonicalization & mutation boundaries
-├── aatp.ts              # Work-order DAG engine, dependency graph & tickets
-├── plan.ts              # 3-Stage Master Plan lifecycle (Draft, Redteam, Synth)
-├── patch-gate.ts        # Unified diff parsing, scope check & atomic commit
-├── release.ts           # Provenance ledger & release derivation
-├── git-runtime.ts       # Hardened Git environment & hook sanitization
-├── verify-runner.ts     # Disposable QA test execution sandbox
-└── skills/              # JIT skill registry, stack detector & parsers
-```
+| Subsystem | Source File | Core Role & Architectural Boundary |
+| :--- | :--- | :--- |
+| **Human Authority** | `CEO Supreme Gate` | Natural language unblock, intent parsing, instant phase overrides |
+| **Triad Consensus** | [`src/plan.ts`](file:///home/oaichu/OMP-foundry/src/plan.ts) | 3-stage consensus (Draft, Redteam, Synth) locking `MASTER_PLAN.md` |
+| **Foundry Kernel** | [`src/index.ts`](file:///home/oaichu/OMP-foundry/src/index.ts) | 15 Governed CLI commands, state machine guards & model router |
+| **AATP Engine** | [`src/aatp.ts`](file:///home/oaichu/OMP-foundry/src/aatp.ts) | Atomic Architecture Task Protocol, dependency DAG & ≤3 file limit |
+| **Patch Gate** | [`src/patch-gate.ts`](file:///home/oaichu/OMP-foundry/src/patch-gate.ts) | Unified diff parser, hard ≤80 line cap & zero scope-drift gate |
+| **Permission Firewall**| [`src/permissions.ts`](file:///home/oaichu/OMP-foundry/src/permissions.ts) | Path canonicalization, out-of-bounds mutation blocker |
+| **Verify Runner** | [`src/verify-runner.ts`](file:///home/oaichu/OMP-foundry/src/verify-runner.ts) | Disposable QA test sandbox & linter execution |
+| **Git Runtime** | [`src/git-runtime.ts`](file:///home/oaichu/OMP-foundry/src/git-runtime.ts) | Hardened git sandbox, provenance ledger & atomic commits |
+| **JIT Skills** | [`src/skills/`](file:///home/oaichu/OMP-foundry/src/skills) | On-demand stack detector (Node/Rust/Python) & skill packs |
 
 ---
 
