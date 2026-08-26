@@ -22,21 +22,70 @@ Foundry today is an always-on 8-phase pipeline. Every request — including a on
 - Expanding the skill catalog (36 → more). Packs remain a data directory of 3–5 superpower procedures.
 - OS-sandbox-by-default on Windows (block `.git` writes first; hard sandbox stays opt-in).
 - Natural-language approval parser ("duyệt"/"ok" regex over user text).
-- ≤80-line diff hard cap and exact-file `allowed_files` (dir prefixes stay; file-count caps live in the router table only).
+- Hard-reject patches solely because a unified diff exceeds 80 lines (upgrade mode instead). `allowed_files` stay directory prefixes; file-count and **file-weight** live in the router table.
 
 ## Architecture
 
-A deterministic router (lookup table, no ML) classifies each request at `/foundry` entry, gated behind `foundry.modes: true` in `.omp/config.yml` until P3 flips the default:
+A deterministic router (lookup table, no ML) classifies each request at `/foundry` entry, gated behind `foundry.modes: true` in `.omp/config.yml` until P3 flips the default. **Fail-closed:** if any predicate is unknown (no git baseline, unreadable file, ambiguous path set), the mode is **Full**. Downgrades never happen automatically.
 
-| Mode | Entry criteria | Pipeline | Models |
-|---|---|---|---|
-| **Fast** | touches ≤1 file; a verify id already exists; no locked artifact; no new concern ID | single implementer + verify | smol/task |
-| **Lite** | touches 2–5 files; no architecture change; no new SEC/ARCH concern | AATP ticket + implementer; review only when `risk >= normal` or `security_sensitive` (mid reviewer) | task impl, mid review |
-| **Full** | >5 files, or touches ARCH/SEC concerns, or revises a locked artifact, or cross-cutting refactor | Plan3 → AATP DAG → workers → review → verify | slow plan/review, task/smol impl |
+**Measured weight** (on disk / HEAD, before the worker runs — never “guess light”):
 
-- **Mid-task upgrade** Fast→Lite→Full: when a worker conflict or diff exceeds mode caps, the router re-classifies and Foundry continues at the higher mode. Downgrades never happen automatically.
-- **Escalation (deterministic):** retry ≥1 → `hard-implementer`; retry ≥2 or two REQUEST_CHANGES → slow-model agent. All transitions recorded in the ledger.
-- **Full mode** is the current pipeline, unchanged, minus its blockers (Phase 0). Fast/Lite are new code paths that reuse the existing patch gate, verify runner, and provenance.
+| Symbol | Value | Measures |
+|---|---|---|
+| `W_LOC` | 400 | lines in a touched **existing** file |
+| `W_BYTES` | 32 KiB | file size |
+| `FAST_DIFF` | 120 | `git diff --numstat` added+deleted after the worker (upgrade trigger) |
+| `LITE_FILES` | 2–5 | distinct repo-relative paths |
+| `LITE_SUM_LOC` | 2000 | sum of `W_LOC` over touched existing files |
+| `LITE_DIFF` | 400 | added+deleted after the worker (upgrade trigger) |
+
+Vendor / generated / minified / lockfiles (`*.min.js`, `dist/`, `node_modules/`, `package-lock.json`, etc.) never count as Fast/Lite targets — Full or refuse.
+
+### Fast (P1)
+
+**All** of the following, else not Fast:
+
+1. Repo has a git baseline (not greenfield / empty tree).
+2. Touches **exactly one** path that **already exists in HEAD** (no create, no rename, no delete).
+3. That file: `LOC ≤ 400` **or** `size ≤ 32 KiB` (both measured; fail if either exceeds).
+4. A verify id already exists in project detection / package scripts.
+5. Does not write locked Foundry artifacts (`PRODUCT.md`, `MASTER_PLAN.md`, `DESIGN.md`, `docs/AATP/*`, `.omp/foundry-state.yml`).
+6. Introduces no new `REQ-*` / `ARCH-*` / `SEC-*` / `DES-*` / `OPS-*` concern IDs.
+
+Pipeline: one `smol-implementer` (or `@foundry_smol` / `@task`) + `/verify`. No Plan3, no AATP compiler.  
+**Mid-task upgrade → Lite** if the resulting diff touches another path, creates/renames, or `added+deleted > 120`.
+
+### Lite (P2)
+
+**All** of the following, else Full:
+
+1. Existing governed repo (product at least present; not a new-project bootstrap).
+2. Touches **2–5** paths. At most **one** of them may be a **new** file; the rest exist in HEAD. No directory-wide `allowed_files` that expand to >5 files.
+3. Every existing touched file: `LOC ≤ 400` **or** `size ≤ 32 KiB`. Sum of existing-file LOC `≤ 2000`.
+4. No architecture change: no new `ARCH-*` / `SEC-*` concerns; no public API / schema / auth surface declared in the locked plan as such.
+5. Does not revise a **locked** artifact (plan/design/product). Unlocked planning files are not Lite work — that is `/plan` (Full).
+6. Not cross-cutting: one cohesive ticket (one subsystem). Split otherwise → Full DAG.
+
+Pipeline: one AATP ticket + `implementer` (`@foundry_impl` / `@task`). Independent review **only** when `risk >= normal` **or** `security_sensitive`; otherwise verify is the floor.  
+**Mid-task upgrade → Full** if files >5, any file exceeds weight, `added+deleted > 400`, new ARCH/SEC, or `FOUNDRY_CONFLICT SCOPE_*`.
+
+### Full (P3 default / fail-closed)
+
+Any of:
+
+- Greenfield, no baseline, `/foundry` bootstrap, or classifier uncertainty
+- >5 files, or directory prefix that cannot be bounded to ≤5 exact paths
+- Any touched existing file exceeds `W_LOC` **and** `W_BYTES` (heavy file — do not smol it)
+- New or revised `ARCH-*` / `SEC-*`, or `security_sensitive: true` at DAG scope
+- Revises a locked product/plan/design artifact (`/plan-revise`, design reopen)
+- Cross-cutting refactor, rename/move sets, generated/vendor targets
+- Fast/Lite predicates failed
+
+Pipeline: current kernel — Plan3 → AATP DAG → isolated workers (`routeAgent`) → review → verify. Models: `@foundry_plan` / `_redteam` / `_synth` then impl/review per ticket risk.
+
+- **Mid-task upgrade** Fast→Lite→Full only. Caps in the tables above; worker conflict or post-diff overflow re-classifies and continues. Ledger `escalated: true`.
+- **Escalation (deterministic, inside a mode):** retry ≥1 → `hard-implementer`; retry ≥2 or two `REQUEST_CHANGES` → slow-model agent (`@foundry_hard` / `@slow`). Recorded in the ledger.
+- **Full mode** is the current pipeline, unchanged, minus Phase 0 blockers. Fast/Lite are new paths that reuse patch gate, verify runner, and provenance.
 
 ## Ledger (minimal)
 
@@ -76,7 +125,7 @@ No UI surface in this design — Foundry is a TUI plugin; observability is `/fou
 
 ## Acceptance criteria
 
-- `bun test` green including new tests: router classification table, `/ok` at `awaiting_lock` locks (no reset), bash write denied on governed projects, `attempts` roundtrip through save/load, ledger append on every governed run.
+- `bun test` green including new tests: router classification table (Fast/Lite/Full fixtures: existing light file, existing 10k-LOC file, greenfield, 2–5 light files, heavy file → Full), `/ok` at `awaiting_lock` locks (no reset), bash write denied on governed projects, `attempts` roundtrip through save/load, ledger append on every governed run.
 - Fast-mode fixed overhead ≤ 1 orchestrate turn (no plan stage, no compiler).
 - Ledger totals match `/foundry-stats` output; file is gitignored.
 - Router is inert unless `foundry.modes: true` is set in `.omp/config.yml`; P3 flips the default.
