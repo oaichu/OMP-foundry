@@ -3,6 +3,8 @@
   "version": "0.8.22",
   "description": "Unified Superpowers, 3-Stage Master Plan, and Governed AATP for Oh My Pi.",
   "license": "MIT",
+  "files": ["src", "skills", "agents", "rules", "templates", "types"],
+  "publishConfig": { "access": "public" },
   "scripts": {
     "test": "bun test",
     "build": "tsc --noEmit",
