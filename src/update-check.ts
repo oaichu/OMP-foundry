@@ -70,17 +70,16 @@ function writeCache(path: string, cache: UpdateCache): boolean {
 	try { const text = `${JSON.stringify(cache)}\n`; if (Buffer.byteLength(text, "utf8") > MAX_CACHE_BYTES) return false; mkdirSync(dirname(path), { recursive: true }); writeFileSync(path, text, "utf8"); return true; }
 	catch { return false; }
 }
+const REGISTRY_LATEST = "https://registry.npmjs.org/omp-foundry/latest";
 async function fetchLatestTag(): Promise<string | undefined> {
-	const response = await fetch(LATEST_RELEASE, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(4000), headers: { Accept: "text/html" } });
+	const response = await fetch(REGISTRY_LATEST, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(4000) });
 	if (!response.ok) return undefined;
 	try {
-		const finalUrl = new URL(response.url);
-		if (finalUrl.protocol !== "https:" || finalUrl.hostname.toLowerCase() !== "github.com") return undefined;
-		if (!/^\/oaichu\/omp-foundry\/releases\/tag\/v?\d+\.\d+\.\d+(?:[-.][\w.]+)?\/?$/i.test(finalUrl.pathname)) return undefined;
-		return parseTagFromUrl(finalUrl.toString());
+		const data = (await response.json()) as { version?: unknown };
+		return typeof data.version === "string" && /^\d+\.\d+\.\d+/.test(data.version) ? data.version.replace(/^v/, "") : undefined;
 	} catch { return undefined; }
 }
-function notifyText(installed: string, latest: string): string { return `Foundry ${latest} available. Installed: ${installed}. Update to release tag v${latest} and restart OMP.`; }
+function notifyText(installed: string, latest: string): string { return `Foundry ${latest} available. Installed: ${installed}. Update: run 'omp plugin install omp-foundry' and restart OMP.`; }
 export async function checkForUpdate(deps: UpdateCheckDeps = {}): Promise<UpdateResult> {
 	const now = deps.now ?? Date.now, installed = deps.installed ?? FOUNDRY_VERSION, omp = deps.omp ?? (await resolveOmpVersion());
 	const cachePath = deps.cachePath ?? (await xdgCachePath()), cached = readCache(cachePath);
@@ -94,5 +93,5 @@ export async function checkForUpdate(deps: UpdateCheckDeps = {}): Promise<Update
 	return { installed, omp, latest, newer, notify: newer && latest ? notifyText(installed, latest) : undefined };
 }
 export function versionReport(result: UpdateResult): string {
-	return [`Foundry: ${result.installed}`, `OMP: ${result.omp}`, `Latest stable: ${result.latest ?? "(unknown)"}`, result.newer ? `Update (stable): git fetch --tags && git checkout v${result.latest} then restart OMP.` : "Installed Foundry is current or newer than the latest release tag."].join("\n");
+	return [`Foundry: ${result.installed}`, `OMP: ${result.omp}`, `Latest stable: ${result.latest ?? "(unknown)"}`, result.newer ? `Update (stable): omp plugin install omp-foundry then restart OMP.` : "Installed Foundry is current or newer than the latest release."].join("\n");
 }
