@@ -34,7 +34,10 @@ export function planStatus(state: CompanyState): string {
 export function enterPlan(state: CompanyState, restart = false): void {
 	state.mode = "plan";
 	state.phase = "planning";
-	if (restart || state.planning.stage === "idle" || state.planning.stage === "awaiting_lock") {
+	// awaiting_lock holds a complete Draft→Redteam→Synth cycle awaiting the
+	// human lock; a plain resume must never destroy it. Only an explicit
+	// restart (or /plan-revise) may reset the stage.
+	if (restart || state.planning.stage === "idle") {
 		state.planning = { stage: "draft", epoch: randomUUID(), draft_sha256: "", review_sha256: "", final_sha256: "" };
 	}
 	if (!state.planning.epoch) state.planning.epoch = randomUUID();

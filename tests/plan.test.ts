@@ -82,3 +82,25 @@ describe("Plan governed mode", () => {
 		expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, state, { canonicalize })?.reason).toContain("PLAN_GATE");
 	});
 });
+
+describe("awaiting_lock is resume-only", () => {
+	test("enterPlan preserves a completed awaiting_lock cycle", () => {
+		const state = defaultState();
+		state.mode = "plan";
+		state.planning = { stage: "awaiting_lock", epoch: "e1", draft_sha256: "a", review_sha256: "b", final_sha256: "c" };
+		enterPlan(state);
+		expect(state.planning.stage).toBe("awaiting_lock");
+		expect(state.planning.epoch).toBe("e1");
+		expect(state.planning.final_sha256).toBe("c");
+	});
+
+	test("enterPlan(restart) still resets awaiting_lock", () => {
+		const state = defaultState();
+		state.mode = "plan";
+		state.planning = { stage: "awaiting_lock", epoch: "e1", draft_sha256: "a", review_sha256: "b", final_sha256: "c" };
+		enterPlan(state, true);
+		expect(state.planning.stage).toBe("draft");
+		expect(state.planning.final_sha256).toBe("");
+		expect(state.planning.epoch).not.toBe("e1");
+	});
+});
