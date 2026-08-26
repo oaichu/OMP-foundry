@@ -461,4 +461,55 @@ describe("extension integration smoke", () => {
 		expect(notifies.some((m) => m.includes("FOUNDRY_GATE"))).toBe(true);
 		expect(existsSync(join(dir, ".omp", "foundry-state.yml"))).toBe(false);
 	});
+
+	test("ok slash command handler locks plan at awaiting_lock and transitions mode to normal without epoch reset", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-ok-awaiting-lock-"));
+		mkdirSync(join(cwd, "docs", "planning"), { recursive: true });
+		writeFileSync(join(cwd, "docs", "PRODUCT.md"), "# Product Specs\nValid product spec.\n");
+		writeFileSync(join(cwd, "docs", "planning", "MASTER_PLAN_DRAFT.md"), "# Master Plan Draft\nDraft content.\n");
+		writeFileSync(join(cwd, "docs", "planning", "PLAN_REVIEW.md"), "# Plan Review\nReview content.\n");
+		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "# Master Plan\nSynthesized master plan.\n");
+
+		const state = defaultState();
+		state.product = { status: "approved", sha256: "prod-sha-ok-test" };
+		state.mode = "plan";
+		state.phase = "planning";
+		const expectedEpoch = "plan-epoch-ok-e2e-12345";
+		state.planning = {
+			stage: "awaiting_lock",
+			epoch: expectedEpoch,
+			draft_sha256: hashPlanArtifact(cwd, "draft")!,
+			review_sha256: hashPlanArtifact(cwd, "redteam")!,
+			final_sha256: hashPlanArtifact(cwd, "synth")!,
+		};
+		state.master_plan = { status: "draft", version: "0", sha256: "" };
+		saveState(cwd, state);
+
+		const { commands } = harness();
+		const okCommand = commands.get("ok");
+		expect(okCommand).toBeDefined();
+		expect(typeof okCommand.handler).toBe("function");
+
+		const notifies: Array<{ message: string; level?: string }> = [];
+		const testCtx = {
+			...ctx(cwd),
+			ui: {
+				notify: (message: string, level?: "error" | "info" | "warning") => {
+					notifies.push({ message, level });
+				},
+				setStatus() {},
+			},
+		};
+
+		await okCommand.handler("", testCtx);
+
+		const updatedState = loadState(cwd);
+		expect(updatedState.master_plan.status).toBe("locked");
+		expect(updatedState.master_plan.version).toBe("1.0");
+		expect(updatedState.master_plan.sha256).toBe(hashPlanArtifact(cwd, "synth")!);
+		expect(updatedState.mode).toBe("normal");
+		expect(updatedState.planning.epoch).toBe(expectedEpoch);
+		expect(updatedState.planning.stage).toBe("awaiting_lock");
+		expect(notifies.some((n) => n.message.includes("Plan phase approved successfully"))).toBe(true);
+	});
 });

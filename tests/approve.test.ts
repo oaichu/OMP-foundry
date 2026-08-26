@@ -75,7 +75,7 @@ describe("approvePlan", () => {
 		const result = approvePlan(dir, state, deps(log));
 		expect(result.ok).toBe(true);
 		expect(state.master_plan.status).toBe("locked");
-		expect(state.mode as string).toBe("normal");
+		expect<FoundryMode>(state.mode).toBe("normal");
 		saveState(dir, state);
 	});
 });

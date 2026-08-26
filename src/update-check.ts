@@ -3,7 +3,6 @@ import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { FOUNDRY_VERSION } from "./types";
 
-export const LATEST_RELEASE = "https://github.com/oaichu/omp-foundry/releases/latest";
 const TTL_MS = 24 * 60 * 60 * 1000;
 const FAIL_TTL_MS = 60 * 60 * 1000;
 const MAX_CACHE_BYTES = 16 * 1024;

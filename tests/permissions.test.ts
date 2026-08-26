@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { denyToolCall, forceIsolatedTaskInput } from "../src/permissions";
+import { denyToolCall, forceIsolatedTaskInput, isReadOnlyGitCommand } from "../src/permissions";
 import { canonicalRepoPath } from "../src/paths";
 import { defaultState } from "../src/types";
 
@@ -58,5 +58,57 @@ describe("shell and LSP gates outside discovery", () => {
 	test("read-only LSP actions remain available", () => {
 		expect(denyToolCall("lsp", { action: "definition", file: "src/a.ts" }, locked())).toBeUndefined();
 		expect(denyToolCall("lsp", { action: "diagnostics", path: "src/**/*.ts" }, locked())).toBeUndefined();
+	});
+});
+
+describe("isReadOnlyGitCommand", () => {
+	test("allows standard read-only commands and flags", () => {
+		expect(isReadOnlyGitCommand("git diff")).toBe(true);
+		expect(isReadOnlyGitCommand("git diff --stat")).toBe(true);
+		expect(isReadOnlyGitCommand("git diff HEAD~1")).toBe(true);
+		expect(isReadOnlyGitCommand("git status")).toBe(true);
+		expect(isReadOnlyGitCommand("git status --porcelain")).toBe(true);
+		expect(isReadOnlyGitCommand("git log")).toBe(true);
+		expect(isReadOnlyGitCommand("git log -n 5 --oneline")).toBe(true);
+		expect(isReadOnlyGitCommand("git show HEAD")).toBe(true);
+		expect(isReadOnlyGitCommand("git show --name-only")).toBe(true);
+		expect(isReadOnlyGitCommand("git --no-pager diff")).toBe(true);
+		expect(isReadOnlyGitCommand("git --no-pager status")).toBe(true);
+	});
+
+	test("rejects non-git and mutating subcommands", () => {
+		expect(isReadOnlyGitCommand("rm -rf .")).toBe(false);
+		expect(isReadOnlyGitCommand("ls -la")).toBe(false);
+		expect(isReadOnlyGitCommand("git commit -m 'test'")).toBe(false);
+		expect(isReadOnlyGitCommand("git push")).toBe(false);
+		expect(isReadOnlyGitCommand("git checkout main")).toBe(false);
+		expect(isReadOnlyGitCommand("git reset --hard")).toBe(false);
+		expect(isReadOnlyGitCommand("git clean -fd")).toBe(false);
+	});
+
+	test("rejects shell control characters, piping, and command injection", () => {
+		expect(isReadOnlyGitCommand("git diff; rm -rf .")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff && echo pwn")).toBe(false);
+		expect(isReadOnlyGitCommand("git log | cat")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff > out.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff < in.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff $(whoami)")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff `whoami`")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff\nrm -rf .")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff\r\nrm -rf .")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff\0rm -rf .")).toBe(false);
+	});
+
+	test("rejects dangerous execution and output flags", () => {
+		expect(isReadOnlyGitCommand("git diff --ext-diff")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --textconv")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --output=pwn.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --output pwn.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff -o pwn.txt")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --tool=custom")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff -t custom")).toBe(false);
+		expect(isReadOnlyGitCommand("git log --exec=sh")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff -c core.pager=sh")).toBe(false);
+		expect(isReadOnlyGitCommand("git diff --config core.pager=sh")).toBe(false);
 	});
 });
