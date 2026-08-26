@@ -20,3 +20,24 @@ describe("hard execution boundary", () => {
 	test("isolated child without state cannot touch governance artifacts", () => expect(denyToolCall("write", { path: "docs/MASTER_PLAN.md" }, defaultState(), { isolatedWithoutState: true })?.reason).toContain("ISOLATION_GATE"));
 	test("forces isolation for implementation and review agents", () => { expect(forceIsolatedTaskInput({ agent: "implementer", task: "AATP-1" })?.isolated).toBe(true); const batch = forceIsolatedTaskInput({ tasks: [{ agent: "reviewer", task: "Review AATP-1" }] }); expect((batch?.tasks as Array<{ isolated?: boolean }>)[0]?.isolated).toBe(true); });
 });
+
+describe("shell and LSP gates outside discovery", () => {
+	test("mutating bash is denied when the plan is locked", () => {
+		expect(denyToolCall("bash", { command: "echo hi >> docs/MASTER_PLAN.md" }, locked())?.reason).toContain("BASH_GATE");
+	});
+	test("read-only git remains available", () => {
+		expect(denyToolCall("bash", { command: "git diff --stat" }, locked())).toBeUndefined();
+		expect(denyToolCall("bash", { command: "git status --porcelain" }, locked())).toBeUndefined();
+	});
+	test("bash stays open during discovery", () => {
+		expect(denyToolCall("bash", { command: "node -v" }, defaultState())).toBeUndefined();
+	});
+	test("mutating LSP actions are denied when locked", () => {
+		expect(denyToolCall("lsp", { action: "rename", file: "src/a.ts" }, locked())?.reason).toContain("LSP_GATE");
+		expect(denyToolCall("lsp", { action: "code_actions", apply: true, file: "src/a.ts" }, locked())?.reason).toContain("LSP_GATE");
+	});
+	test("read-only LSP actions remain available", () => {
+		expect(denyToolCall("lsp", { action: "definition", file: "src/a.ts" }, locked())).toBeUndefined();
+		expect(denyToolCall("lsp", { action: "diagnostics", path: "src/**/*.ts" }, locked())).toBeUndefined();
+	});
+});

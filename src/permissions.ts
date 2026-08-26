@@ -11,6 +11,8 @@ import {
 } from "./types";
 
 const FILE_MUTATING = new Set(["write", "edit", "ast_edit", "apply_patch"]);
+const BASH_READ_ONLY = /^git\s+(?:diff|status|log|show)\b/;
+const LSP_READ_ONLY = new Set(["status", "capabilities", "definition", "type_definition", "implementation", "references", "hover", "symbols", "diagnostics", "reload"]);
 const GOVERNED = new Set(["implementer", "hard-implementer", "smol-implementer", "reviewer", "security-reviewer"]);
 const EXTENSION_OWNED_PATHS = [
 	...STATE_PATHS,
@@ -82,6 +84,20 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 				}
 			}
 		} catch { /* malformed URLs are handled by the tool */ }
+	}
+	// Outside discovery the parent shell is read-only: every mutation must
+	// flow through AATP tickets and the foundry_* tools so gates see it.
+	if (state.phase !== "discovery") {
+		if (toolName === "bash") {
+			const command = typeof input.command === "string" ? input.command.trim() : "";
+			if (!BASH_READ_ONLY.test(command)) return { block: true, reason: "BASH_GATE: governed projects allow read-only git only (diff|status|log|show); mutations go through AATP tickets and foundry tools." };
+			return undefined;
+		}
+		if (toolName === "lsp") {
+			const action = typeof input.action === "string" ? input.action : "";
+			if (!LSP_READ_ONLY.has(action)) return { block: true, reason: "LSP_GATE: read-only LSP actions only in a governed project; renames and edits go through AATP tickets." };
+			return undefined;
+		}
 	}
 	if (!FILE_MUTATING.has(toolName)) return;
 	if (ctx.stateBroken) return { block: true, reason: `STATE_CORRUPT: ${ctx.stateBroken}. Fix .omp/foundry-state.yml.` };
