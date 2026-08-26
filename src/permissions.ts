@@ -11,7 +11,19 @@ import {
 } from "./types";
 
 const FILE_MUTATING = new Set(["write", "edit", "ast_edit", "apply_patch"]);
-const BASH_READ_ONLY = /^git\s+(?:diff|status|log|show)\b/;
+const SHELL_CONTROL_CHARS = /[;&|<>$`\n\r\0(){}]/;
+const DANGEROUS_GIT_FLAGS = /(?:^|\s)(?:--ext-diff|--textconv|--output(?:=|\s|$)|-o(?:=|\s|$)|--tool(?:=|\s|$)|-t(?:=|\s|$)|--exec\b|-c\b|--config\b)/;
+
+export function isReadOnlyGitCommand(command: string): boolean {
+	if (typeof command !== "string") return false;
+	const cmd = command.trim();
+	if (!cmd || SHELL_CONTROL_CHARS.test(cmd)) return false;
+	const match = cmd.match(/^git(?:\s+--no-pager)?\s+(diff|status|log|show)(?:\s+(.*))?$/);
+	if (!match) return false;
+	const rest = match[2];
+	if (rest && DANGEROUS_GIT_FLAGS.test(rest)) return false;
+	return true;
+}
 const LSP_READ_ONLY = new Set(["status", "capabilities", "definition", "type_definition", "implementation", "references", "hover", "symbols", "diagnostics", "reload"]);
 const GOVERNED = new Set(["implementer", "hard-implementer", "smol-implementer", "reviewer", "security-reviewer"]);
 const EXTENSION_OWNED_PATHS = [
@@ -90,7 +102,7 @@ export function denyToolCall(toolName: string, input: ToolInput, state: CompanyS
 	if (state.phase !== "discovery") {
 		if (toolName === "bash") {
 			const command = typeof input.command === "string" ? input.command.trim() : "";
-			if (!BASH_READ_ONLY.test(command)) return { block: true, reason: "BASH_GATE: governed projects allow read-only git only (diff|status|log|show); mutations go through AATP tickets and foundry tools." };
+			if (!isReadOnlyGitCommand(command)) return { block: true, reason: "BASH_GATE: governed projects allow read-only git only (diff|status|log|show); mutations go through AATP tickets and foundry tools." };
 			return undefined;
 		}
 		if (toolName === "lsp") {

@@ -25,9 +25,28 @@ describe("shell and LSP gates outside discovery", () => {
 	test("mutating bash is denied when the plan is locked", () => {
 		expect(denyToolCall("bash", { command: "echo hi >> docs/MASTER_PLAN.md" }, locked())?.reason).toContain("BASH_GATE");
 	});
+	test("compound shell commands and operators are denied", () => {
+		expect(denyToolCall("bash", { command: "git diff && rm -rf ." }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git status; echo hi" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git log | sh" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff > out.txt" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff < in.txt" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff $(touch pwn)" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff `touch pwn`" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff\nrm -rf ." }, locked())?.reason).toContain("BASH_GATE");
+	});
+	test("dangerous git flags are denied", () => {
+		expect(denyToolCall("bash", { command: "git diff --ext-diff" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git diff --output=out.patch" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git -c core.pager=sh diff" }, locked())?.reason).toContain("BASH_GATE");
+		expect(denyToolCall("bash", { command: "git log --exec=sh" }, locked())?.reason).toContain("BASH_GATE");
+	});
 	test("read-only git remains available", () => {
 		expect(denyToolCall("bash", { command: "git diff --stat" }, locked())).toBeUndefined();
 		expect(denyToolCall("bash", { command: "git status --porcelain" }, locked())).toBeUndefined();
+		expect(denyToolCall("bash", { command: "git log -n 5 --oneline" }, locked())).toBeUndefined();
+		expect(denyToolCall("bash", { command: "git show HEAD" }, locked())).toBeUndefined();
+		expect(denyToolCall("bash", { command: "git --no-pager diff" }, locked())).toBeUndefined();
 	});
 	test("bash stays open during discovery", () => {
 		expect(denyToolCall("bash", { command: "node -v" }, defaultState())).toBeUndefined();
