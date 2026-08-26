@@ -18,7 +18,7 @@ Foundry today is an always-on 8-phase pipeline. Every request — including a on
 ## Non-goals (explicitly rejected in review)
 
 - Benchmark suite of 20–40 synthetic tasks; composite quality score `Q = αC+βR+γA+δV`.
-- Custom updater (canary/rollback/checksum) — use `omp update --plugins` + single version source.
+- Custom updater (canary/rollback/checksum) — the update channel is public npm: `omp plugin install omp-foundry` re-installs latest; `omp update --plugins` upgrades marketplace plugins only and is not this plugin's path.
 - Expanding the skill catalog (36 → more). Packs remain a data directory of 3–5 superpower procedures.
 - OS-sandbox-by-default on Windows (block `.git` writes first; hard sandbox stays opt-in).
 - Natural-language approval parser ("duyệt"/"ok" regex over user text).
@@ -50,9 +50,13 @@ Gitignored (never committed). `/foundry-stats` renders per-mode totals and cost 
 
 **Success metric (measurable, from real usage):** over a rolling 2-week window of the maintainer's actual tasks — relative acceptance ≥ 0.9 vs `@slow`-direct on the same tasks, at ≤ 0.4 cost. If missed: tune escalation thresholds only. Do not add architectural planes.
 
+## Distribution & updates (npm)
+
+The plugin publishes to public npm as `omp-foundry` (repo is already public MIT; zero runtime dependencies, so the tarball is small). CI publishes on `v*` tag push (`npm publish --provenance`, `NPM_TOKEN` secret). Update check switches from parsing the GitHub release redirect to `https://registry.npmjs.org/omp-foundry/latest` (clean JSON, no HTML regex, no GitHub rate limits), and the notify text instructs `omp plugin install omp-foundry` instead of `git fetch --tags && git checkout`. Git-tag installs keep working but are the slow path.
+
 ## Phase 0 — kernel hotfixes (prerequisite, from the audit; ships before any router)
 
-1. `FOUNDRY_VERSION` derived from `package.json` (single source; CHANGELOG + badge sync).
+1. `FOUNDRY_VERSION` derived from `package.json` (single source; CHANGELOG + badge sync); update-check reads the npm registry and notifies with `omp plugin install omp-foundry`.
 2. `/ok` `/run` `/go` at `awaiting_lock` lock the plan; `enterPlan` no longer resets `awaiting_lock`.
 3. `denyToolCall` fail-closed for `bash`/`lsp` write paths in governed projects (allowlist: `git diff|status|log|show`).
 4. Serialize `ticket.attempts`; route `trivial|low` → `smol-implementer` (decision: route, not delete — Fast mode needs it).
