@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — native design intelligence core
+
+- Replace the thin external `ui-ux-pro-max` handoff with a native Foundry design pack: `design-intelligence`, `design-system-contract`, and `design-quality` behind the existing `design-foundation` orchestrator.
+- Cover Skeuomorphism, Neumorphism/Neomorphism, Glassmorphism, Claymorphism, Minimalism, Maximalism, Brutalism, Liquid Glass, Bento Grid, and Spatial UI as explicit visual-language grammar.
+- Expand `templates/DESIGN.md` into a durable Primitive -> Semantic -> Component contract with responsive/platform rules, interaction states, accessibility, motion/effect budgets, representative screens, preview evidence, and a PASS/BLOCKED design-QA gate.
+- Reuse `design-quality` during independent Review/QA while keeping art-direction and token-authoring skills confined to the Design phase.
+- Record upstream design-knowledge provenance without vendoring or runtime-coupling external skill corpora.
+
 ## 0.8.23 — P0 kernel hotfixes + npm distribution
 
 - `FOUNDRY_VERSION` is derived from `package.json` (single source; fixes the false "update available" signal).
