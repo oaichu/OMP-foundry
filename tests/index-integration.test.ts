@@ -2,7 +2,9 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnSync } from "node:child_process";
 import registerFoundryExtension from "../src/index";
+import { aatpManifestHash, listAatpSpecs, seedTickets } from "../src/aatp";
 import { hashPlanArtifact } from "../src/plan";
 import { lockArtifactHash } from "../src/release";
 import { loadState, saveState } from "../src/state-machine";
@@ -182,6 +184,45 @@ describe("extension integration smoke", () => {
 		expect(readFileSync(join(cwd, "docs", "AATP", "INDEX.md"), "utf8")).toContain("AATP-001");
 		const beforeBuild = await taskHook({ toolName: "task", toolCallId: "too-early", input: { agent: "implementer", task: "Implement AATP-001" } }, ctx(cwd));
 		expect(beforeBuild.reason).toContain("AATP_EXECUTION_GATE");
+	});
+
+	test("foundry_step on a sealed ready DAG enters implementation without slash /build", async () => {
+		const cwd = mkdtempSync(join(tmpdir(), "foundry-step-build-"));
+		const git = (args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8" });
+		git(["init", "-b", "main"]); git(["config", "user.email", "t@t"]); git(["config", "user.name", "t"]); git(["config", "core.autocrlf", "false"]);
+		mkdirSync(join(cwd, "docs", "AATP"), { recursive: true });
+		mkdirSync(join(cwd, ".omp"), { recursive: true });
+		writeFileSync(join(cwd, "docs", "PRODUCT.md"), "# Product\nlocked evidence\n");
+		writeFileSync(join(cwd, "docs", "MASTER_PLAN.md"), "# Master plan\nlocked evidence\n");
+		writeFileSync(join(cwd, ".gitignore"), ".omp/foundry-state.yml\n");
+		writeFileSync(join(cwd, ".omp", "config.yml"), "task:\n  isolation:\n    mode: auto\n    apply: false\nmodelRoleStorage: project\n");
+		writeFileSync(join(cwd, "docs", "AATP", "AATP-001.md"), "---\nid: AATP-001\nobjective: Add the first governed slice\ndependencies:\n  - none\nallowed_files:\n  - src/example.ts\nforbidden_files:\n  - docs/MASTER_PLAN.md\nrisk: normal\nacceptance:\n  - the slice satisfies the locked plan\nverification:\n  - typecheck\n---\n");
+		const state = defaultState();
+		state.product.status = "approved";
+		state.master_plan.status = "locked";
+		state.design.required = false;
+		state.design.status = "not_required";
+		state.phase = "planning";
+		state.mode = "normal";
+		expect(lockArtifactHash(cwd, state, "product")).toBe(true);
+		expect(lockArtifactHash(cwd, state, "master_plan")).toBe(true);
+		state.aatp.manifest_sha256 = aatpManifestHash(cwd);
+		seedTickets(state, listAatpSpecs(cwd));
+		saveState(cwd, state);
+		git(["add", "docs", ".gitignore", ".omp/config.yml"]);
+		const committed = git(["commit", "-m", "sealed"]);
+		expect(committed.status).toBe(0);
+		const { tools, messages, handlers } = harness();
+		const stepped = await tools.get("foundry_step")!.execute("step", {}, "session", null, ctx(cwd));
+		expect(stepped.isError).not.toBe(true);
+		expect(loadState(cwd).phase).toBe("implementation");
+		expect(messages.at(-1)).toContain("Ready (1)");
+		expect(messages.at(-1)).toContain("AATP-001");
+		expect(messages.at(-1)).not.toContain("Run /build.");
+		const taskHook = handlers.get("tool_call")![0];
+		const worker = await taskHook({ toolName: "task", toolCallId: "impl-001", input: { agent: "implementer", task: "Implement AATP-001" } }, ctx(cwd));
+		expect(worker?.reason ?? "").not.toContain("AATP_EXECUTION_GATE");
+		expect(worker?.block).not.toBe(true);
 	});
 
 	test("AATP compiler seals terminal capability output after a provider post-write failure", async () => {

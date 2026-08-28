@@ -299,6 +299,32 @@ function atomicGovernedWrite(target: string, content: string): string | undefine
 	}
 }
 
+function enterImplementationLayer(pi: ExtensionAPI, cwd: string, notify: (message: string, level?: "error" | "info" | "warning") => void): boolean {
+	const state = loadState(cwd), gate = requireDesignIfUi(state);
+	if (gate) { notify(gate, "warning"); return false; }
+	const contract = checkIsolationContract(cwd); if (!contract.ok) { notify(contract.reason ?? "Foundry isolation contract failed", "error"); return false; }
+	const specs = listAatpSpecs(cwd), errors = validateAatpSpecs(specs, { strict: true }); if (errors.length) { notify(`AATP invalid: ${errors.join("; ")}`, "error"); return false; }
+	if (!state.aatp.manifest_sha256) { notify("AATP_COMPILER_GATE: the project-wide DAG is not sealed. Run /aatp and wait for aatp-compiler before /build.", "error"); return false; }
+	if (state.aatp.manifest_sha256 !== aatpManifestHash(cwd)) { notify("AATP_SPEC_GATE: sealed AATP specs changed. Re-run /aatp after an explicit plan/design revision.", "error"); return false; }
+	if (!artifactsMatch(cwd, state)) { notify("AATP_ARTIFACT_GATE: locked product/plan/design evidence changed. Reopen the relevant human gate before building.", "error"); return false; }
+	const baselineError = commitGovernanceBaseline(cwd); if (baselineError) { notify(baselineError, "error"); return false; }
+	const baselineHead = gitHead(cwd);
+	if (!baselineHead) { notify("PROVENANCE_GATE: unable to capture the Foundry baseline commit.", "error"); return false; }
+	if (!state.aatp.baseline_sha) state.aatp.baseline_sha = baselineHead;
+	let zombies = 0;
+	for (const t of Object.values(state.tickets)) {
+		if (t.status === "active") {
+			t.status = "ready";
+			zombies++;
+		}
+	}
+	if (zombies > 0) notify(`WATCHDOG: Reset ${zombies} zombie ticket(s) back to ready.`, "warning");
+	seedTickets(state, specs); const tasks = hydrateAatp(cwd, state), ready = readyIndependent(tasks); state.phase = "implementation"; recountTickets(state); persist(cwd, state);
+	const lines = ready.map((t) => `- ${t.id} agent=${routeAgent(t.risk, t.attempts)} :: ${t.objective}`);
+	orchestrate(pi, "Run the ready AATP layer.", [`Ready (${ready.length}):`, lines.join("\n") || "(none)", "Call the 'task' tool to spawn one blocking subagent per line using the exact AATP id in the task instructions.", "Do NOT call aatp_begin/complete. Foundry owns lifecycle, patch validation, apply, and commit.", "Worker conflicts must end with: FOUNDRY_CONFLICT <KIND> <reason>."].join("\n"));
+	return true;
+}
+
 function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 	const loaded = safeState(cwd);
 	if (loaded.broken) { orchestrate(pi, "Foundry state blocked.", loaded.broken); return; }
@@ -320,7 +346,7 @@ function advanceFoundry(pi: ExtensionAPI, cwd: string, args: string): void {
 	const tasks = hydrateAatp(cwd, state);
 	if (tasks.length === 0) { requestAatpCompile(pi, cwd, state); return; }
 	const ready = readyIndependent(tasks), counts = summarizeAatp(tasks);
-	if (ready.length > 0) { orchestrate(pi, "Build the next independent AATP layer.", "Run /build. Foundry will use the sealed DAG, isolate workers, validate patches, then apply+commit only valid deltas."); return; }
+	if (ready.length > 0) { enterImplementationLayer(pi, cwd, (message, level) => { if (level === "error" || level === "warning") orchestrate(pi, "Build blocked.", message); }); return; }
 	const unreviewed = tasks.filter((t) => t.status === "completed" && t.review !== "APPROVE");
 	if (unreviewed.length > 0) { orchestrate(pi, "Review before downstream work.", `Run /review <AATP-ID>. Dependencies unlock only after APPROVE. Unreviewed: ${unreviewed.map((t) => t.id).join(", ")}.`); return; }
 	if (counts.completed === counts.total && counts.total > 0 && state.qa.status !== "pass") {
@@ -1001,27 +1027,7 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 
 	pi.registerCommand("aatp", { description: "Compile the project-wide AATP DAG with the synthesis capability", handler: async (_args, ctx) => { const state = loadState(ctx.cwd), gate = requireDesignIfUi(state); if (gate) { ctx.ui.notify(gate, "warning"); return; } requestAatpCompile(pi, ctx.cwd, state); } });
 	pi.registerCommand("build", { description: "Run ready isolated workers from the sealed AATP DAG", handler: async (_args, ctx) => {
-		const state = loadState(ctx.cwd), gate = requireDesignIfUi(state); if (gate) { ctx.ui.notify(gate, "warning"); return; }
-		const contract = checkIsolationContract(ctx.cwd); if (!contract.ok) { ctx.ui.notify(contract.reason ?? "Foundry isolation contract failed", "error"); return; }
-		const specs = listAatpSpecs(ctx.cwd), errors = validateAatpSpecs(specs, { strict: true }); if (errors.length) { ctx.ui.notify(`AATP invalid: ${errors.join("; ")}`, "error"); return; }
-		if (!state.aatp.manifest_sha256) { ctx.ui.notify("AATP_COMPILER_GATE: the project-wide DAG is not sealed. Run /aatp and wait for aatp-compiler before /build.", "error"); return; }
-		if (state.aatp.manifest_sha256 !== aatpManifestHash(ctx.cwd)) { ctx.ui.notify("AATP_SPEC_GATE: sealed AATP specs changed. Re-run /aatp after an explicit plan/design revision.", "error"); return; }
-		if (!artifactsMatch(ctx.cwd, state)) { ctx.ui.notify("AATP_ARTIFACT_GATE: locked product/plan/design evidence changed. Reopen the relevant human gate before building.", "error"); return; }
-		const baselineError = commitGovernanceBaseline(ctx.cwd); if (baselineError) { ctx.ui.notify(baselineError, "error"); return; }
-		const baselineHead = gitHead(ctx.cwd);
-		if (!baselineHead) { ctx.ui.notify("PROVENANCE_GATE: unable to capture the Foundry baseline commit.", "error"); return; }
-		if (!state.aatp.baseline_sha) state.aatp.baseline_sha = baselineHead;
-		let zombies = 0;
-		for (const t of Object.values(state.tickets)) {
-			if (t.status === "active") {
-				t.status = "ready";
-				zombies++;
-			}
-		}
-		if (zombies > 0) ctx.ui.notify(`WATCHDOG: Reset ${zombies} zombie ticket(s) back to ready.`, "warning");
-		seedTickets(state, specs); const tasks = hydrateAatp(ctx.cwd, state), ready = readyIndependent(tasks); state.phase = "implementation"; recountTickets(state); persist(ctx.cwd, state);
-		const lines = ready.map((t) => `- ${t.id} agent=${routeAgent(t.risk, t.attempts)} :: ${t.objective}`);
-		orchestrate(pi, "Run the ready AATP layer.", [`Ready (${ready.length}):`, lines.join("\n") || "(none)", "Call the 'task' tool to spawn one blocking subagent per line using the exact AATP id in the task instructions.", "Do NOT call aatp_begin/complete. Foundry owns lifecycle, patch validation, apply, and commit.", "Worker conflicts must end with: FOUNDRY_CONFLICT <KIND> <reason>."].join("\n"));
+		enterImplementationLayer(pi, ctx.cwd, (message, level) => ctx.ui.notify(message, level));
 	} });
 	pi.registerCommand("review", { description: "Independent AATP review with parent-owned verdict transition", handler: async (args, ctx) => {
 		const state = loadState(ctx.cwd), completed = Object.values(state.tickets).filter((t) => t.status === "completed" && t.review !== "APPROVE"), requested = args.trim().toUpperCase(), target = requested ? state.tickets[requested] : completed[0];
