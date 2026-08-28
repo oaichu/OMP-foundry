@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — Foundry Eval Lab v1
+
+- Freeze `54c898163024c3e017d914c30fd9490bee27f7b3` as the control baseline for the next optimization roadmap.
+- Add a deterministic eval scorer/comparator with fixed quality weights, same-model/config fairness checks, minimum stochastic sample counts, metric-regression guards, and a hard fail on any candidate governance violation.
+- Seed a v1 corpus across planning, design, routing, AATP, implementation, review, security, and recovery; synthetic smoke fixtures validate only the harness and are explicitly not benchmark claims.
+- Run the eval harness smoke on both Ubuntu and Windows CI without provider credentials or non-deterministic model calls.
+
 ## Unreleased — native engineering intelligence core
 
 - Upgrade the complete Foundry engineering catalog from thin prompt stubs to capability-grade native control planes across core engineering, web, backend, data, mobile, desktop, cloud, AI, DevOps, systems, embedded, and game domains.

@@ -9,7 +9,9 @@
     "test": "bun test",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "check:omp-contract": "bun scripts/check-omp-contract.ts"
+    "check:omp-contract": "bun scripts/check-omp-contract.ts",
+    "eval": "bun scripts/eval.ts",
+    "eval:smoke": "bun scripts/eval.ts --control evals/fixtures/smoke-control.json --candidate evals/fixtures/smoke-candidate.json --policy evals/baselines/control-policy.json"
   },
   "repository": {
     "type": "git",

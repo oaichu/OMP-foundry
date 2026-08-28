@@ -20,6 +20,8 @@ jobs:
       - name: typecheck
         run: bun run typecheck
       - run: bun test
+      - name: eval harness smoke
+        run: bun run eval:smoke
       - name: extension syntax smoke
         run: bun -e "new Bun.Transpiler({loader:'ts'}).transformSync(await Bun.file('src/index.ts').text())"
       - name: checkout current Oh My Pi contract
