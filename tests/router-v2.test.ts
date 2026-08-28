@@ -1,0 +1,69 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { resolveSkillRouting, resolveSkills } from "../src/skills/resolver";
+import { defaultState } from "../src/types";
+
+const skillsRoot = join(import.meta.dir, "..", "skills");
+
+function fullStackApp(): string {
+	const dir = mkdtempSync(join(tmpdir(), "foundry-router-"));
+	writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies: { next: "15.0.0", react: "19.0.0", typescript: "5.0.0", "@supabase/supabase-js": "2.0.0" } }));
+	writeFileSync(join(dir, "tsconfig.json"), "{}");
+	writeFileSync(join(dir, "next.config.ts"), "export default {}");
+	return dir;
+}
+
+describe("Skill Router v2", () => {
+	test("preserves repository-only routing when no task context exists", () => {
+		const state = { ...defaultState(), phase: "implementation" as const };
+		const ids = resolveSkills(fullStackApp(), state, { skillsRoot, role: "implementer" });
+		expect(ids).toContain("nextjs-engineering");
+		expect(ids).toContain("react-engineering");
+	});
+
+	test("strong AATP context suppresses unrelated repo-only frontend adapters", () => {
+		const state = { ...defaultState(), phase: "implementation" as const };
+		const result = resolveSkillRouting(fullStackApp(), state, {
+			skillsRoot,
+			role: "implementer",
+			context: {
+				objective: "Fix the Supabase Postgres tenant RLS policy and ownership leak.",
+				files: ["supabase/migrations/20260828_rls.sql"],
+				concerns: ["SEC-TENANT-RLS"],
+				securitySensitive: true,
+			},
+		});
+		const ids = result.skills.map((item) => item.id);
+		expect(ids).toContain("security");
+		expect(ids).toContain("postgres-engineering");
+		expect(ids).toContain("supabase-engineering");
+		expect(ids).not.toContain("nextjs-engineering");
+		expect(ids).not.toContain("react-engineering");
+		const postgres = result.scores.find((row) => row.id === "postgres-engineering");
+		expect(postgres?.selected).toBe(true);
+		expect(postgres?.contextEvidence).toBeGreaterThanOrEqual(14);
+		expect(postgres?.reasons.some((reason) => reason.includes("task-id:postgres"))).toBe(true);
+	});
+
+	test("routing is deterministic and stably ordered", () => {
+		const state = { ...defaultState(), phase: "implementation" as const };
+		const options = { skillsRoot, role: "implementer" as const, context: { objective: "Fix Supabase Postgres RLS", concerns: ["SEC-RLS"], securitySensitive: true } };
+		const first = resolveSkillRouting(fullStackApp(), state, options);
+		const second = resolveSkillRouting(fullStackApp(), state, options);
+		expect(first.skills.map((item) => item.id)).toEqual(second.skills.map((item) => item.id));
+		expect(first.scores.map(({ id, score, selected }) => ({ id, score, selected }))).toEqual(second.scores.map(({ id, score, selected }) => ({ id, score, selected })));
+	});
+
+	test("explanation exposes repo evidence, task evidence, and context cost", () => {
+		const state = { ...defaultState(), phase: "implementation" as const };
+		const result = resolveSkillRouting(fullStackApp(), state, { skillsRoot, role: "implementer", context: { objective: "Change a Next route handler", files: ["app/api/user/route.ts"] } });
+		const next = result.scores.find((row) => row.id === "nextjs-engineering");
+		expect(next).toBeDefined();
+		expect(next!.repoEvidence).toBeGreaterThan(0);
+		expect(next!.contextEvidence).toBeGreaterThan(0);
+		expect(next!.contextCost).toBeGreaterThan(0);
+		expect(next!.reasons.length).toBeGreaterThan(2);
+	});
+});

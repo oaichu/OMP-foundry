@@ -1,5 +1,6 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { listAatpSpecs } from "../aatp";
 import type { CompanyState } from "../types";
 import { respectsConflicts, withRequires } from "./compatibility";
 import { detectRepo, type RepoFacts } from "./detector";
@@ -9,45 +10,184 @@ import { loadRegistry } from "./registry";
 
 const DEFAULT_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
 const MAX_SKILLS = 12;
+const STRONG_CONTEXT_SCORE = 14;
+const STOP_WORDS = new Set([
+	"a", "an", "and", "are", "as", "at", "be", "before", "by", "code", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "this", "to", "with",
+	"engineer", "engineering", "implementation", "implementer", "review", "reviewer", "planning", "planner", "skill", "rules", "project", "application", "app",
+]);
+
+export interface SkillRoutingContext {
+	objective?: string;
+	files?: string[];
+	concerns?: string[];
+	securitySensitive?: boolean;
+}
 
 export interface ResolveOptions {
 	role?: SkillRole;
 	skillsRoot?: string;
 	registry?: SkillManifest[];
+	context?: SkillRoutingContext;
 }
 
-function activated(item: SkillManifest, facts: RepoFacts): boolean {
+export interface SkillRoutingScore {
+	id: string;
+	score: number;
+	repoEvidence: number;
+	contextEvidence: number;
+	contextCost: number;
+	selected: boolean;
+	reasons: string[];
+}
+
+export interface SkillRoutingResolution {
+	skills: SkillManifest[];
+	scores: SkillRoutingScore[];
+	context?: SkillRoutingContext;
+}
+
+function tokens(text: string): Set<string> {
+	const values = text.toLowerCase().split(/[^a-z0-9@._/-]+/g)
+		.flatMap((value) => value.split(/[./_-]+/g))
+		.map((value) => value.trim())
+		.filter((value) => value.length >= 2 && !STOP_WORDS.has(value));
+	return new Set(values);
+}
+
+function contextTokens(context: SkillRoutingContext | undefined): Set<string> {
+	if (!context) return new Set();
+	return tokens([context.objective ?? "", ...(context.files ?? []), ...(context.concerns ?? [])].join(" "));
+}
+
+function skillTokens(item: SkillManifest): Set<string> {
+	const activation = [
+		...(item.activate_when.dependencies ?? []),
+		...(item.activate_when.files ?? []),
+		...(item.activate_when.stacks ?? []),
+		...(item.activate_when.languages ?? []),
+	].join(" ");
+	// A bounded slice lets domain terms such as RLS or hydration participate in
+	// deterministic routing without loading the full body into the agent prompt.
+	return tokens([item.id, item.domain.join(" "), item.description, activation, item.body.slice(0, 900)].join(" "));
+}
+
+function repoScore(item: SkillManifest, facts: RepoFacts, reasons: string[]): number {
 	const when = item.activate_when;
 	const empty = !when.dependencies?.length && !when.files?.length && !when.stacks?.length && !when.languages?.length;
-	if (empty) return item.layer === "L1";
-	if (when.stacks?.some((s) => facts.stacks.includes(s))) return true;
-	if (when.languages?.some((s) => facts.languages.includes(s))) return true;
-	if (when.dependencies?.some((d) => facts.dependencies.includes(d) || facts.frameworks.includes(d))) return true;
-	if (when.files?.some((f) => facts.files.includes(f))) return true;
-	return false;
+	let score = 0;
+	if (empty && item.layer === "L1") { score += 20; reasons.push("+20 core L1"); }
+	const dependencies = when.dependencies?.filter((value) => facts.dependencies.includes(value) || facts.frameworks.includes(value)) ?? [];
+	const stacks = when.stacks?.filter((value) => facts.stacks.includes(value)) ?? [];
+	const languages = when.languages?.filter((value) => facts.languages.includes(value)) ?? [];
+	const files = when.files?.filter((value) => facts.files.includes(value)) ?? [];
+	if (dependencies.length) { const value = Math.min(28, 20 + (dependencies.length - 1) * 4); score += value; reasons.push(`+${value} dependency:${dependencies.join(",")}`); }
+	if (stacks.length) { const value = Math.min(20, 14 + (stacks.length - 1) * 3); score += value; reasons.push(`+${value} stack:${stacks.join(",")}`); }
+	if (languages.length) { const value = Math.min(16, 11 + (languages.length - 1) * 2); score += value; reasons.push(`+${value} language:${languages.join(",")}`); }
+	if (files.length) { const value = Math.min(18, 13 + (files.length - 1) * 2); score += value; reasons.push(`+${value} marker:${files.join(",")}`); }
+	return score;
 }
 
-export function resolveSkillManifests(
-	cwd: string,
-	state: CompanyState,
-	options: ResolveOptions = {},
-): SkillManifest[] {
+function concernScore(item: SkillManifest, context: SkillRoutingContext, reasons: string[]): number {
+	const concerns = (context.concerns ?? []).map((value) => value.toUpperCase());
+	const domains = new Set(item.domain.map((value) => value.toLowerCase()));
+	const id = item.id.toLowerCase();
+	let score = 0;
+	if (context.securitySensitive && (domains.has("security") || id.includes("security"))) { score += 40; reasons.push("+40 security-sensitive"); }
+	if (concerns.some((value) => value.startsWith("SEC-")) && (domains.has("security") || id.includes("security"))) { score += 30; reasons.push("+30 SEC concern"); }
+	if (concerns.some((value) => value.startsWith("DES-")) && (domains.has("design") || id.includes("design"))) { score += 26; reasons.push("+26 DES concern"); }
+	if (concerns.some((value) => value.startsWith("ARCH-")) && id === "architecture") { score += 24; reasons.push("+24 ARCH concern"); }
+	if (concerns.some((value) => value.startsWith("OPS-")) && (domains.has("cloud") || id.includes("devops") || id === "performance")) { score += 20; reasons.push("+20 OPS concern"); }
+	return score;
+}
+
+function taskScore(item: SkillManifest, context: SkillRoutingContext | undefined, reasons: string[]): number {
+	if (!context) return 0;
+	const task = contextTokens(context);
+	if (!task.size) return concernScore(item, context, reasons);
+	const vocab = skillTokens(item);
+	const idParts = [...tokens(item.id)].filter((value) => value !== "engineering");
+	let score = concernScore(item, context, reasons);
+	const directIdHits = idParts.filter((value) => task.has(value));
+	if (directIdHits.length) { const value = Math.min(32, directIdHits.length * 22); score += value; reasons.push(`+${value} task-id:${directIdHits.join(",")}`); }
+	const domainHits = item.domain.map((value) => value.toLowerCase()).filter((value) => task.has(value));
+	if (domainHits.length) { const value = Math.min(18, domainHits.length * 12); score += value; reasons.push(`+${value} task-domain:${domainHits.join(",")}`); }
+	const semanticHits = [...task].filter((value) => vocab.has(value) && !directIdHits.includes(value) && !domainHits.includes(value)).slice(0, 4);
+	if (semanticHits.length) { const value = semanticHits.length * 3; score += value; reasons.push(`+${value} task-term:${semanticHits.join(",")}`); }
+	return score;
+}
+
+function contextCost(item: SkillManifest): number {
+	return Math.min(8, Math.max(1, Math.ceil(item.body.length / 450)));
+}
+
+function inferContext(cwd: string, state: CompanyState, role: SkillRole | undefined): SkillRoutingContext | undefined {
+	if (role !== "implementer" && role !== "reviewer") return undefined;
+	const tickets = Object.values(state.tickets).filter((ticket) => role === "implementer"
+		? ticket.status === "active"
+		: ticket.status === "completed" && ticket.review !== "APPROVE");
+	if (!tickets.length) return undefined;
+	let specs: ReturnType<typeof listAatpSpecs> = [];
+	try { specs = listAatpSpecs(cwd); } catch { return undefined; }
+	const ids = new Set(tickets.map((ticket) => ticket.id.toUpperCase()));
+	const active = specs.filter((spec) => ids.has(spec.id.toUpperCase()));
+	if (!active.length) return undefined;
+	return {
+		objective: active.map((spec) => `${spec.id}: ${spec.objective}`).join("\n"),
+		files: [...new Set(active.flatMap((spec) => spec.allowed_files))],
+		concerns: [...new Set(active.flatMap((spec) => spec.covers ?? []))],
+		securitySensitive: active.some((spec) => spec.security_sensitive === true),
+	};
+}
+
+function candidateScores(registry: SkillManifest[], facts: RepoFacts, context: SkillRoutingContext | undefined, phase: ReturnType<typeof phaseOf>, role: SkillRole | undefined): Array<{ item: SkillManifest; score: SkillRoutingScore }> {
+	const phaseEligible = filterPhaseRole(registry, phase, role);
+	const rows = phaseEligible.map((item) => {
+		const reasons: string[] = [];
+		const repoEvidence = repoScore(item, facts, reasons);
+		const contextEvidence = taskScore(item, context, reasons);
+		const cost = contextCost(item);
+		const priority = item.priority / 12;
+		const total = repoEvidence + contextEvidence + priority - cost;
+		reasons.push(`+${priority.toFixed(1)} priority`, `-${cost} context-cost`);
+		return { item, score: { id: item.id, score: total, repoEvidence, contextEvidence, contextCost: cost, selected: false, reasons } };
+	});
+	const strongestContext = Math.max(0, ...rows.filter(({ item }) => item.layer !== "L1").map(({ score }) => score.contextEvidence));
+	return rows.filter(({ item, score }) => {
+		if (item.layer === "L1") return score.repoEvidence > 0 || score.contextEvidence > 0;
+		if (score.repoEvidence === 0 && score.contextEvidence < 6) return false;
+		// Once the active AATP gives strong domain evidence, repo-only adapters
+		// are noise. Required companions remain safe because withRequires adds
+		// them after ranking.
+		if (context && strongestContext >= STRONG_CONTEXT_SCORE && score.contextEvidence === 0) return false;
+		return true;
+	});
+}
+
+export function resolveSkillRouting(cwd: string, state: CompanyState, options: ResolveOptions = {}): SkillRoutingResolution {
 	const registry = options.registry ?? loadRegistry(options.skillsRoot ?? DEFAULT_ROOT);
 	const facts = detectRepo(cwd);
 	const phase = phaseOf(state);
-	const eligible = filterPhaseRole(registry, phase, options.role)
-		.filter((item) => activated(item, facts))
-		.sort((a, b) => b.priority - a.priority);
-
+	const context = options.context ?? inferContext(cwd, state, options.role);
+	const ranked = candidateScores(registry, facts, context, phase, options.role)
+		.sort((a, b) => b.score.score - a.score.score || b.item.priority - a.item.priority || a.item.id.localeCompare(b.item.id));
 	const chosen: SkillManifest[] = [];
-	for (const item of eligible) {
-		if (!respectsConflicts(item, chosen)) continue;
-		chosen.push(item);
+	for (const row of ranked) {
+		if (!respectsConflicts(row.item, chosen)) continue;
+		chosen.push(row.item);
 		if (chosen.length >= MAX_SKILLS) break;
 	}
-	// Dependencies are mandatory companions, so withRequires may push the
-	// pack past MAX_SKILLS rather than dropping a required skill.
-	return withRequires(chosen, registry);
+	const skills = withRequires(chosen, registry);
+	const selected = new Set(skills.map((item) => item.id));
+	const scoreById = new Map(ranked.map((row) => [row.item.id, row.score]));
+	const scores: SkillRoutingScore[] = ranked.map((row) => ({ ...row.score, selected: selected.has(row.item.id) }));
+	for (const item of skills) {
+		if (!scoreById.has(item.id)) scores.push({ id: item.id, score: 0, repoEvidence: 0, contextEvidence: 0, contextCost: contextCost(item), selected: true, reasons: ["required companion"] });
+	}
+	return { skills, scores, ...(context ? { context } : {}) };
+}
+
+export function resolveSkillManifests(cwd: string, state: CompanyState, options: ResolveOptions = {}): SkillManifest[] {
+	return resolveSkillRouting(cwd, state, options).skills;
 }
 
 export function resolveSkills(cwd: string, state: CompanyState, options: ResolveOptions = {}): string[] {
