@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -144,12 +144,6 @@ try {
 	const candidateRaw = await runSide("candidate", candidate.sha, candidate.dir, corpus, samples, omp, model, thinking, judgeModel, judgeThinking);
 	const runs = finalizePairedRuns(controlRaw, candidateRaw, { corpusVersion: corpus.version, model, modelConfigHash: configHash });
 	const comparison = compareRuns(runs.control, runs.candidate, policy);
-	await Bun.write(join(temp, "control.json"), JSON.stringify(runs.control, null, 2));
-	await Bun.write(join(temp, "candidate.json"), JSON.stringify(runs.candidate, null, 2));
-	await Bun.write(join(temp, "comparison.json"), JSON.stringify(comparison, null, 2));
-	await command(["mkdir", "-p", outDir], repo).catch(() => undefined);
-	// Bun.mkdir is not available as a portable sync primitive; use the filesystem through write after ensuring parent with Bun shell-independent API.
-	const { mkdirSync } = await import("node:fs");
 	mkdirSync(outDir, { recursive: true });
 	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 	writeFileSync(join(outDir, `${stamp}-control.json`), JSON.stringify(runs.control, null, 2));
