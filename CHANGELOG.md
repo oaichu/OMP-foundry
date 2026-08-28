@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — Skill Router v2
+
+- Replace repository-wide any-match ordering with deterministic evidence scoring across repository signals, active AATP objective/files/concerns, security sensitivity, priority, and bounded context cost.
+- When an active AATP provides strong domain evidence, suppress unrelated repo-only adapters while preserving mandatory `requires` companions and existing conflict rules.
+- Infer routing context only from governed active/unreviewed AATP work; fall back to repository facts when no task context is available.
+- Add explainable routing scores with selected state, repo/task evidence, context cost, and human-readable reasons; no model call is introduced.
+
 ## Unreleased — Foundry Eval Lab v1
 
 - Freeze `54c898163024c3e017d914c30fd9490bee27f7b3` as the control baseline for the next optimization roadmap.
