@@ -1,11 +1,20 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
-import { join } from "node:path";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { contentAddressedEvidence } from "./evidence-cache";
+import { contentAddressedEvidence, type EvidenceResponse } from "./evidence-cache";
 import { loadRegistry } from "./skills/registry";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+interface KnownEvidence {
+	id: string;
+	sha256: string;
+}
+
+interface CachedSkillReadParams {
+	ids: string[];
+	known?: KnownEvidence[];
+}
 
 export default function registerFoundryContextRuntime(pi: ExtensionAPI): void {
 	const z = pi.zod;
@@ -19,11 +28,12 @@ export default function registerFoundryContextRuntime(pi: ExtensionAPI): void {
 			ids: z.array(z.string()),
 			known: z.array(z.object({ id: z.string(), sha256: z.string() })).optional(),
 		}),
-		async execute(_id, params) {
+		async execute(_id, rawParams) {
+			const params = rawParams as CachedSkillReadParams;
 			const registry = loadRegistry(join(ROOT, "skills"));
 			const wanted = params.ids.slice(0, 3);
-			const known = new Map((params.known ?? []).map((entry) => [entry.id, entry.sha256]));
-			const responses = wanted.map((id) => {
+			const known = new Map<string, string>((params.known ?? []).map((entry) => [entry.id, entry.sha256]));
+			const responses: EvidenceResponse[] = wanted.map((id) => {
 				const hit = registry.find((skill) => skill.id === id);
 				if (!hit) return { id, sha256: "", cacheHit: false, text: `# ${id}\n(not found)` };
 				const content = `# ${hit.id}\n${hit.description}\n\n${hit.body}`;
