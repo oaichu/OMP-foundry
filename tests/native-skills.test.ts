@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
-function skillFiles(root = join(import.meta.dir, "..", "skills")): string[] {
+const skillsRoot = join(import.meta.dir, "..", "skills");
+
+function skillFiles(root = skillsRoot): string[] {
   const out: string[] = [];
   const walk = (dir: string) => {
     for (const name of readdirSync(dir)) {
@@ -39,7 +41,7 @@ describe("native skill catalog", () => {
       join("master-plan-method", "SKILL.md"),
     ]);
     for (const file of files) {
-      const rel = file.split(`${join("skills", "")}`)[1];
+      const rel = relative(skillsRoot, file);
       if (exempt.has(rel)) continue;
       const body = readFileSync(file, "utf8");
       expect(body.length).toBeGreaterThan(900);
