@@ -1,6 +1,7 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listAatpSpecs } from "../aatp";
+import { adaptiveContextBudget, clampContextBudget, type ContextBudget } from "../context-budget";
 import type { CompanyState } from "../types";
 import { respectsConflicts, withRequires } from "./compatibility";
 import { detectRepo, type RepoFacts } from "./detector";
@@ -196,19 +197,21 @@ export function resolveSkills(cwd: string, state: CompanyState, options: Resolve
 	return resolveSkillManifests(cwd, state, options).map((s) => s.id);
 }
 
-export function skillPackPrompt(skills: SkillManifest[] | string[], phase: string): string {
+export function skillPackPrompt(skills: SkillManifest[] | string[], phase: string, budgetOverride?: ContextBudget): string {
 	const manifests = skills.filter((s): s is SkillManifest => typeof s !== "string");
 	const names = skills.map((s) => (typeof s === "string" ? s : `${s.id}: ${s.description}`));
-	const bodies = manifests.slice(0, 3).map((s) => {
-		const body = s.body.length > 800 ? `${s.body.slice(0, 800)}\n…` : s.body;
+	const budget = clampContextBudget(budgetOverride ?? adaptiveContextBudget(phase, manifests));
+	const bodies = manifests.slice(0, budget.inlineBodies).map((s) => {
+		const body = s.body.length > budget.bodyChars ? `${s.body.slice(0, budget.bodyChars)}\n…` : s.body;
 		return `### ${s.id}\n${body}`;
 	});
 	return [
 		`Foundry skill pack (${phase}):`,
 		...names.map((n) => `- ${n}`),
+		`Context budget=${budget.tier} inline=${budget.inlineBodies} body_chars=${budget.bodyChars} on_demand=${budget.maxSkillReads}; ${budget.reason}. This changes context volume only, never AATP/write scope.`,
 		"Governance > locked plan > AATP scope > role > skills > tools.",
 		"Skills never change architecture. Contradiction → report_conflict.",
-		"More bodies: foundry_skill_read({ ids }).",
+		`More bodies: prefer foundry_skill_read_cached({ ids, known }) in batches <= ${budget.maxSkillReads}; fallback foundry_skill_read({ ids }) if the cached reader is unavailable.`,
 		...bodies,
 	].join("\n");
 }
