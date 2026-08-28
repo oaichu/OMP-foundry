@@ -35,4 +35,27 @@ describe("skill resolver", () => {
 		expect(ids).not.toContain("vue-engineering");
 		expect(ids.length).toBeLessThanOrEqual(12);
 	});
+
+	test("design phase resolves the native design intelligence contract and quality pack", () => {
+		const state = { ...defaultState(), phase: "design" as const };
+		const ids = resolveSkills(nextApp(), state, { skillsRoot, role: "designer" });
+		expect(ids).toContain("design-intelligence");
+		expect(ids).toContain("design-system-contract");
+		expect(ids).toContain("design-quality");
+		expect(ids).toContain("design-foundation");
+		expect(ids.indexOf("design-intelligence")).toBeLessThan(ids.indexOf("design-foundation"));
+		expect(ids.indexOf("design-system-contract")).toBeLessThan(ids.indexOf("design-foundation"));
+		expect(ids.indexOf("design-quality")).toBeLessThan(ids.indexOf("design-foundation"));
+		expect(ids.length).toBeLessThanOrEqual(12);
+	});
+
+	test("review reuses design quality without reopening design authoring skills", () => {
+		const state = { ...defaultState(), phase: "review" as const };
+		const ids = resolveSkills(nextApp(), state, { skillsRoot, role: "reviewer" });
+		expect(ids).toContain("design-quality");
+		expect(ids).not.toContain("design-intelligence");
+		expect(ids).not.toContain("design-system-contract");
+		expect(ids).not.toContain("design-foundation");
+		expect(ids.length).toBeLessThanOrEqual(12);
+	});
 });
