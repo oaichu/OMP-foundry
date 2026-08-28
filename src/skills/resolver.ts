@@ -11,6 +11,7 @@ import { loadRegistry } from "./registry";
 const DEFAULT_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
 const MAX_SKILLS = 12;
 const STRONG_CONTEXT_SCORE = 14;
+const MIN_RELEVANT_CONTEXT_SCORE = 6;
 const STOP_WORDS = new Set([
 	"a", "an", "and", "are", "as", "at", "be", "before", "by", "code", "for", "from", "in", "into", "is", "it", "of", "on", "or", "the", "this", "to", "with",
 	"engineer", "engineering", "implementation", "implementer", "review", "reviewer", "planning", "planner", "skill", "rules", "project", "application", "app",
@@ -66,9 +67,10 @@ function skillTokens(item: SkillManifest): Set<string> {
 		...(item.activate_when.stacks ?? []),
 		...(item.activate_when.languages ?? []),
 	].join(" ");
-	// A bounded slice lets domain terms such as RLS or hydration participate in
-	// deterministic routing without loading the full body into the agent prompt.
-	return tokens([item.id, item.domain.join(" "), item.description, activation, item.body.slice(0, 900)].join(" "));
+	// Routing vocabulary is intentionally metadata-only. Skill bodies contain
+	// broad prose (for example "ownership" or "policy") that creates false
+	// cross-domain matches; bodies affect context cost, never relevance.
+	return tokens([item.id, item.domain.join(" "), item.description, activation].join(" "));
 }
 
 function repoScore(item: SkillManifest, facts: RepoFacts, reasons: string[]): number {
@@ -154,11 +156,11 @@ function candidateScores(registry: SkillManifest[], facts: RepoFacts, context: S
 	const strongestContext = Math.max(0, ...rows.filter(({ item }) => item.layer !== "L1").map(({ score }) => score.contextEvidence));
 	return rows.filter(({ item, score }) => {
 		if (item.layer === "L1") return score.repoEvidence > 0 || score.contextEvidence > 0;
-		if (score.repoEvidence === 0 && score.contextEvidence < 6) return false;
-		// Once the active AATP gives strong domain evidence, repo-only adapters
-		// are noise. Required companions remain safe because withRequires adds
-		// them after ranking.
-		if (context && strongestContext >= STRONG_CONTEXT_SCORE && score.contextEvidence === 0) return false;
+		if (score.repoEvidence === 0 && score.contextEvidence < MIN_RELEVANT_CONTEXT_SCORE) return false;
+		// Strong governed task evidence switches non-core routing from repo-wide
+		// presence to task relevance. Required companions remain safe because
+		// withRequires expands them after ranking.
+		if (context && strongestContext >= STRONG_CONTEXT_SCORE && score.contextEvidence < MIN_RELEVANT_CONTEXT_SCORE) return false;
 		return true;
 	});
 }

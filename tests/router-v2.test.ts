@@ -36,15 +36,23 @@ describe("Skill Router v2", () => {
 			},
 		});
 		const ids = result.skills.map((item) => item.id);
-		expect(ids).toContain("security");
 		expect(ids).toContain("postgres-engineering");
 		expect(ids).toContain("supabase-engineering");
 		expect(ids).not.toContain("nextjs-engineering");
 		expect(ids).not.toContain("react-engineering");
+		expect(ids).not.toContain("web-engineering");
 		const postgres = result.scores.find((row) => row.id === "postgres-engineering");
 		expect(postgres?.selected).toBe(true);
 		expect(postgres?.contextEvidence).toBeGreaterThanOrEqual(14);
 		expect(postgres?.reasons.some((reason) => reason.includes("task-id:postgres"))).toBe(true);
+	});
+
+	test("security-sensitive evidence is routed in the phases where security skills are authorized", () => {
+		const state = { ...defaultState(), phase: "review" as const };
+		const result = resolveSkillRouting(fullStackApp(), state, { skillsRoot, role: "reviewer", context: { objective: "Review tenant RLS authorization", concerns: ["SEC-TENANT-RLS"], securitySensitive: true } });
+		const ids = result.skills.map((item) => item.id);
+		expect(ids).toContain("security");
+		expect(result.scores.find((row) => row.id === "security")?.contextEvidence).toBeGreaterThanOrEqual(40);
 	});
 
 	test("routing is deterministic and stably ordered", () => {
