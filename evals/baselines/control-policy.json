@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "control_commit": "54c898163024c3e017d914c30fd9490bee27f7b3",
+  "min_sample_count": 3,
+  "min_score_delta": 0,
+  "metric_regression_tolerance": 0,
+  "governance_regression": "forbid"
+}

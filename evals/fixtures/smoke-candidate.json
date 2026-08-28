@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "corpus_version": "smoke-v1",
+  "label": "candidate-smoke",
+  "commit_sha": "1111111111111111111111111111111111111111",
+  "model": "smoke-model",
+  "model_config_hash": "smoke-config-v1",
+  "cases": [
+    {
+      "id": "SMOKE-PLAN",
+      "category": "planning",
+      "sample_count": 3,
+      "metrics": {"correctness":0.8,"verification":0.8,"governance":1,"scope_precision":0.8,"first_pass_review":0.8,"context_efficiency":0.8,"model_cost_efficiency":0.8,"traceability":0.8,"recovery":0.8},
+      "governance_violations": [],
+      "telemetry": {"input_tokens":900,"output_tokens":480,"cached_input_tokens":300,"model_cost_usd":0.009}
+    },
+    {
+      "id": "SMOKE-SEC",
+      "category": "security",
+      "sample_count": 3,
+      "metrics": {"correctness":0.9,"verification":0.9,"governance":1,"scope_precision":0.9,"first_pass_review":0.9,"context_efficiency":0.8,"model_cost_efficiency":0.8,"traceability":0.9,"recovery":0.8},
+      "governance_violations": [],
+      "telemetry": {"input_tokens":1100,"output_tokens":580,"cached_input_tokens":350,"model_cost_usd":0.011}
+    }
+  ]
+}

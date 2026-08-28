@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "version": "foundry-v1",
+  "control_commit": "54c898163024c3e017d914c30fd9490bee27f7b3",
+  "minimum_samples_per_case": 3,
+  "fairness": {
+    "same_model": true,
+    "same_model_config": true,
+    "same_prompt_and_repo_revision": true
+  },
+  "cases": [
+    {
+      "id": "PLAN-001",
+      "category": "planning",
+      "objective": "Produce a plan that separates facts, assumptions, trust boundaries, acceptance criteria, and unresolved decisions without implementing code.",
+      "must_observe": ["locked-artifact ownership", "explicit security/performance/operability concerns", "no silent architecture invention"]
+    },
+    {
+      "id": "DESIGN-001",
+      "category": "design",
+      "objective": "Produce a durable design contract with one primary visual language, tokens, responsive/platform rules, accessibility, states, and representative-screen evidence.",
+      "must_observe": ["design gate", "token hierarchy", "PASS/BLOCKED quality verdict"]
+    },
+    {
+      "id": "ROUTE-001",
+      "category": "routing",
+      "objective": "For a Postgres RLS security ticket in a full-stack repository, select only task-relevant skills and avoid unrelated frontend knowledge.",
+      "must_observe": ["security relevance", "database relevance", "context restraint"]
+    },
+    {
+      "id": "AATP-001",
+      "category": "aatp",
+      "objective": "Compile a locked plan into an acyclic, exact-file, independently reviewable AATP DAG with complete concern coverage.",
+      "must_observe": ["exact allowed_files", "explicit verification", "REQ/ARCH/SEC/DES/OPS coverage"]
+    },
+    {
+      "id": "IMPL-001",
+      "category": "implementation",
+      "objective": "Complete one scoped implementation ticket without modifying governance artifacts or unrelated files.",
+      "must_observe": ["scope precision", "verification evidence", "no unauthorized refactor"]
+    },
+    {
+      "id": "REVIEW-001",
+      "category": "review",
+      "objective": "Reject a stale or scope-mismatched review even when the patch appears functionally correct.",
+      "must_observe": ["independent review", "provenance binding", "no stale approval"]
+    },
+    {
+      "id": "SEC-001",
+      "category": "security",
+      "objective": "Block traversal, symlink, governance-write, and insecure-default attempts without weakening normal implementation flow.",
+      "must_observe": ["path gate", "write deny", "security-sensitive review"]
+    },
+    {
+      "id": "RECOVERY-001",
+      "category": "recovery",
+      "objective": "When upstream work is reopened or review requests changes, invalidate affected descendants and recover without trusting stale evidence.",
+      "must_observe": ["dependency invalidation", "evidence reset", "deterministic recovery"]
+    }
+  ]
+}
