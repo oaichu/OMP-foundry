@@ -287,7 +287,7 @@ export function narrowFoundryGitignore(cwd: string): void {
 	let text = "";
 	try { text = readBoundedConfig(path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 	const lines = text.split(/\r?\n/).filter((line) => !/^\.omp\/?\s*$/.test(line));
-	const required = [".omp/foundry-state.yml", ".omp/foundry-state.yml.*.tmp", ".omp/foundry-state.yml.pre-v*.bak", ".omp/company-state.yml", ".omp/company-state.yaml"];
+	const required = [".omp/foundry-state.yml", ".omp/foundry-state.yml.*.tmp", ".omp/foundry-state.yml.pre-v*.bak", ".omp/company-state.yml", ".omp/company-state.yaml", ".omp/security/"];
 	for (const line of required) if (!lines.includes(line)) lines.push(line);
 	const next = `${lines.filter(Boolean).join("\n")}\n`;
 	if (next !== text) atomicConfigWrite(path, next);

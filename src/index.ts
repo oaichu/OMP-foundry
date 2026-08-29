@@ -71,6 +71,7 @@ import { loadState, loadStateResult, recountTickets, saveState, stateFileExists,
 import { type CompanyState, type ConflictKind, type PlanStage, defaultState } from "./types";
 import { checkForUpdate, versionReport } from "./update-check";
 import { applyQa, executeVerifyStep, runDeclaredVerification, runVerify } from "./verify-runner";
+import { DEFAULT_SECURITY_TOOLS, runSecurityScan, securityReleaseReady, securityStatus } from "./security-runner";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CUSTOM = "com.omp.foundry.state";
@@ -1040,13 +1041,80 @@ export default function registerFoundryExtension(pi: ExtensionAPI): void {
 		if (!stateFileExists(ctx.cwd)) { ctx.ui.notify("FOUNDRY_GATE: this project is not governed by Foundry yet; run /foundry first.", "warning"); return; }
 		const state = loadState(ctx.cwd), rows = runVerify(ctx.cwd); applyQa(ctx.cwd, state, rows); deriveRelease(ctx.cwd, state); persist(ctx.cwd, state); orchestrate(pi, `QA ${state.qa.status}`, rows.map((r) => `${r.id}=${r.exitCode}`).join(" ") || "no-commands");
 	} });
+	pi.registerCommand("security", {
+		description: "Deterministic security runner: status | diff | full | codeql",
+		handler: async (args, ctx) => {
+			const sub = args.trim().toLowerCase();
+			if (!sub || sub === "status") {
+				const status = securityStatus(ctx.cwd);
+				const toolLines = status.tools.map((t) => {
+					const state = t.available ? `available (${t.path})` : "not found in PATH";
+					const cfg = t.configured ? "configured" : "not configured";
+					return `  - ${t.tool}: ${state} [${cfg}]`;
+				});
+				const latestSummary = status.latest
+					? `Latest scan (${status.latest.runId}): mode=${status.latest.mode} status=${status.latest.status} head=${status.latest.head.slice(0, 8)} tools=${status.latest.tools.map((t) => `${t.tool}:${t.status}`).join(", ")}`
+					: "No previous scan manifest found under .omp/security/latest.json";
+				const configSummary = status.config.error
+					? `Config error: ${status.config.error}`
+					: `Policy: ${status.config.policy}, Configured tools: ${(status.config.tools && status.config.tools.length > 0 ? status.config.tools : DEFAULT_SECURITY_TOOLS).join(", ")}`;
+
+				orchestrate(
+					pi,
+					`Security Status (policy: ${status.config.policy})`,
+					[
+						configSummary,
+						"",
+						"Tool availability:",
+						...toolLines,
+						"",
+						latestSummary,
+					].join("\n")
+				);
+				return;
+			}
+
+			if (sub === "diff" || sub === "full" || sub === "codeql") {
+				const result = runSecurityScan(ctx.cwd, sub);
+				const toolSummary = result.manifest.tools
+					.map((t) => `  - ${t.tool}: ${t.status}${t.findings !== undefined ? ` (${t.findings} findings)` : ""}${t.reason ? ` - ${t.reason}` : ""}`)
+					.join("\n");
+				const sarifInfo = result.mergedSarifPath ? `Merged SARIF: ${result.mergedSarifPath}` : "No SARIF merged";
+				orchestrate(
+					pi,
+					`Security scan [${sub}]: ${result.manifest.status}`,
+					[
+						`Run ID: ${result.manifest.runId}`,
+						`Status: ${result.manifest.status} (policy: ${result.manifest.policy}, head: ${result.manifest.head.slice(0, 8)})`,
+						`Coverage: requested=${result.manifest.coverage.requested}, completed=${result.manifest.coverage.completed}, blocked=${result.manifest.coverage.blocked}, not_run=${result.manifest.coverage.notRun}`,
+						"",
+						"Tool results:",
+						toolSummary,
+						"",
+						sarifInfo,
+					].join("\n")
+				);
+				return;
+			}
+
+			ctx.ui.notify("Usage: /security [status|diff|full|codeql]", "warning");
+		},
+	});
 	pi.registerCommand("release-check", { description: "Derived release gate; agent release commands remain denied", handler: async (_args, ctx) => {
 		if (!stateFileExists(ctx.cwd)) { ctx.ui.notify("FOUNDRY_GATE: this project is not governed by Foundry yet; run /foundry first.", "warning"); return; }
-		const state = loadState(ctx.cwd); recountTickets(state); const ready = deriveRelease(ctx.cwd, state); if (ready) state.phase = "release"; persist(ctx.cwd, state);
+		const state = loadState(ctx.cwd); recountTickets(state);
+		const secCheck = securityReleaseReady(ctx.cwd);
+		const ready = deriveRelease(ctx.cwd, state) && secCheck.ready;
+		if (ready) state.phase = "release";
+		persist(ctx.cwd, state);
+		const secLine = secCheck.policy === "optional"
+			? `ℹ SECURITY ${secCheck.status} (policy: optional)`
+			: `${secCheck.ready ? "✓" : "✗"} SECURITY ${secCheck.status}${secCheck.reason ? ` (${secCheck.reason})` : ""}`;
 		const report = [
 			`${productReady(state) ? "✓" : "✗"} PRODUCT`, `${planLocked(state) ? "✓" : "✗"} PLAN locked`, `${designAllowsUi(state) ? "✓" : "✗"} DESIGN`,
 			`${state.aatp.manifest_sha256 && state.aatp.manifest_sha256 === aatpManifestHash(ctx.cwd) ? "✓" : "✗"} AATP specs sealed`, `${state.aatp.total > 0 && state.aatp.completed === state.aatp.total && state.aatp.blocked === 0 ? "✓" : "✗"} AATP complete`,
 			`${Object.values(state.tickets).every((t) => t.review === "APPROVE" && (t.review_by === "reviewer" || t.review_by === "security-reviewer") && t.review_evidence_sha256) && Object.keys(state.tickets).length > 0 ? "✓" : "✗"} independent reviews`, `${governedCommitLedgerFresh(ctx.cwd, state, gitHead(ctx.cwd)) ? "✓" : "✗"} provenance ledger`, `${state.qa.status === "pass" ? "✓" : "✗"} QA pass @ ${state.qa.tree_sha || "no-sha"}`, `${workingTreeClean(ctx.cwd) ? "✓" : "✗"} clean tree`,
+			secLine,
 		].join("\n");
 		orchestrate(pi, ready ? "RELEASE_READY=true (derived)." : "Release blocked.", `${report}\n\nAgent push/publish/deploy remains denied. Release from a human shell after this gate is green.`);
 	} });

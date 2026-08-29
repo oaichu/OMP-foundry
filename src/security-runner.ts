@@ -1497,6 +1497,78 @@ export function readLatestSecurityManifest(
 	}
 }
 
+export interface SecurityToolStatus {
+	tool: SecurityToolId;
+	available: boolean;
+	path?: string;
+	configured: boolean;
+}
+
+export interface SecurityStatusResult {
+	config: SecurityConfig;
+	tools: SecurityToolStatus[];
+	latest?: SecurityRunManifest;
+	error?: string;
+}
+
+export function securityStatus(
+	cwd: string,
+	options?: { resolveExecutable?: (cwd: string, executable: string) => string | undefined }
+): SecurityStatusResult {
+	let config: SecurityConfig;
+	const ymlRel = safeRepoPath(cwd, ".omp/config.yml");
+	const yamlRel = safeRepoPath(cwd, ".omp/config.yaml");
+
+	const ymlExists = existsSync(resolve(cwd, ".omp", "config.yml"));
+	const yamlExists = existsSync(resolve(cwd, ".omp", "config.yaml"));
+
+	if (ymlExists || yamlExists) {
+		const activePath = ymlExists ? ymlRel : yamlRel;
+		if (!activePath) {
+			config = { policy: "optional", tools: [], error: "Config file path crosses symlink or leaves repository" };
+		} else {
+			try {
+				const stat = lstatSync(activePath);
+				if (stat.isSymbolicLink() || !stat.isFile()) {
+					config = { policy: "optional", tools: [], error: `Config file '${activePath}' is not a regular file or is a symlink` };
+				} else if (stat.size > MAX_CONFIG_BYTES) {
+					config = { policy: "optional", tools: [], error: `Config file '${activePath}' exceeds ${MAX_CONFIG_BYTES}-byte limit` };
+				} else {
+					const text = readFileSync(activePath, "utf8");
+					config = parseSecurityConfig(text);
+				}
+			} catch (error) {
+				config = { policy: "optional", tools: [], error: `Failed to read config file: ${error instanceof Error ? error.message : String(error)}` };
+			}
+		}
+	} else {
+		config = parseSecurityConfig("");
+	}
+
+	const execResolver = options?.resolveExecutable || trustedExecutable;
+	const configuredTools = new Set(config.tools && config.tools.length > 0 ? config.tools : DEFAULT_SECURITY_TOOLS);
+	const toolResults: SecurityToolStatus[] = [];
+
+	for (const tool of ALL_SECURITY_TOOLS) {
+		const path = execResolver(cwd, tool);
+		toolResults.push({
+			tool,
+			available: path !== undefined,
+			path,
+			configured: configuredTools.has(tool),
+		});
+	}
+
+	const latestRes = readLatestSecurityManifest(cwd);
+
+	return {
+		config,
+		tools: toolResults,
+		latest: latestRes.ok ? latestRes.manifest : undefined,
+		error: config.error || (latestRes.ok ? undefined : latestRes.error),
+	};
+}
+
 export interface RunSecurityScanOptions {
 	config?: SecurityConfig;
 	runId?: string;

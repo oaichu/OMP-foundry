@@ -9,6 +9,7 @@ import { hashPlanArtifact } from "../src/plan";
 import { lockArtifactHash } from "../src/release";
 import { loadState, saveState } from "../src/state-machine";
 import { defaultState } from "../src/types";
+import { narrowFoundryGitignore } from "../src/omp-runtime";
 
 function fakeZod() {
 	const chain = { optional() { return this; } };
@@ -552,5 +553,126 @@ describe("extension integration smoke", () => {
 		expect(updatedState.planning.epoch).toBe(expectedEpoch);
 		expect(updatedState.planning.stage).toBe("awaiting_lock");
 		expect(notifies.some((n) => n.message.includes("Plan phase approved successfully"))).toBe(true);
+	});
+
+	test("narrowFoundryGitignore writes .omp/security/ while retaining all existing state ignore entries", () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-ignore-test-"));
+		const initialIgnore = "node_modules/\ndist/\n.omp/\n.omp/foundry-state.yml\n";
+		writeFileSync(join(dir, ".gitignore"), initialIgnore, "utf8");
+
+		narrowFoundryGitignore(dir);
+
+		const updated = readFileSync(join(dir, ".gitignore"), "utf8");
+		expect(updated).toContain(".omp/security/");
+		expect(updated).toContain(".omp/foundry-state.yml");
+		expect(updated).toContain(".omp/foundry-state.yml.*.tmp");
+		expect(updated).toContain(".omp/foundry-state.yml.pre-v*.bak");
+		expect(updated).toContain(".omp/company-state.yml");
+		expect(updated).toContain(".omp/company-state.yaml");
+		expect(updated).toContain("node_modules/");
+		expect(updated).toContain("dist/");
+		expect(updated.split("\n")).not.toContain(".omp/");
+		expect(updated.split("\n")).not.toContain(".omp");
+	});
+
+	test("security command is registered and handles status, scan modes, and usage warning", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-sec-cmd-"));
+		mkdirSync(join(dir, "docs"), { recursive: true });
+		writeFileSync(join(dir, "docs", ".foundry-governed"), "");
+		mkdirSync(join(dir, ".omp"), { recursive: true });
+		writeFileSync(join(dir, ".omp", "config.yml"), "security:\n  policy: optional\n  tools: [semgrep]\n", "utf8");
+
+		const state = defaultState();
+		saveState(dir, state);
+
+		const { commands, messages } = harness();
+		const secCommand = commands.get("security");
+		expect(secCommand).toBeDefined();
+		expect(typeof secCommand.handler).toBe("function");
+
+		const notifies: Array<{ message: string; level?: string }> = [];
+		const testCtx = {
+			...ctx(dir),
+			ui: {
+				notify: (message: string, level?: "error" | "info" | "warning") => {
+					notifies.push({ message, level });
+				},
+				setStatus() {},
+			},
+		};
+
+		// 1. Status mode (explicit)
+		await secCommand.handler("status", testCtx);
+		expect(messages.some((m) => m.includes("Security Status") || m.includes("optional"))).toBe(true);
+
+		// 2. Status mode (default/empty)
+		messages.length = 0;
+		await secCommand.handler("", testCtx);
+		expect(messages.some((m) => m.includes("Security Status") || m.includes("optional"))).toBe(true);
+
+		// 3. Invalid mode
+		notifies.length = 0;
+		await secCommand.handler("invalid-mode", testCtx);
+		expect(notifies.some((n) => n.message.includes("Usage: /security"))).toBe(true);
+
+		// 4. Scan mode diff/full/codeql
+		messages.length = 0;
+		await secCommand.handler("full", testCtx);
+		expect(messages.some((m) => m.includes("Security scan [full]"))).toBe(true);
+
+		messages.length = 0;
+		await secCommand.handler("diff", testCtx);
+		expect(messages.some((m) => m.includes("Security scan [diff]"))).toBe(true);
+
+		messages.length = 0;
+		await secCommand.handler("codeql", testCtx);
+		expect(messages.some((m) => m.includes("Security scan [codeql]"))).toBe(true);
+
+		// Confirm governance state was not mutated
+		const currentState = loadState(dir);
+		expect(currentState.mode).toBe("normal");
+		expect(currentState.phase).toBe("discovery");
+	});
+
+	test("release-check includes security line derived from securityReleaseReady", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "foundry-rel-sec-"));
+		mkdirSync(join(dir, "docs"), { recursive: true });
+		writeFileSync(join(dir, "docs", ".foundry-governed"), "");
+		writeFileSync(join(dir, "docs", "PRODUCT.md"), "# Product");
+		writeFileSync(join(dir, "docs", "MASTER_PLAN.md"), "# Plan");
+		const state = defaultState();
+		state.product = { status: "approved", sha256: "p-sha" };
+		state.master_plan = { status: "locked", version: "1.0", sha256: "mp-sha" };
+		state.design = { required: false, status: "not_required", version: "0", sha256: "" };
+		state.aatp.epoch = "e-1";
+		state.aatp.total = 1;
+		state.aatp.completed = 1;
+		state.aatp.manifest_sha256 = "mf-sha";
+		saveState(dir, state);
+		const { commands, messages } = harness();
+		const relCheck = commands.get("release-check");
+		expect(relCheck).toBeDefined();
+
+		const notifies: string[] = [];
+		const testCtx = {
+			...ctx(dir),
+			ui: { notify: (m: string) => notifies.push(m), setStatus() {} },
+		};
+
+		// 1. Optional policy -> NOT_REQUIRED
+		await relCheck.handler("", testCtx);
+		let lastMessage = messages[messages.length - 1];
+		expect(lastMessage).toBeDefined();
+		expect(lastMessage).toMatch(/SECURITY NOT_REQUIRED/i);
+
+		// 2. Required policy without manifest -> BLOCKED
+		mkdirSync(join(dir, ".omp"), { recursive: true });
+		writeFileSync(join(dir, ".omp", "config.yml"), "security:\n  policy: required\n", "utf8");
+		messages.length = 0;
+		await relCheck.handler("", testCtx);
+		lastMessage = messages[messages.length - 1];
+		expect(lastMessage).toBeDefined();
+		expect(lastMessage).toMatch(/SECURITY BLOCKED/i);
+		expect(lastMessage).toMatch(/Release blocked/i);
 	});
 });

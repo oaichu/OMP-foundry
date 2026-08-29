@@ -21,6 +21,7 @@ import {
 	readSecurityRunManifest,
 	readLatestSecurityManifest,
 	runSecurityScan,
+	securityStatus,
 } from "../src/security-runner";
 import { executeVerifyStep } from "../src/verify-runner";
 
@@ -1144,6 +1145,251 @@ describe("Security Runner - Task 3 Execution, SARIF, and Run Manifests", () => {
 
 			expect(capturedArgs).toContain("--log-opts");
 			expect(capturedArgs).toContain("HEAD~1...HEAD");
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+	});
+});
+
+describe("Security Runner - Task 4 Status and Release Ready Helper", () => {
+	describe("1. securityStatus helper", () => {
+		let tempDir: string;
+
+		test("reads config, resolved tool availability, and latest manifest", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-status-full-"));
+			mkdirSync(join(tempDir, ".omp", "security"), { recursive: true });
+			writeFileSync(
+				join(tempDir, ".omp", "config.yml"),
+				"security:\n  policy: release-required\n  tools: [semgrep, trivy]\n",
+				"utf8"
+			);
+
+			const manifest: SecurityRunManifest = {
+				runId: "run-status-001",
+				mode: "full",
+				policy: "release-required",
+				head: "1122334455667788",
+				startedAt: "2026-08-29T12:00:00Z",
+				completedAt: "2026-08-29T12:01:00Z",
+				tools: [
+					{ tool: "semgrep", status: "PASS", argv: ["semgrep"] },
+					{ tool: "trivy", status: "PASS", argv: ["trivy"] },
+				],
+				coverage: { requested: 2, completed: 2, blocked: 0, notRun: 0 },
+				status: "PASS",
+			};
+			writeFileSync(join(tempDir, ".omp", "security", "latest.json"), JSON.stringify(manifest), "utf8");
+
+			const status = securityStatus(tempDir, {
+				resolveExecutable: (_c, tool) => (tool === "semgrep" ? "/bin/semgrep" : undefined),
+			});
+
+			expect(status.config.policy).toBe("release-required");
+			expect(status.config.tools).toEqual(["semgrep", "trivy"]);
+			expect(status.latest).toBeDefined();
+			expect(status.latest?.runId).toBe("run-status-001");
+
+			const semgrepTool = status.tools.find((t) => t.tool === "semgrep");
+			expect(semgrepTool?.available).toBe(true);
+			expect(semgrepTool?.path).toBe("/bin/semgrep");
+			expect(semgrepTool?.configured).toBe(true);
+
+			const trivyTool = status.tools.find((t) => t.tool === "trivy");
+			expect(trivyTool?.available).toBe(false);
+			expect(trivyTool?.configured).toBe(true);
+
+			const gitleaksTool = status.tools.find((t) => t.tool === "gitleaks");
+			expect(gitleaksTool?.configured).toBe(false);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("returns default optional config and unrun tools when no config or runs exist", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-status-empty-"));
+			const status = securityStatus(tempDir, {
+				resolveExecutable: () => undefined,
+			});
+
+			expect(status.config.policy).toBe("optional");
+			expect(status.latest).toBeUndefined();
+			expect(status.tools.every((t) => !t.available)).toBe(true);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("captures config parse error safely without throwing", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-status-err-"));
+			mkdirSync(join(tempDir, ".omp"), { recursive: true });
+			writeFileSync(join(tempDir, ".omp", "config.yml"), "security:\n  policy: invalid-pol\n", "utf8");
+
+			const status = securityStatus(tempDir);
+			expect(status.config.error).toBeDefined();
+			expect(status.config.error).toMatch(/policy/i);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+	});
+
+	describe("2. securityReleaseReady comprehensive manifest cases", () => {
+		let tempDir: string;
+
+		test("fresh complete manifest with all passing tools passes release-ready", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-rel-fresh-"));
+			mkdirSync(join(tempDir, ".omp", "security"), { recursive: true });
+			writeFileSync(
+				join(tempDir, ".omp", "config.yml"),
+				"security:\n  policy: release-required\n  tools: [semgrep, gitleaks, trivy]\n",
+				"utf8"
+			);
+
+			const headSha = "abcdef1234567890abcdef1234567890abcdef12";
+			const manifest: SecurityRunManifest = {
+				runId: "run-fresh-pass",
+				mode: "full",
+				policy: "release-required",
+				head: headSha,
+				startedAt: "2026-08-29T10:00:00Z",
+				completedAt: "2026-08-29T10:02:00Z",
+				tools: [
+					{ tool: "semgrep", status: "PASS", argv: ["semgrep"] },
+					{ tool: "gitleaks", status: "PASS", argv: ["gitleaks"] },
+					{ tool: "trivy", status: "PASS", argv: ["trivy"] },
+				],
+				coverage: { requested: 3, completed: 3, blocked: 0, notRun: 0 },
+				status: "PASS",
+			};
+			writeFileSync(join(tempDir, ".omp", "security", "latest.json"), JSON.stringify(manifest), "utf8");
+
+			const result = securityReleaseReady(tempDir, { head: headSha });
+			expect(result.ready).toBe(true);
+			expect(result.status).toBe("PASS");
+			expect(result.policy).toBe("release-required");
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("stale manifest (different HEAD) blocks release-ready", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-rel-stale-"));
+			mkdirSync(join(tempDir, ".omp", "security"), { recursive: true });
+			writeFileSync(
+				join(tempDir, ".omp", "config.yml"),
+				"security:\n  policy: release-required\n  tools: [semgrep]\n",
+				"utf8"
+			);
+
+			const manifest: SecurityRunManifest = {
+				runId: "run-stale",
+				mode: "full",
+				policy: "release-required",
+				head: "1111111111111111",
+				startedAt: "2026-08-29T10:00:00Z",
+				completedAt: "2026-08-29T10:02:00Z",
+				tools: [{ tool: "semgrep", status: "PASS", argv: ["semgrep"] }],
+				coverage: { requested: 1, completed: 1, blocked: 0, notRun: 0 },
+				status: "PASS",
+			};
+			writeFileSync(join(tempDir, ".omp", "security", "latest.json"), JSON.stringify(manifest), "utf8");
+
+			const result = securityReleaseReady(tempDir, { head: "2222222222222222" });
+			expect(result.ready).toBe(false);
+			expect(result.status).toBe("BLOCKED");
+			expect(result.reason).toMatch(/stale/i);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("partial manifest with unrun tool blocks release-ready under required policy", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-rel-partial-"));
+			mkdirSync(join(tempDir, ".omp", "security"), { recursive: true });
+			writeFileSync(
+				join(tempDir, ".omp", "config.yml"),
+				"security:\n  policy: required\n  tools: [semgrep, trivy]\n",
+				"utf8"
+			);
+
+			const headSha = "abcdef1234567890abcdef1234567890abcdef12";
+			const manifest: SecurityRunManifest = {
+				runId: "run-partial",
+				mode: "full",
+				policy: "required",
+				head: headSha,
+				startedAt: "2026-08-29T10:00:00Z",
+				completedAt: "2026-08-29T10:02:00Z",
+				tools: [
+					{ tool: "semgrep", status: "PASS", argv: ["semgrep"] },
+					{ tool: "trivy", status: "NOT_RUN", argv: [] },
+				],
+				coverage: { requested: 2, completed: 1, blocked: 0, notRun: 1 },
+				status: "NOT_RUN",
+			};
+			writeFileSync(join(tempDir, ".omp", "security", "latest.json"), JSON.stringify(manifest), "utf8");
+
+			const result = securityReleaseReady(tempDir, { head: headSha });
+			expect(result.ready).toBe(false);
+			expect(result.status).toBe("BLOCKED");
+			expect(result.reason).toMatch(/blocked|unrun|not_run|not run|coverage|status/i);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("blocked tool manifest blocks release-ready under release-required policy", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-rel-blocked-"));
+			mkdirSync(join(tempDir, ".omp", "security"), { recursive: true });
+			writeFileSync(
+				join(tempDir, ".omp", "config.yml"),
+				"security:\n  policy: release-required\n  tools: [semgrep]\n",
+				"utf8"
+			);
+
+			const headSha = "abcdef1234567890abcdef1234567890abcdef12";
+			const manifest: SecurityRunManifest = {
+				runId: "run-blocked",
+				mode: "full",
+				policy: "release-required",
+				head: headSha,
+				startedAt: "2026-08-29T10:00:00Z",
+				completedAt: "2026-08-29T10:02:00Z",
+				tools: [{ tool: "semgrep", status: "BLOCKED", argv: ["semgrep"], reason: "Crash" }],
+				coverage: { requested: 1, completed: 0, blocked: 1, notRun: 0 },
+				status: "BLOCKED",
+			};
+			writeFileSync(join(tempDir, ".omp", "security", "latest.json"), JSON.stringify(manifest), "utf8");
+
+			const result = securityReleaseReady(tempDir, { head: headSha });
+			expect(result.ready).toBe(false);
+			expect(result.status).toBe("BLOCKED");
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("manifest missing a configured required tool blocks release-ready", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-rel-missingtool-"));
+			mkdirSync(join(tempDir, ".omp", "security"), { recursive: true });
+			writeFileSync(
+				join(tempDir, ".omp", "config.yml"),
+				"security:\n  policy: release-required\n  tools: [semgrep, gitleaks]\n",
+				"utf8"
+			);
+
+			const headSha = "abcdef1234567890abcdef1234567890abcdef12";
+			// Manifest only ran semgrep, gitleaks was omitted
+			const manifest: SecurityRunManifest = {
+				runId: "run-missing-tool",
+				mode: "full",
+				policy: "release-required",
+				head: headSha,
+				startedAt: "2026-08-29T10:00:00Z",
+				completedAt: "2026-08-29T10:02:00Z",
+				tools: [{ tool: "semgrep", status: "PASS", argv: ["semgrep"] }],
+				coverage: { requested: 1, completed: 1, blocked: 0, notRun: 0 },
+				status: "PASS",
+			};
+			writeFileSync(join(tempDir, ".omp", "security", "latest.json"), JSON.stringify(manifest), "utf8");
+
+			const result = securityReleaseReady(tempDir, { head: headSha });
+			expect(result.ready).toBe(false);
+			expect(result.status).toBe("BLOCKED");
+			expect(result.reason).toMatch(/gitleaks/i);
 
 			rmSync(tempDir, { recursive: true, force: true });
 		});
