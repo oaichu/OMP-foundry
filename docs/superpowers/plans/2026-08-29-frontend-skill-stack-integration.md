@@ -305,7 +305,7 @@ expect(ids).not.toContain("shadcn-ui");
 expect(ids).not.toContain("web-interface-guidelines");
 ```
 
-Add a strong AATP context case whose objective is backend/database work and assert neither new web adapter is selected. Assert repeated routing returns identical skill IDs and score rows.
+Add a strong backend AATP implementation-context case and assert the contextual `shadcn-ui` adapter is suppressed; `web-interface-guidelines` is lifecycle-ineligible in implementation and is not used as evidence for context suppression. Add a separate review-phase web control and backend-context repetition proving the L1 WIG adapter remains available to every eligible web review. Assert repeated routing in both eligible implementation and review scenarios returns identical complete skill IDs and score rows, including the new adapter rows.
 
 - [ ] **Step 2: Run routing tests and confirm the new assertions fail**
 
