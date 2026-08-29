@@ -45,11 +45,32 @@ describe("Skill Router v2", () => {
 		expect(ids).not.toContain("react-engineering");
 		expect(ids).not.toContain("web-engineering");
 		expect(ids).not.toContain("shadcn-ui");
-		expect(ids).not.toContain("web-interface-guidelines");
 		const postgres = result.scores.find((row) => row.id === "postgres-engineering");
 		expect(postgres?.selected).toBe(true);
 		expect(postgres?.contextEvidence).toBeGreaterThanOrEqual(14);
 		expect(postgres?.reasons.some((reason) => reason.includes("task-id:postgres"))).toBe(true);
+	});
+
+	test("L1 web-interface-guidelines remains active across eligible web reviews with and without backend context", () => {
+		const state = { ...defaultState(), phase: "review" as const };
+		const appDir = fullStackApp({ componentsJson: true });
+
+		const baseline = resolveSkillRouting(appDir, state, { skillsRoot, role: "reviewer" });
+		expect(baseline.skills.map((s) => s.id)).toContain("web-interface-guidelines");
+		expect(baseline.skills.map((s) => s.id)).toContain("design-quality");
+
+		const withBackendContext = resolveSkillRouting(appDir, state, {
+			skillsRoot,
+			role: "reviewer",
+			context: {
+				objective: "Fix the Supabase Postgres tenant RLS policy and ownership leak.",
+				files: ["supabase/migrations/20260828_rls.sql"],
+				concerns: ["SEC-TENANT-RLS"],
+				securitySensitive: true,
+			},
+		});
+		expect(withBackendContext.skills.map((s) => s.id)).toContain("web-interface-guidelines");
+		expect(withBackendContext.skills.map((s) => s.id)).toContain("design-quality");
 	});
 
 	test("security-sensitive evidence is routed in the phases where security skills are authorized", () => {
@@ -60,14 +81,41 @@ describe("Skill Router v2", () => {
 		expect(result.scores.find((row) => row.id === "security")?.contextEvidence).toBeGreaterThanOrEqual(40);
 	});
 
-	test("routing is deterministic and stably ordered", () => {
+	test("routing is deterministic and stably ordered in implementation with components.json", () => {
 		const state = { ...defaultState(), phase: "implementation" as const };
-		const options = { skillsRoot, role: "implementer" as const, context: { objective: "Fix Supabase Postgres RLS", concerns: ["SEC-RLS"], securitySensitive: true } };
 		const appDir = fullStackApp({ componentsJson: true });
+		const options = {
+			skillsRoot,
+			role: "implementer" as const,
+			context: { objective: "Implement user profile dialog using shadcn primitives", files: ["components/user-profile.tsx"] },
+		};
 		const first = resolveSkillRouting(appDir, state, options);
 		const second = resolveSkillRouting(appDir, state, options);
 		expect(first.skills.map((item) => item.id)).toEqual(second.skills.map((item) => item.id));
-		expect(first.scores.map(({ id, score, selected }) => ({ id, score, selected }))).toEqual(second.scores.map(({ id, score, selected }) => ({ id, score, selected })));
+		expect(first.scores).toEqual(second.scores);
+		const shadcnScore = first.scores.find((row) => row.id === "shadcn-ui");
+		expect(shadcnScore).toBeDefined();
+		expect(shadcnScore?.selected).toBe(true);
+	});
+
+	test("routing is deterministic and stably ordered in review with web interface guidelines", () => {
+		const state = { ...defaultState(), phase: "review" as const };
+		const appDir = fullStackApp({ componentsJson: true });
+		const options = {
+			skillsRoot,
+			role: "reviewer" as const,
+			context: { objective: "Review navigation bar accessibility and dialog focus traps", files: ["components/navbar.tsx"] },
+		};
+		const first = resolveSkillRouting(appDir, state, options);
+		const second = resolveSkillRouting(appDir, state, options);
+		expect(first.skills.map((item) => item.id)).toEqual(second.skills.map((item) => item.id));
+		expect(first.scores).toEqual(second.scores);
+		const wigScore = first.scores.find((row) => row.id === "web-interface-guidelines");
+		expect(wigScore).toBeDefined();
+		expect(wigScore?.selected).toBe(true);
+		const dqScore = first.scores.find((row) => row.id === "design-quality");
+		expect(dqScore).toBeDefined();
+		expect(dqScore?.selected).toBe(true);
 	});
 
 	test("explanation exposes repo evidence, task evidence, and context cost", () => {
