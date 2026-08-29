@@ -31,14 +31,15 @@ If the evidence is insufficient to prove either `TRUE_POSITIVE` or `FALSE_POSITI
 
 ## Triage Disposition & Valid Relationships
 
-Assign an actionable disposition that strictly matches the classification:
-- `ACCEPT`: Validated vulnerability requiring remediation. Valid ONLY for proven `TRUE_POSITIVE` findings. Document evidence, minimal reproductive preconditions, impact, and remediation guidance. False positives must never be accepted.
-- `DISMISS`: Verified false positive or documented acceptable risk. Valid ONLY for proven `FALSE_POSITIVE` findings or policy-approved exceptions. Provide concrete technical rationale and proof of non-exploitability. Unresolved candidate findings must never be silently dismissed.
-- `NEEDS-MORE-INFO`: Unresolved candidate finding where proof threshold is not met. Specify the exact missing evidence required to reach a definitive verdict.
+Assign an actionable disposition that strictly maps to the proven classification:
+- `ACCEPT`: Validated vulnerability requiring remediation. Valid ONLY for proven `TRUE_POSITIVE` findings. Document evidence, minimal reproductive preconditions, impact, and remediation guidance. False positives must never be accepted. If governance accepts residual risk, the finding remains a classified `TRUE_POSITIVE` (risk acceptance never reclassifies a true positive or overrides the finding into a false-positive dismissal).
+- `DISMISS`: Conclusively refuted candidate. Valid ONLY for proven `FALSE_POSITIVE` findings. Provide concrete technical rationale and code proof of non-exploitability or rule mismatch. Unresolved candidate findings or unverified assumptions must never be dismissed.
+- `NEEDS-MORE-INFO`: Unresolved candidate finding where the proof threshold for `TRUE_POSITIVE` or `FALSE_POSITIVE` is not met. Specify the exact missing evidence, reproducer, or runtime context required to reach a definitive verdict. Unresolved candidates must never be silently dismissed or prematurely accepted.
 
 ## Operational Rules
 
 - Ground all claims in code evidence (exact file, line range, variable names).
 - Never fabricate exploit chains or claim theoretical issues without reachable execution paths.
-- Adhere strictly to valid classification/disposition mappings: `TRUE_POSITIVE` -> `ACCEPT`, `FALSE_POSITIVE` -> `DISMISS`, insufficient proof -> `NEEDS-MORE-INFO`.
+- Enforce strict, unambiguous classification-disposition mappings: `TRUE_POSITIVE` -> `ACCEPT`, `FALSE_POSITIVE` -> `DISMISS`, insufficient proof -> `NEEDS-MORE-INFO`.
+- Risk acceptance is a governance decision that does not turn true positives or unresolved findings into `DISMISS`.
 - Verdict only; do not implement application fixes.

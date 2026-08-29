@@ -104,6 +104,12 @@ describe("native security control-plane skills", () => {
 		expect(body).toContain("proof threshold");
 		expect(body).toContain("False positives must never be accepted");
 		expect(body).toContain("never be silently dismissed");
+		expect(body).toContain("`TRUE_POSITIVE` -> `ACCEPT`");
+		expect(body).toContain("`FALSE_POSITIVE` -> `DISMISS`");
+		expect(body).toContain("insufficient proof -> `NEEDS-MORE-INFO`");
+		expect(body).not.toContain("policy-approved exceptions");
+		expect(body).not.toContain("documented acceptable risk. Valid ONLY");
+		expect(body).toContain("Risk acceptance is a governance decision that does not turn true positives or unresolved findings into `DISMISS`");
 	});
 
 	test("scanners skill enforces evidence adjudication, non-pass states, and accurate tool boundaries", () => {
@@ -116,6 +122,8 @@ describe("native security control-plane skills", () => {
 		expect(body).toContain("PARTIAL_COVERAGE");
 		expect(body).toContain("TOOL_ERROR");
 		expect(body).toContain("extracted database");
-		expect(body).toContain("no-build");
+		expect(body).toContain("selected build mode");
+		expect(body).toContain("Coverage and build requirements depend on the target language, extractor, repository setup");
+		expect(body).not.toContain("compiled languages require extraction during build");
 	});
 });

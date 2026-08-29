@@ -34,6 +34,6 @@ Plan scanner evaluation and adjudicate security tool evidence. Governed workers 
 ## Tool Boundaries & Limitations
 
 - **Semgrep**: Excels at AST pattern matching and intra-file rules; does not perform whole-program inter-procedural data-flow or pointer analysis across complex component boundaries.
-- **CodeQL**: Deep inter-procedural query analysis requires a compatible, successfully extracted database and configured query suite. Coverage depends on the language, extractor, and build mode (supported no-build analysis exists for some languages, while compiled languages require extraction during build). Cannot analyze dynamic runtime behavior or generated code not captured in the extracted database.
+- **CodeQL**: Deep inter-procedural query analysis requires a compatible, successfully extracted database and configured query suite. Coverage and build requirements depend on the target language, extractor, repository setup, selected build mode (such as `none`, `autobuild`, or manual build invocation depending on language support and tradeoffs), and desired analysis coverage. Cannot analyze dynamic runtime behavior, unextracted dependencies, or generated code not captured in the extracted database.
 - **Gitleaks**: High-accuracy regex and entropy secret detection; may flag test fixtures as false positives or miss split-token / dynamic credential assembly.
 - **Trivy**: Vulnerability and misconfiguration scanning depends on vulnerability database freshness and complete lockfile synchronization.
