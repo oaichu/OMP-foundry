@@ -133,7 +133,7 @@ Extend `templates/DESIGN.md` only where needed to make the art-direction contrac
 - Resolver tests prove:
   - a normal React/Next web implementation does not receive `shadcn-ui` without `components.json`;
   - a shadcn project receives `shadcn-ui` and its React companion;
-- web review/QA receives `web-interface-guidelines` and `design-quality` while design-authoring skills remain excluded; a strong backend implementation context suppresses `shadcn-ui` through contextual routing, while WIG is absent from implementation because its lifecycle contract is review/QA-only and remains available to every eligible web review.
+  - web review/QA receives `web-interface-guidelines` and `design-quality` while design-authoring skills remain excluded; a strong backend implementation context suppresses `shadcn-ui` through contextual routing, while WIG is absent from implementation because its lifecycle contract is review/QA-only and remains available to every eligible web review.
   - non-web projects do not receive web-only adapters.
 - Prompt tests prove the precedence text is present and deterministic routing remains stable.
 - Run `bun test`, `bun run typecheck`, `bun run check:omp-contract`, and `npm pack --dry-run`.
