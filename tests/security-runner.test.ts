@@ -15,6 +15,12 @@ import {
 	parseSecurityConfig,
 	planSecurityTools,
 	securityReleaseReady,
+	normalizeToolResult,
+	mergeSarifResults,
+	writeSecurityRunManifest,
+	readSecurityRunManifest,
+	readLatestSecurityManifest,
+	runSecurityScan,
 } from "../src/security-runner";
 import { executeVerifyStep } from "../src/verify-runner";
 
@@ -582,6 +588,563 @@ describe("Security Runner - Task 2 Review Hardening", () => {
 			expect(plan.steps[0].status).toBe("PLANNED");
 			expect(plan.steps[0].step?.args).toContain("--log-opts");
 			expect(plan.steps[0].step?.args).toContain("HEAD~1...HEAD");
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+	});
+});
+
+describe("Security Runner - Task 3 Execution, SARIF, and Run Manifests", () => {
+	const sampleEmptySarif = JSON.stringify({
+		$schema: "https://json.schemastore.org/sarif-2.1.0.json",
+		version: "2.1.0",
+		runs: [
+			{
+				tool: { driver: { name: "semgrep", version: "1.0.0" } },
+				results: [],
+			},
+		],
+	});
+
+	const sampleSarifWithFindings = JSON.stringify({
+		$schema: "https://json.schemastore.org/sarif-2.1.0.json",
+		version: "2.1.0",
+		runs: [
+			{
+				tool: { driver: { name: "semgrep", version: "1.0.0" } },
+				results: [
+					{
+						ruleId: "rules.security.eval",
+						message: { text: "Use of eval is dangerous" },
+						locations: [
+							{
+								physicalLocation: {
+									artifactLocation: { uri: "src/unsafe.js" },
+									region: { startLine: 12, startColumn: 5 },
+								},
+							},
+						],
+					},
+				],
+			},
+		],
+	});
+
+	describe("1. Tool Outcome Normalization (normalizeToolResult)", () => {
+		test("returns PASS for exitCode 0 with valid 0-finding SARIF", () => {
+			const res = normalizeToolResult({ exitCode: 0, sarif: sampleEmptySarif });
+			expect(res).toMatchObject({ status: "PASS", findings: 0 });
+		});
+
+		test("returns FAIL with findings count for exitCode 1 with findings in SARIF", () => {
+			const res = normalizeToolResult({ exitCode: 1, sarif: sampleSarifWithFindings });
+			expect(res).toMatchObject({ status: "FAIL", findings: 1 });
+		});
+
+		test("returns FAIL with findings count for exitCode 0 when SARIF has findings", () => {
+			const res = normalizeToolResult({ exitCode: 0, sarif: sampleSarifWithFindings });
+			expect(res).toMatchObject({ status: "FAIL", findings: 1 });
+		});
+
+		test("returns BLOCKED for exitCode 1 with empty SARIF", () => {
+			const res = normalizeToolResult({ exitCode: 1, sarif: "" });
+			expect(res.status).toBe("BLOCKED");
+		});
+
+		test("returns BLOCKED when error is provided (e.g. ENOENT)", () => {
+			const res = normalizeToolResult({ error: "ENOENT" });
+			expect(res.status).toBe("BLOCKED");
+		});
+
+		test("returns BLOCKED when timedOut is true", () => {
+			const res = normalizeToolResult({ timedOut: true });
+			expect(res.status).toBe("BLOCKED");
+		});
+
+		test("returns BLOCKED for exitCode 0 with unparseable SARIF JSON", () => {
+			const res = normalizeToolResult({ exitCode: 0, sarif: "not-json" });
+			expect(res.status).toBe("BLOCKED");
+		});
+
+		test("returns BLOCKED for exitCode 0 with invalid SARIF structure (missing runs)", () => {
+			const res = normalizeToolResult({ exitCode: 0, sarif: JSON.stringify({ version: "2.1.0" }) });
+			expect(res.status).toBe("BLOCKED");
+		});
+
+		test("returns BLOCKED for fatal non-zero exit codes like exitCode 2", () => {
+			const res = normalizeToolResult({ exitCode: 2, sarif: sampleSarifWithFindings });
+			expect(res.status).toBe("BLOCKED");
+		});
+
+		test("accepts object SARIF directly", () => {
+			const sarifObj = {
+				version: "2.1.0",
+				runs: [{ tool: { driver: { name: "trivy" } }, results: [{ ruleId: "CVE-2026-1" }] }],
+			};
+			const res = normalizeToolResult({ exitCode: 1, sarif: sarifObj });
+			expect(res).toMatchObject({ status: "FAIL", findings: 1 });
+		});
+
+		test("preserves tool, argv, and bounded reason", () => {
+			const res = normalizeToolResult({
+				tool: "gitleaks",
+				argv: ["gitleaks", "git", "--redact"],
+				error: "Command failed: fatal gitleaks error with sensitive text: secret12345",
+			});
+			expect(res.tool).toBe("gitleaks");
+			expect(res.argv).toEqual(["gitleaks", "git", "--redact"]);
+			expect(res.status).toBe("BLOCKED");
+			expect(res.reason).toBeDefined();
+			expect(res.reason!.length).toBeLessThanOrEqual(500);
+		});
+	});
+
+	describe("2. Deterministic SARIF Merging (mergeSarifResults)", () => {
+		test("produces standard SARIF 2.1.0 document with schema and version", () => {
+			const merged = mergeSarifResults([sampleEmptySarif]);
+			expect(merged.$schema).toBe("https://json.schemastore.org/sarif-2.1.0.json");
+			expect(merged.version).toBe("2.1.0");
+			expect(Array.isArray(merged.runs)).toBe(true);
+		});
+
+		test("handles empty inputs returning empty runs array", () => {
+			const merged = mergeSarifResults([]);
+			expect(merged.runs).toEqual([]);
+		});
+
+		test("skips malformed or invalid SARIF inputs safely", () => {
+			const merged = mergeSarifResults(["invalid-json", null, undefined, sampleEmptySarif]);
+			const runs = Array.isArray(merged.runs) ? merged.runs : [];
+			expect(runs.length).toBe(1);
+		});
+
+		test("sorts runs deterministically by tool driver name", () => {
+			const trivySarif = {
+				version: "2.1.0",
+				runs: [{ tool: { driver: { name: "trivy", version: "0.50.0" } }, results: [] }],
+			};
+			const gitleaksSarif = {
+				version: "2.1.0",
+				runs: [{ tool: { driver: { name: "gitleaks", version: "8.18.0" } }, results: [] }],
+			};
+			const semgrepSarif = {
+				version: "2.1.0",
+				runs: [{ tool: { driver: { name: "semgrep", version: "1.60.0" } }, results: [] }],
+			};
+
+			const merged = mergeSarifResults([trivySarif, gitleaksSarif, semgrepSarif]);
+			const runs = Array.isArray(merged.runs) ? (merged.runs as Array<{ tool: { driver: { name: string } } }>) : [];
+			const runNames = runs.map((r) => r.tool.driver.name);
+			expect(runNames).toEqual(["gitleaks", "semgrep", "trivy"]);
+		});
+
+		test("sorts results within a run deterministically by ruleId, file URI, line, and column", () => {
+			const sarifWithMultipleResults = {
+				version: "2.1.0",
+				runs: [
+					{
+						tool: { driver: { name: "semgrep" } },
+						results: [
+							{
+								ruleId: "b-rule",
+								locations: [{ physicalLocation: { artifactLocation: { uri: "src/b.ts" }, region: { startLine: 10, startColumn: 1 } } }],
+							},
+							{
+								ruleId: "a-rule",
+								locations: [{ physicalLocation: { artifactLocation: { uri: "src/z.ts" }, region: { startLine: 5, startColumn: 1 } } }],
+							},
+							{
+								ruleId: "b-rule",
+								locations: [{ physicalLocation: { artifactLocation: { uri: "src/a.ts" }, region: { startLine: 20, startColumn: 1 } } }],
+							},
+							{
+								ruleId: "b-rule",
+								locations: [{ physicalLocation: { artifactLocation: { uri: "src/a.ts" }, region: { startLine: 5, startColumn: 10 } } }],
+							},
+							{
+								ruleId: "b-rule",
+								locations: [{ physicalLocation: { artifactLocation: { uri: "src/a.ts" }, region: { startLine: 5, startColumn: 2 } } }],
+							},
+						],
+					},
+				],
+			};
+
+			const merged = mergeSarifResults([sarifWithMultipleResults]);
+			const runs = Array.isArray(merged.runs) ? (merged.runs as Array<{ results: Array<{ ruleId: string; locations: Array<{ physicalLocation: { artifactLocation: { uri: string }; region: { startLine: number; startColumn: number } } }> }> }>) : [];
+			const results = runs[0].results;
+
+			expect(results[0].ruleId).toBe("a-rule");
+			expect(results[1].ruleId).toBe("b-rule");
+			expect(results[1].locations[0].physicalLocation.artifactLocation.uri).toBe("src/a.ts");
+			expect(results[1].locations[0].physicalLocation.region.startLine).toBe(5);
+			expect(results[1].locations[0].physicalLocation.region.startColumn).toBe(2);
+
+			expect(results[2].locations[0].physicalLocation.region.startLine).toBe(5);
+			expect(results[2].locations[0].physicalLocation.region.startColumn).toBe(10);
+
+			expect(results[3].locations[0].physicalLocation.region.startLine).toBe(20);
+			expect(results[4].locations[0].physicalLocation.artifactLocation.uri).toBe("src/b.ts");
+		});
+	});
+
+	describe("3. Manifest Persistence & Reading", () => {
+		let tempDir: string;
+
+		const createSampleManifest = (runId = "run-12345"): SecurityRunManifest => ({
+			runId,
+			mode: "full",
+			policy: "required",
+			head: "abcdef0123456789",
+			startedAt: "2026-08-29T12:00:00.000Z",
+			completedAt: "2026-08-29T12:01:00.000Z",
+			tools: [
+				{ tool: "semgrep", status: "PASS", argv: ["semgrep", "scan"], findings: 0 },
+				{ tool: "gitleaks", status: "PASS", argv: ["gitleaks", "git"], findings: 0 },
+				{ tool: "trivy", status: "PASS", argv: ["trivy", "fs"], findings: 0 },
+			],
+			coverage: { requested: 3, completed: 3, blocked: 0, notRun: 0 },
+			status: "PASS",
+			mergedSarifPath: `.omp/security/runs/${runId}/merged.sarif`,
+		});
+
+		test("writes manifest atomically to run path and updates latest.json", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-mf-write-"));
+			const manifest = createSampleManifest("test-run-001");
+			const res = writeSecurityRunManifest(tempDir, manifest);
+
+			expect(res.ok).toBe(true);
+			expect(res.manifestPath).toBeDefined();
+			expect(res.latestPath).toBeDefined();
+
+			const readByRun = readSecurityRunManifest(tempDir, "test-run-001");
+			expect(readByRun.ok).toBe(true);
+			expect(readByRun.manifest).toEqual(manifest);
+
+			const readLatest = readLatestSecurityManifest(tempDir);
+			expect(readLatest.ok).toBe(true);
+			expect(readLatest.manifest).toEqual(manifest);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("rejects invalid manifest before writing", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-mf-inv-"));
+			const invalidManifest = {
+				...createSampleManifest("invalid-01"),
+				status: "INVALID_STATUS" as unknown as SecurityResultStatus,
+			};
+			const res = writeSecurityRunManifest(tempDir, invalidManifest);
+			expect(res.ok).toBe(false);
+			expect(res.error).toMatch(/validation|invalid/i);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("rejects runId with directory traversal or illegal characters", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-mf-trav-"));
+			const manifest = createSampleManifest("run-safe");
+			manifest.runId = "../escaped-run";
+			const res = writeSecurityRunManifest(tempDir, manifest);
+			expect(res.ok).toBe(false);
+
+			const readRes = readSecurityRunManifest(tempDir, "../../etc/passwd");
+			expect(readRes.ok).toBe(false);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("returns error when manifest does not exist", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-mf-noent-"));
+			const readRes = readSecurityRunManifest(tempDir, "nonexistent");
+			expect(readRes.ok).toBe(false);
+			expect(readRes.error).toBeDefined();
+
+			const readLatest = readLatestSecurityManifest(tempDir);
+			expect(readLatest.ok).toBe(false);
+			expect(readLatest.error).toBeDefined();
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("refuses symlink target when reading run manifest", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-mf-sym-"));
+			const targetDir = join(tempDir, ".omp", "security", "runs", "sym-run");
+			mkdirSync(targetDir, { recursive: true });
+			const targetFile = join(tempDir, "external.json");
+			writeFileSync(targetFile, JSON.stringify(createSampleManifest("sym-run")), "utf8");
+
+			try {
+				symlinkSync(targetFile, join(targetDir, "manifest.json"));
+				const readRes = readSecurityRunManifest(tempDir, "sym-run");
+				expect(readRes.ok).toBe(false);
+				expect(readRes.error).toMatch(/symlink/i);
+			} catch {
+				// On Windows unprivileged symlink creation might fail; skip if symlink cannot be created
+			}
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("refuses oversized manifest file", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-mf-oversized-"));
+			const targetDir = join(tempDir, ".omp", "security", "runs", "big-run");
+			mkdirSync(targetDir, { recursive: true });
+			const bigFile = join(targetDir, "manifest.json");
+			const bigManifest = {
+				...createSampleManifest("big-run"),
+				extraPadding: "x".repeat(600 * 1024),
+			};
+			writeFileSync(bigFile, JSON.stringify(bigManifest), "utf8");
+
+			const readRes = readSecurityRunManifest(tempDir, "big-run");
+			expect(readRes.ok).toBe(false);
+			expect(readRes.error).toMatch(/exceeds/i);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("refuses symlink latest.json when reading latest manifest", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-latest-sym-"));
+			const secDir = join(tempDir, ".omp", "security");
+			mkdirSync(secDir, { recursive: true });
+			const targetFile = join(tempDir, "external-latest.json");
+			writeFileSync(targetFile, JSON.stringify(createSampleManifest("run-1")), "utf8");
+
+			try {
+				symlinkSync(targetFile, join(secDir, "latest.json"));
+				const readRes = readLatestSecurityManifest(tempDir);
+				expect(readRes.ok).toBe(false);
+				expect(readRes.error).toMatch(/symlink/i);
+			} catch {
+				// Skip if symlink not allowed
+			}
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+	});
+
+	describe("4. End-to-End Scan Execution (runSecurityScan)", () => {
+		let tempDir: string;
+
+		test("full scan with all tools PASS produces PASS manifest and writes merged SARIF", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-scan-pass-"));
+			const config: SecurityConfig = {
+				policy: "required",
+				tools: ["semgrep", "gitleaks", "trivy"],
+			};
+
+			const fakeExecutor = (_cwd: string, step: { id: string; command: string; executable: string; args: string[] }) => {
+				const outputPath = step.args[step.args.indexOf("--output") !== -1 ? step.args.indexOf("--output") + 1 : step.args.indexOf("--report-path") + 1];
+				if (outputPath) {
+					writeFileSync(
+						outputPath,
+						JSON.stringify({
+							version: "2.1.0",
+							runs: [{ tool: { driver: { name: step.executable } }, results: [] }],
+						})
+					);
+				}
+				return {
+					id: step.id,
+					command: step.command,
+					exitCode: 0,
+					output: "Scan clean",
+				};
+			};
+
+			const result = runSecurityScan(tempDir, "full", {
+				config,
+				head: "1122334455667788",
+				executeStep: fakeExecutor,
+				resolveExecutable: (_cwd, exe) => `C:\\tools\\${exe}.exe`,
+			});
+
+			expect(result.manifest.status).toBe("PASS");
+			expect(result.manifest.coverage).toEqual({ requested: 3, completed: 3, blocked: 0, notRun: 0 });
+			expect(result.manifest.tools.every((t) => t.status === "PASS")).toBe(true);
+			expect(result.mergedSarif).toBeDefined();
+			expect(result.mergedSarifPath).toBeDefined();
+
+			const latest = readLatestSecurityManifest(tempDir);
+			expect(latest.ok).toBe(true);
+			expect(latest.manifest?.status).toBe("PASS");
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("scan with findings produces FAIL manifest with finding counts", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-scan-fail-"));
+			const config: SecurityConfig = {
+				policy: "required",
+				tools: ["semgrep"],
+			};
+
+			const fakeExecutor = (_cwd: string, step: { id: string; command: string; executable: string; args: string[] }) => {
+				const outputPath = step.args[step.args.indexOf("--output") + 1];
+				if (outputPath) {
+					writeFileSync(
+						outputPath,
+						JSON.stringify({
+							version: "2.1.0",
+							runs: [
+								{
+									tool: { driver: { name: "semgrep" } },
+									results: [{ ruleId: "security.leak", message: { text: "finding" } }],
+								},
+							],
+						})
+					);
+				}
+				return {
+					id: step.id,
+					command: step.command,
+					exitCode: 1,
+					output: "1 finding found",
+				};
+			};
+
+			const result = runSecurityScan(tempDir, "full", {
+				config,
+				head: "1122334455667788",
+				executeStep: fakeExecutor,
+				resolveExecutable: () => "C:\\tools\\semgrep.exe",
+			});
+
+			expect(result.manifest.status).toBe("FAIL");
+			expect(result.manifest.tools[0].status).toBe("FAIL");
+			expect(result.manifest.tools[0].findings).toBe(1);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("scan with missing tool under optional policy marks NOT_RUN and does not block", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-scan-opt-"));
+			const config: SecurityConfig = {
+				policy: "optional",
+				tools: ["semgrep"],
+			};
+
+			const result = runSecurityScan(tempDir, "full", {
+				config,
+				head: "1122334455667788",
+				resolveExecutable: () => undefined, // tool absent
+			});
+
+			expect(result.manifest.status).toBe("NOT_RUN");
+			expect(result.manifest.coverage.notRun).toBe(1);
+			expect(result.manifest.tools[0].status).toBe("NOT_RUN");
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("scan with missing tool under required policy marks BLOCKED and blocks aggregate", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-scan-req-"));
+			const config: SecurityConfig = {
+				policy: "required",
+				tools: ["semgrep"],
+			};
+
+			const result = runSecurityScan(tempDir, "full", {
+				config,
+				head: "1122334455667788",
+				resolveExecutable: () => undefined, // tool absent
+			});
+
+			expect(result.manifest.status).toBe("BLOCKED");
+			expect(result.manifest.coverage.blocked).toBe(1);
+			expect(result.manifest.tools[0].status).toBe("BLOCKED");
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("scan timeout marks tool and aggregate as BLOCKED", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-scan-timeout-"));
+			const config: SecurityConfig = {
+				policy: "required",
+				tools: ["semgrep"],
+			};
+
+			const fakeExecutor = (_cwd: string, step: { id: string; command: string }) => ({
+				id: step.id,
+				command: step.command,
+				exitCode: 1,
+				output: "VERIFY_RUNTIME_GATE: ETIMEDOUT execution timed out",
+			});
+
+			const result = runSecurityScan(tempDir, "full", {
+				config,
+				head: "1122334455667788",
+				executeStep: fakeExecutor,
+				resolveExecutable: () => "C:\\tools\\semgrep.exe",
+			});
+
+			expect(result.manifest.status).toBe("BLOCKED");
+			expect(result.manifest.tools[0].status).toBe("BLOCKED");
+			expect(result.manifest.tools[0].reason).toMatch(/timed out|timeout|gate/i);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("redacts secret patterns and limits reason length in gitleaks tool results", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-scan-redact-"));
+			const config: SecurityConfig = {
+				policy: "required",
+				tools: ["gitleaks"],
+			};
+
+			const sensitiveToken = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
+			const fakeExecutor = (_cwd: string, step: { id: string; command: string }) => ({
+				id: step.id,
+				command: step.command,
+				exitCode: 2,
+				output: `Error found secret token: ${sensitiveToken} with some extra details`.repeat(20),
+			});
+
+			const result = runSecurityScan(tempDir, "full", {
+				config,
+				head: "1122334455667788",
+				executeStep: fakeExecutor,
+				resolveExecutable: () => "C:\\tools\\gitleaks.exe",
+			});
+
+			expect(result.manifest.tools[0].status).toBe("BLOCKED");
+			expect(result.manifest.tools[0].reason).toBeDefined();
+			expect(result.manifest.tools[0].reason).not.toContain(sensitiveToken);
+			expect(result.manifest.tools[0].reason!.length).toBeLessThanOrEqual(500);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		});
+
+		test("diff mode passes git range to gitleaks", () => {
+			tempDir = mkdtempSync(join(tmpdir(), "omp-sec-scan-diff-"));
+			const config: SecurityConfig = {
+				policy: "optional",
+				tools: ["gitleaks"],
+			};
+
+			let capturedArgs: string[] = [];
+			const fakeExecutor = (_cwd: string, step: { id: string; command: string; args: string[] }) => {
+				capturedArgs = step.args;
+				return {
+					id: step.id,
+					command: step.command,
+					exitCode: 0,
+					output: "Clean",
+				};
+			};
+
+			runSecurityScan(tempDir, "diff", {
+				config,
+				head: "1122334455667788",
+				baseRef: "HEAD~1",
+				headRef: "HEAD",
+				executeStep: fakeExecutor,
+				resolveExecutable: () => "C:\\tools\\gitleaks.exe",
+			});
+
+			expect(capturedArgs).toContain("--log-opts");
+			expect(capturedArgs).toContain("HEAD~1...HEAD");
+
 			rmSync(tempDir, { recursive: true, force: true });
 		});
 	});

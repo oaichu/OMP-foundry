@@ -1,9 +1,9 @@
-import { existsSync, lstatSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { safeRepoPath } from "./paths";
 import { gitHead } from "./release";
-import { trustedExecutable } from "./verify-runner";
+import { executeVerifyStep, trustedExecutable, type VerifyRow } from "./verify-runner";
 import { gitCall } from "./git-runtime";
 import type { VerifyStep } from "./skills/detector";
 
@@ -1037,5 +1037,674 @@ export function securityReleaseReady(
 		policy: config.policy,
 		status: "PASS",
 		manifest,
+	};
+}
+
+export interface NormalizeToolResultOptions {
+	tool?: SecurityToolId;
+	exitCode?: number;
+	sarif?: string | unknown;
+	sarifPath?: string;
+	outputPath?: string;
+	error?: unknown;
+	timedOut?: boolean;
+	argv?: string[];
+	version?: string;
+	reason?: string;
+	output?: string;
+}
+
+export function normalizeToolResult(options: NormalizeToolResultOptions): SecurityToolResult {
+	const tool: SecurityToolId = options.tool ?? "semgrep";
+	const argv = options.argv ? [...options.argv] : [];
+	const outputPath = options.outputPath ?? options.sarifPath;
+	const version = options.version;
+
+	const sanitizeReason = (text: string): string => {
+		let clean = text.replace(/[\r\n\t]+/g, " ").replace(/[\u0000-\u001f\u007f]/g, "").trim();
+		clean = clean.replace(/([a-zA-Z0-9_-]{32,})/g, "[REDACTED]");
+		return clean.slice(0, 500);
+	};
+
+	let rawReason = options.reason;
+	if (!rawReason && options.error) {
+		rawReason = options.error instanceof Error ? options.error.message : String(options.error);
+	} else if (!rawReason && options.timedOut) {
+		rawReason = "Tool execution timed out";
+	} else if (!rawReason && options.output && options.exitCode !== 0 && options.exitCode !== 1) {
+		rawReason = options.output;
+	}
+
+	if (options.timedOut) {
+		return {
+			tool,
+			status: "BLOCKED",
+			exitCode: options.exitCode,
+			version,
+			argv,
+			outputPath,
+			reason: sanitizeReason(rawReason ?? "Tool execution timed out"),
+		};
+	}
+
+	if (options.error) {
+		return {
+			tool,
+			status: "BLOCKED",
+			exitCode: options.exitCode,
+			version,
+			argv,
+			outputPath,
+			reason: sanitizeReason(rawReason ?? String(options.error)),
+		};
+	}
+
+	if (options.sarif !== undefined) {
+		let parsedSarif: Record<string, unknown> | undefined;
+		if (typeof options.sarif === "string") {
+			const trimmed = options.sarif.trim();
+			if (!trimmed) {
+				return {
+					tool,
+					status: "BLOCKED",
+					exitCode: options.exitCode,
+					version,
+					argv,
+					outputPath,
+					reason: sanitizeReason(rawReason ?? (options.exitCode === 1 ? "Tool exited with code 1 and empty SARIF output" : "Empty SARIF output")),
+				};
+			}
+			try {
+				const val = JSON.parse(trimmed);
+				if (val && typeof val === "object" && !Array.isArray(val)) {
+					parsedSarif = val as Record<string, unknown>;
+				}
+			} catch {
+				return {
+					tool,
+					status: "BLOCKED",
+					exitCode: options.exitCode,
+					version,
+					argv,
+					outputPath,
+					reason: sanitizeReason(rawReason ?? "Malformed or unparseable SARIF JSON"),
+				};
+			}
+		} else if (options.sarif && typeof options.sarif === "object" && !Array.isArray(options.sarif)) {
+			parsedSarif = options.sarif as Record<string, unknown>;
+		}
+
+		if (!parsedSarif || !Array.isArray(parsedSarif.runs)) {
+			return {
+				tool,
+				status: "BLOCKED",
+				exitCode: options.exitCode,
+				version,
+				argv,
+				outputPath,
+				reason: sanitizeReason(rawReason ?? "Invalid SARIF structure (missing runs array)"),
+			};
+		}
+
+		let findingsCount = 0;
+		for (const run of parsedSarif.runs) {
+			if (run && typeof run === "object" && Array.isArray((run as Record<string, unknown>).results)) {
+				findingsCount += ((run as Record<string, unknown>).results as unknown[]).length;
+			}
+		}
+
+		if (options.exitCode === 0) {
+			if (findingsCount === 0) {
+				return {
+					tool,
+					status: "PASS",
+					exitCode: 0,
+					version,
+					argv,
+					outputPath,
+					findings: 0,
+				};
+			}
+			return {
+				tool,
+				status: "FAIL",
+				exitCode: 0,
+				version,
+				argv,
+				outputPath,
+				findings: findingsCount,
+				reason: sanitizeReason(rawReason ?? `Security scan found ${findingsCount} finding(s)`),
+			};
+		}
+
+		if (options.exitCode === 1) {
+			if (findingsCount > 0) {
+				return {
+					tool,
+					status: "FAIL",
+					exitCode: 1,
+					version,
+					argv,
+					outputPath,
+					findings: findingsCount,
+					reason: sanitizeReason(rawReason ?? `Security scan found ${findingsCount} finding(s)`),
+				};
+			}
+			return {
+				tool,
+				status: "BLOCKED",
+				exitCode: 1,
+				version,
+				argv,
+				outputPath,
+				reason: sanitizeReason(rawReason ?? "Tool exited with code 1 without findings in SARIF"),
+			};
+		}
+
+		return {
+			tool,
+			status: "BLOCKED",
+			exitCode: options.exitCode,
+			version,
+			argv,
+			outputPath,
+			reason: sanitizeReason(rawReason ?? `Tool exited with unexpected code ${options.exitCode}`),
+		};
+	}
+
+	if (options.exitCode === 0) {
+		return {
+			tool,
+			status: "PASS",
+			exitCode: 0,
+			version,
+			argv,
+			outputPath,
+		};
+	}
+
+	return {
+		tool,
+		status: "BLOCKED",
+		exitCode: options.exitCode,
+		version,
+		argv,
+		outputPath,
+		reason: sanitizeReason(rawReason ?? `Tool exited with code ${options.exitCode ?? "unknown"}`),
+	};
+}
+
+interface SarifLocation {
+	physicalLocation?: {
+		artifactLocation?: { uri?: string };
+		region?: { startLine?: number; startColumn?: number };
+	};
+}
+
+interface SarifResult {
+	ruleId?: string;
+	message?: { text?: string };
+	locations?: SarifLocation[];
+	[key: string]: unknown;
+}
+
+interface SarifDriver {
+	name: string;
+	version?: string;
+	rules?: unknown[];
+	[key: string]: unknown;
+}
+
+interface SarifRun {
+	tool?: {
+		driver?: SarifDriver;
+		[key: string]: unknown;
+	};
+	results?: SarifResult[];
+	[key: string]: unknown;
+}
+
+export function mergeSarifResults(
+	inputs: Array<string | Record<string, unknown> | { tool?: string; sarif?: unknown } | undefined | null>
+): Record<string, unknown> {
+	const runs: SarifRun[] = [];
+
+	for (const input of inputs) {
+		if (input === null || input === undefined) continue;
+
+		let obj: unknown = input;
+		if (typeof input === "object" && input !== null && "sarif" in input) {
+			obj = (input as { sarif: unknown }).sarif;
+		}
+
+		if (typeof obj === "string") {
+			const trimmed = obj.trim();
+			if (!trimmed) continue;
+			try {
+				obj = JSON.parse(trimmed);
+			} catch {
+				continue;
+			}
+		}
+
+		if (!obj || typeof obj !== "object" || Array.isArray(obj)) continue;
+
+		const log = obj as Record<string, unknown>;
+		if (!Array.isArray(log.runs)) continue;
+
+		for (const rawRun of log.runs) {
+			if (!rawRun || typeof rawRun !== "object" || Array.isArray(rawRun)) continue;
+			const run = JSON.parse(JSON.stringify(rawRun)) as SarifRun;
+
+			if (!run.tool || typeof run.tool !== "object") {
+				run.tool = { driver: { name: "unknown" } };
+			} else if (!run.tool.driver || typeof run.tool.driver !== "object") {
+				run.tool.driver = { name: "unknown" };
+			}
+
+			if (Array.isArray(run.results)) {
+				run.results.sort((a, b) => {
+					const ruleA = String(a.ruleId ?? "");
+					const ruleB = String(b.ruleId ?? "");
+					if (ruleA !== ruleB) return ruleA.localeCompare(ruleB);
+
+					const locA = a.locations?.[0]?.physicalLocation;
+					const locB = b.locations?.[0]?.physicalLocation;
+					const uriA = String(locA?.artifactLocation?.uri ?? "");
+					const uriB = String(locB?.artifactLocation?.uri ?? "");
+					if (uriA !== uriB) return uriA.localeCompare(uriB);
+
+					const lineA = typeof locA?.region?.startLine === "number" ? locA.region.startLine : 0;
+					const lineB = typeof locB?.region?.startLine === "number" ? locB.region.startLine : 0;
+					if (lineA !== lineB) return lineA - lineB;
+
+					const colA = typeof locA?.region?.startColumn === "number" ? locA.region.startColumn : 0;
+					const colB = typeof locB?.region?.startColumn === "number" ? locB.region.startColumn : 0;
+					if (colA !== colB) return colA - colB;
+
+					const msgA = String(a.message?.text ?? "");
+					const msgB = String(b.message?.text ?? "");
+					if (msgA !== msgB) return msgA.localeCompare(msgB);
+
+					return JSON.stringify(a).localeCompare(JSON.stringify(b));
+				});
+			}
+
+			runs.push(run);
+		}
+	}
+
+	runs.sort((a, b) => {
+		const nameA = String(a.tool?.driver?.name ?? "");
+		const nameB = String(b.tool?.driver?.name ?? "");
+		if (nameA !== nameB) return nameA.localeCompare(nameB);
+
+		const verA = String(a.tool?.driver?.version ?? "");
+		const verB = String(b.tool?.driver?.version ?? "");
+		return verA.localeCompare(verB);
+	});
+
+	return {
+		$schema: "https://json.schemastore.org/sarif-2.1.0.json",
+		version: "2.1.0",
+		runs,
+	};
+}
+
+export function writeSecurityRunManifest(
+	cwd: string,
+	manifest: SecurityRunManifest
+): { ok: boolean; manifestPath?: string; latestPath?: string; error?: string } {
+	const validation = validateSecurityRunManifest(manifest);
+	if (!validation.valid || !validation.manifest) {
+		return { ok: false, error: `Manifest validation failed: ${validation.reason}` };
+	}
+
+	if (!/^[a-zA-Z0-9_-]{1,64}$/.test(manifest.runId)) {
+		return { ok: false, error: `Invalid runId: '${manifest.runId}'` };
+	}
+
+	const runDirRel = safeRepoPath(cwd, join(".omp", "security", "runs", manifest.runId));
+	const manifestRel = safeRepoPath(cwd, join(".omp", "security", "runs", manifest.runId, "manifest.json"));
+	const latestRel = safeRepoPath(cwd, join(".omp", "security", "latest.json"));
+
+	if (!runDirRel || !manifestRel || !latestRel) {
+		return { ok: false, error: "Security manifest paths escape repository or cross symlinks" };
+	}
+
+	const runDirAbs = resolve(cwd, runDirRel);
+	const manifestAbs = resolve(cwd, manifestRel);
+	const latestAbs = resolve(cwd, latestRel);
+	const securityDirAbs = resolve(cwd, ".omp", "security");
+
+	try {
+		mkdirSync(securityDirAbs, { recursive: true });
+		mkdirSync(runDirAbs, { recursive: true });
+
+		const secStat = lstatSync(securityDirAbs);
+		if (secStat.isSymbolicLink() || !secStat.isDirectory()) {
+			return { ok: false, error: "Security directory is not a regular directory or is a symlink" };
+		}
+		const runStat = lstatSync(runDirAbs);
+		if (runStat.isSymbolicLink() || !runStat.isDirectory()) {
+			return { ok: false, error: "Run directory is not a regular directory or is a symlink" };
+		}
+
+		const serialized = JSON.stringify(manifest, null, 2) + "\n";
+		if (Buffer.byteLength(serialized, "utf8") > MAX_CONFIG_BYTES) {
+			return { ok: false, error: `Manifest size exceeds ${MAX_CONFIG_BYTES} bytes` };
+		}
+
+		const tmpManifest = join(runDirAbs, `manifest.json.tmp.${randomUUID()}`);
+		writeFileSync(tmpManifest, serialized, "utf8");
+		renameSync(tmpManifest, manifestAbs);
+
+		const tmpLatest = join(securityDirAbs, `latest.json.tmp.${randomUUID()}`);
+		writeFileSync(tmpLatest, serialized, "utf8");
+		renameSync(tmpLatest, latestAbs);
+
+		return {
+			ok: true,
+			manifestPath: manifestAbs,
+			latestPath: latestAbs,
+		};
+	} catch (error) {
+		return {
+			ok: false,
+			error: `Failed to write security run manifest: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
+export function readSecurityRunManifest(
+	cwd: string,
+	runId: string
+): { ok: boolean; manifest?: SecurityRunManifest; error?: string } {
+	if (!runId || !/^[a-zA-Z0-9_-]{1,64}$/.test(runId)) {
+		return { ok: false, error: `Invalid runId: '${runId}'` };
+	}
+
+	const relPath = safeRepoPath(cwd, join(".omp", "security", "runs", runId, "manifest.json"));
+	if (!relPath) {
+		return { ok: false, error: "Manifest path escapes repository or crosses symlink" };
+	}
+
+	const absPath = resolve(cwd, relPath);
+	if (!existsSync(absPath)) {
+		return { ok: false, error: `Manifest file does not exist for runId '${runId}'` };
+	}
+
+	try {
+		const stat = lstatSync(absPath);
+		if (stat.isSymbolicLink() || !stat.isFile()) {
+			return { ok: false, error: "Manifest file is not a regular file or is a symlink" };
+		}
+		if (stat.size > MAX_CONFIG_BYTES) {
+			return { ok: false, error: `Manifest file exceeds ${MAX_CONFIG_BYTES} bytes` };
+		}
+
+		const content = readFileSync(absPath, "utf8");
+		const parsed = JSON.parse(content);
+		const validation = validateSecurityRunManifest(parsed);
+		if (!validation.valid || !validation.manifest) {
+			return { ok: false, error: `Manifest validation failed: ${validation.reason}` };
+		}
+
+		return { ok: true, manifest: validation.manifest };
+	} catch (error) {
+		return {
+			ok: false,
+			error: `Failed to read security manifest: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
+export function readLatestSecurityManifest(
+	cwd: string
+): { ok: boolean; manifest?: SecurityRunManifest; error?: string } {
+	const relPath = safeRepoPath(cwd, join(".omp", "security", "latest.json"));
+	if (!relPath) {
+		return { ok: false, error: "Latest manifest path escapes repository or crosses symlink" };
+	}
+
+	const absPath = resolve(cwd, relPath);
+	if (!existsSync(absPath)) {
+		return { ok: false, error: "Latest manifest file does not exist" };
+	}
+
+	try {
+		const stat = lstatSync(absPath);
+		if (stat.isSymbolicLink() || !stat.isFile()) {
+			return { ok: false, error: "Latest manifest file is not a regular file or is a symlink" };
+		}
+		if (stat.size > MAX_CONFIG_BYTES) {
+			return { ok: false, error: `Latest manifest file exceeds ${MAX_CONFIG_BYTES} bytes` };
+		}
+
+		const content = readFileSync(absPath, "utf8");
+		const parsed = JSON.parse(content);
+		const validation = validateSecurityRunManifest(parsed);
+		if (!validation.valid || !validation.manifest) {
+			return { ok: false, error: `Latest manifest validation failed: ${validation.reason}` };
+		}
+
+		return { ok: true, manifest: validation.manifest };
+	} catch (error) {
+		return {
+			ok: false,
+			error: `Failed to read latest security manifest: ${error instanceof Error ? error.message : String(error)}`,
+		};
+	}
+}
+
+export interface RunSecurityScanOptions {
+	config?: SecurityConfig;
+	runId?: string;
+	runDir?: string;
+	baseRef?: string;
+	headRef?: string;
+	head?: string;
+	executeStep?: (cwd: string, step: VerifyStep, timeout?: number) => VerifyRow;
+	resolveExecutable?: (cwd: string, executable: string) => string | undefined;
+}
+
+export interface SecurityRunResult {
+	manifest: SecurityRunManifest;
+	manifestPath?: string;
+	latestPath?: string;
+	mergedSarif?: Record<string, unknown>;
+	mergedSarifPath?: string;
+	error?: string;
+}
+
+export function runSecurityScan(
+	cwd: string,
+	mode: Exclude<SecurityMode, "status">,
+	options?: RunSecurityScanOptions
+): SecurityRunResult {
+	const startedAt = new Date().toISOString();
+	const head = (options?.head ?? gitHead(cwd)).trim() || "0000000000000000000000000000000000000000";
+
+	let config = options?.config;
+	if (!config) {
+		const ymlRel = safeRepoPath(cwd, ".omp/config.yml");
+		const yamlRel = safeRepoPath(cwd, ".omp/config.yaml");
+
+		const ymlExists = existsSync(resolve(cwd, ".omp", "config.yml"));
+		const yamlExists = existsSync(resolve(cwd, ".omp", "config.yaml"));
+
+		if (ymlExists || yamlExists) {
+			const activePath = ymlExists ? ymlRel : yamlRel;
+			if (activePath) {
+				try {
+					const stat = lstatSync(activePath);
+					if (!stat.isSymbolicLink() && stat.isFile() && stat.size <= MAX_CONFIG_BYTES) {
+						const text = readFileSync(activePath, "utf8");
+						config = parseSecurityConfig(text);
+					}
+				} catch {
+					config = { policy: "optional", tools: [...DEFAULT_SECURITY_TOOLS], error: "Failed to read config file" };
+				}
+			}
+		}
+		if (!config) {
+			config = parseSecurityConfig("");
+		}
+	}
+
+	const plan = planSecurityTools(cwd, mode, config, options?.runDir, {
+		baseRef: options?.baseRef,
+		headRef: options?.headRef,
+		runId: options?.runId,
+		resolveExecutable: options?.resolveExecutable,
+	});
+
+	const runId = plan.runId;
+	const runDir = plan.runDir;
+
+	try {
+		mkdirSync(runDir, { recursive: true });
+	} catch {
+		// best effort
+	}
+
+	const stepExecutor = options?.executeStep ?? executeVerifyStep;
+	const toolResults: SecurityToolResult[] = [];
+	const collectedSarifs: Array<{ tool: string; sarif: unknown }> = [];
+
+	for (const stepEntry of plan.steps) {
+		if (stepEntry.status === "BLOCKED") {
+			toolResults.push({
+				tool: stepEntry.tool,
+				status: "BLOCKED",
+				argv: stepEntry.step ? [stepEntry.step.executable, ...stepEntry.step.args] : [],
+				outputPath: stepEntry.outputPath ? relative(cwd, stepEntry.outputPath).replace(/\\/g, "/") : undefined,
+				reason: stepEntry.reason ?? "Tool planning was blocked",
+			});
+			continue;
+		}
+
+		if (stepEntry.status === "NOT_RUN") {
+			toolResults.push({
+				tool: stepEntry.tool,
+				status: "NOT_RUN",
+				argv: stepEntry.step ? [stepEntry.step.executable, ...stepEntry.step.args] : [],
+				outputPath: stepEntry.outputPath ? relative(cwd, stepEntry.outputPath).replace(/\\/g, "/") : undefined,
+				reason: stepEntry.reason ?? "Tool execution skipped",
+			});
+			continue;
+		}
+
+		if (stepEntry.status === "PLANNED" && stepEntry.step) {
+			let verifyRow: VerifyRow;
+			try {
+				verifyRow = stepExecutor(cwd, stepEntry.step, config.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+			} catch (err) {
+				verifyRow = {
+					id: stepEntry.step.id,
+					command: stepEntry.step.command,
+					exitCode: 1,
+					output: `VERIFY_RUNTIME_GATE: ${err instanceof Error ? err.message : String(err)}`,
+				};
+			}
+
+			let sarifContent: string | undefined;
+			if (stepEntry.outputPath && existsSync(stepEntry.outputPath)) {
+				try {
+					const stat = lstatSync(stepEntry.outputPath);
+					if (!stat.isSymbolicLink() && stat.isFile() && stat.size <= 10 * 1024 * 1024) {
+						sarifContent = readFileSync(stepEntry.outputPath, "utf8");
+					}
+				} catch {
+					// output not readable
+				}
+			}
+
+			const timedOut = verifyRow.output.includes("ETIMEDOUT") || verifyRow.output.includes("timed out");
+			const isGateError = verifyRow.exitCode !== 0 && !sarifContent;
+
+			const normResult = normalizeToolResult({
+				tool: stepEntry.tool,
+				exitCode: verifyRow.exitCode,
+				sarif: sarifContent,
+				outputPath: stepEntry.outputPath ? relative(cwd, stepEntry.outputPath).replace(/\\/g, "/") : undefined,
+				argv: [stepEntry.step.executable, ...stepEntry.step.args],
+				timedOut,
+				output: verifyRow.output,
+				error: isGateError ? verifyRow.output : undefined,
+			});
+
+			toolResults.push(normResult);
+
+			if (sarifContent && (normResult.status === "PASS" || normResult.status === "FAIL")) {
+				collectedSarifs.push({ tool: stepEntry.tool, sarif: sarifContent });
+			}
+		}
+	}
+
+	const mergedSarif = mergeSarifResults(collectedSarifs);
+	const mergedSarifRel = join(".omp", "security", "runs", runId, "merged.sarif").replace(/\\/g, "/");
+	const mergedSarifPath = resolve(cwd, mergedSarifRel);
+
+	try {
+		writeFileSync(mergedSarifPath, JSON.stringify(mergedSarif, null, 2) + "\n", "utf8");
+	} catch {
+		// best effort writing merged SARIF
+	}
+
+	let completed = 0;
+	let blocked = 0;
+	let notRun = 0;
+	for (const t of toolResults) {
+		if (t.status === "PASS" || t.status === "FAIL") completed++;
+		else if (t.status === "BLOCKED") blocked++;
+		else if (t.status === "NOT_RUN") notRun++;
+	}
+	const requested = toolResults.length;
+
+	let aggregateStatus: SecurityResultStatus;
+	if (toolResults.some((t) => t.status === "FAIL")) {
+		aggregateStatus = "FAIL";
+	} else if (toolResults.some((t) => t.status === "BLOCKED")) {
+		aggregateStatus = "BLOCKED";
+	} else if (toolResults.some((t) => t.status === "NOT_RUN")) {
+		if (config.policy === "required") {
+			aggregateStatus = "BLOCKED";
+		} else {
+			aggregateStatus = "NOT_RUN";
+		}
+	} else {
+		aggregateStatus = "PASS";
+	}
+
+	const completedAt = new Date().toISOString();
+
+	const manifest: SecurityRunManifest = {
+		runId,
+		mode,
+		policy: config.policy,
+		head,
+		startedAt,
+		completedAt,
+		tools: toolResults,
+		coverage: {
+			requested,
+			completed,
+			blocked,
+			notRun,
+		},
+		status: aggregateStatus,
+		mergedSarifPath: mergedSarifRel,
+	};
+
+	const writeResult = writeSecurityRunManifest(cwd, manifest);
+
+	return {
+		manifest,
+		manifestPath: writeResult.manifestPath,
+		latestPath: writeResult.latestPath,
+		mergedSarif,
+		mergedSarifPath,
+		error: writeResult.ok ? undefined : writeResult.error,
 	};
 }
