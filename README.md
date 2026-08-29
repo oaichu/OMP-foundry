@@ -12,7 +12,7 @@
   <a href="https://github.com/oaichu/OMP-foundry/releases/latest"><img alt="Release" src="https://img.shields.io/badge/version-v0.8.23-FFB020?style=for-the-badge&logo=git&logoColor=white"/></a>
   <a href="https://github.com/can1357/oh-my-pi"><img alt="Platform" src="https://img.shields.io/badge/platform-Oh%20My%20Pi%20%7C%20Antigravity-FF9F1C?style=for-the-badge&logo=electron&logoColor=white"/></a>
   <a href="https://github.com/oaichu/OMP-foundry/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/badge/CI-passing-7EC8A9?style=for-the-badge&logo=githubactions&logoColor=white"/></a>
-  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-128%20passing-7EC8A9?style=for-the-badge&logo=checkmarx&logoColor=white"/></a>
+  <a href="#"><img alt="Tests" src="https://img.shields.io/badge/tests-275%20passing-7EC8A9?style=for-the-badge&logo=checkmarx&logoColor=white"/></a>
   <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-14110E?style=for-the-badge"/></a>
   <a href="https://ko-fi.com/oaichu"><img alt="Support" src="https://img.shields.io/badge/Support-Buy%20Me%20A%20Coffee-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white"/></a>
 </p>
@@ -61,6 +61,7 @@ Version `0.8.23` ships the production **P0 Governance & Distribution Layer**:
 - [💎 Core Architectural Superpowers](#-core-architectural-superpowers)
 - [🔄 The 6-Phase Governed Lifecycle](#-the-6-phase-governed-lifecycle)
 - [🛡️ Security & Hard Execution Boundaries](#️-security--hard-execution-boundaries)
+  - [🔒 Governed Security Engine & Sidecars](#-governed-security-engine--sidecars)
 - [🚀 30-Second Quickstart](#-30-second-quickstart)
 - [🧠 Model & Context Strategy](#-model--context-strategy)
 - [⌨️ Complete Command Reference](#️-complete-command-reference)
@@ -171,6 +172,64 @@ Foundry enforces **fail-closed runtime boundaries**:
 - **Evidence vs. OS Hardening**: SHA-256 hashes prove byte integrity against agent drift; processes bypassing the extension can still modify files.
 - **Automated Scope**: `/debug` outputs the disciplined 5-step systematic isolation protocol; `/approve` handles Product and Plan gates (`/design approve` handles Design).
 
+### 🔒 Governed Security Engine & Sidecars
+
+Foundry integrates an enterprise-grade, deterministic security scanning and review engine that combines native control-plane skills with hardened sidecar execution:
+
+#### 🔄 6-Stage Governed Security Pipeline
+
+```text
+┌─────────────┐     ┌──────────────┐     ┌────────────────┐     ┌─────────────────────┐     ┌──────────────┐     ┌──────────────┐
+│  1. Context │ ──▶ │   2. Scan    │ ──▶ │   3. Review    │ ──▶ │ 4. Finding Verif.   │ ──▶ │  5. Triage   │ ──▶ │ 6. Rel. Gate │
+└─────────────┘     └──────────────┘     └────────────────┘     └─────────────────────┘     └──────────────┘     └──────────────┘
+```
+
+1. **Context-First Orientation**: Understand system architecture, trust boundaries, sensitive assets, and threat model before reviewing code diffs or running tools.
+2. **Deterministic Scan Execution**: The parent extension executes `/security` runner sidecars in an isolated environment with fixed-argv arrays, suppressing shell intermediaries and capturing structured SARIF evidence.
+3. **Three-Pass Differential Review**: The `security-review` role executes differential attack analysis, insecure-default detection, and static-pattern inspection with exact source-to-sink reachability tracking.
+4. **Finding Verification & Proof Thresholds**: The `security-finding-verification` protocol classifies candidate issues strictly based on technical proof: `TRUE_POSITIVE` (proven exploitability/reachability), `FALSE_POSITIVE` (proven mitigation/unreachability), or `NEEDS-MORE-INFO` (unresolved proof).
+5. **Unambiguous Triage Disposition**: Triage strictly enforces 1:1 disposition mappings: `TRUE_POSITIVE` → `ACCEPT` (requires remediation; governance risk acceptance does not dismiss findings), `FALSE_POSITIVE` → `DISMISS` (requires code refutation), and unresolved → `NEEDS-MORE-INFO`.
+6. **Deterministic Release Gate**: `/release-check` verifies security policy compliance, git HEAD commit binding, uncompromised tool coverage, and clean SARIF status before permitting human deployment.
+
+#### ⚙️ `/security` CLI Modes & Semantics
+
+| Command / Mode | Purpose & Execution Contract |
+| :--- | :--- |
+| **`/security` · `/security status`** | Read-only health check. Displays configuration policy, tool PATH availability, and latest scan manifest (`.omp/security/latest.json`). Runs zero subprocesses and mutates no state. |
+| **`/security diff`** | Differential scan. Passes bounded git revision range (`HEAD~1...HEAD` with `--log-opts`) to secret scanners (Gitleaks) and evaluates scoped diffs. |
+| **`/security full`** | Complete repository scan across all configured tools (Semgrep, Gitleaks, Trivy). Produces atomic run manifests and aggregated SARIF outputs under `.omp/security/runs/<run-id>/`. |
+| **`/security codeql`** | Semantic deep analysis via CodeQL. Executes only when project meets OSI license eligibility and has configured database/suite paths. |
+
+#### 🛡️ Security Policies & Freshness Contract
+
+Security policies are configured in `.omp/config.yml` under the `security:` block:
+
+- **`policy: optional`** (default): Runs scans on demand. Scanner outcomes and missing tools are reported informatively (`NOT_REQUIRED` / `NOT_RUN`) without blocking `/release-check`.
+- **`policy: release-required`**: Security scans are mandatory for release. `/release-check` fails closed (`BLOCKED`) if `.omp/security/latest.json` is missing, malformed, failing, unrun, or stale (head commit SHA does not match current git HEAD).
+- **`policy: required`**: Hard gate. Scanners must be available on PATH and execute with `PASS` status. Any missing tool, parse error, or tool error immediately marks the scan as `BLOCKED`.
+- **Freshness & Integrity Binding**: Every scan manifest records `runId`, `head` (commit SHA), timestamp interval, exact tool `argv`, finding counts, and aggregate `coverage`. Manifests are stored under `.omp/security/` (narrowed in gitignore). Stale manifests or tampered files fail closed.
+
+#### 🔒 Fixed-Argv, No-Autofix & No-Shell Guarantees
+
+- **No Shell Intermediaries**: All security tools execute via fixed string argument arrays (`VerifyStep`) directly via the Node/Bun runtime. Shell invocation (`sh -c`, `cmd.exe`), variable expansion, and string interpolation are strictly prohibited.
+- **Diagnostic-Only (No Autofix)**: Tools run with inspection flags only (e.g. `--sarif`, `--report-format sarif`). Auto-fixing flags (`--fix`, `--autofix`) are forbidden; code modifications remain strictly sandboxed to parent-owned AATP patch workflows.
+- **Execution Sandboxing**: Scans run in a credential-sanitized environment with isolated `HOME` and `TMP` paths, preventing environment variable leakage or secret cross-contamination.
+
+#### 🔍 Scanner Ecosystem, Boundaries & Caveats
+
+| Tool | Engine & Scope | Execution Contract & Governance Boundaries |
+| :--- | :--- | :--- |
+| **Semgrep OSS** (`semgrep`) | Intra-file AST pattern matching & lightweight semantic rules. | Uses explicit, approved configs (default: `p/security-audit`). Strict `--metrics=off` telemetry suppression. `auto` and `p/auto` configs are forbidden. Does not perform inter-procedural data-flow or pointer analysis across file boundaries. |
+| **Gitleaks** (`gitleaks`) | Regex & Shannon entropy secret/credential detection. | Executes with mandatory `--redact` flag and SARIF reporting. Diff mode uses `--log-opts <base>...<head>`. **Maintenance caveat**: Gitleaks is in upstream feature-complete maintenance mode; may flag test fixtures or miss dynamic/split-token credential reconstruction. |
+| **Trivy** (`trivy`) | Lockfile SBOM dependency vulnerabilities & config flaws. | Runs `fs --scanners vuln,misconfig,secret --format sarif .`. Analysis coverage depends on local vulnerability database currency and lockfile synchronization. |
+| **CodeQL** (`codeql`) | Whole-program semantic data-flow & AST query analysis. | **OSI License Gate**: Requires an OSI-approved SPDX license in `package.json` or root `LICENSE` file. The *public-is-not-enough rule* strictly blocks proprietary or unlicensed projects. Requires valid extracted database directory and query suite file within safe repository paths; supports flexible build modes (`none`, `autobuild`, manual) depending on target language. |
+
+#### 🏛️ Sidecar Boundaries & No-Vendoring Policy
+
+- **Sidecar Execution Isolation**: All external security scanners run exclusively as host/sidecar binaries managed by the parent extension. Upstream tool binaries, third-party skill packs, or prompt corpora are **never vendored into the repository or treated as runtime dependencies**.
+- **Read-Only Subagents**: Governed subagents (`reviewer`, `security-reviewer`, `qa`) operate shell-free and read-only. They adjudicate structured SARIF evidence, trace reachability in code, and evaluate findings without running scanner commands or modifying state.
+- **Explicit Non-Pass States**: Foundry never masks tool failures as clean scans. Unrun tools are reported as `NOT_RUN`, tool crashes or invalid configs as `BLOCKED` / `TOOL_ERROR`, and partial scans as `PARTIAL_COVERAGE`. We never claim Codex Security equivalence or clean results when tools are missing.
+
 ---
 
 ## 🚀 30-Second Quickstart
@@ -267,6 +326,15 @@ Foundry incorporates a native, multi-layered frontend and design engineering sta
   $$\text{Foundry governance / scope} > \text{functional correctness / security} > \text{accessibility / semantic interaction} > \text{framework / component contracts} > \text{web interface quality} > \text{visual art direction}$$
   A skill cannot override locked artifacts (`MASTER_PLAN.md`, `DESIGN.md`), AATP task scope boundaries, security policies, or component contracts.
 
+
+#### 🔒 Governed Security & Verification Skill Stack
+
+Foundry provides a comprehensive, 4-skill native security control plane:
+
+- **`security-review`** (Layer L1): Core 3-pass differential security review inspecting attack surfaces, insecure defaults, and static patterns. Active across planning and review phases.
+- **`security-finding-verification`** (Layer L2): Threat-model reachability, data-flow validation, and strict classification into `TRUE_POSITIVE`, `FALSE_POSITIVE`, or `NEEDS-MORE-INFO`.
+- **`security-supply-chain`** (Layer L2): Static dependency advisory matching (CVE/GHSA/OSV), lockfile integrity checks, publisher/install risk evaluation, and unassessable component tracking.
+- **`security-scanners`** (Layer L2): Adjudicates fixed-argv scanner evidence, SARIF reports, and non-pass exit states (`UNASSESSED`, `PARTIAL_COVERAGE`, `TOOL_ERROR`).
 ---
 
 ## ⌨️ Complete Command Reference
@@ -287,6 +355,7 @@ Foundry incorporates a native, multi-layered frontend and design engineering sta
 | **`/build`** | **Execution** | Dispatches ready, isolated workers to implement active tickets. |
 | **`/review [AATP-ID]`** | **Quality** | Triggers an independent reviewer agent to verify code against tickets. |
 | **`/verify`** | **Quality** | Runs deterministic test and QA scripts in a sanitized environment. |
+| **`/security [status\|diff\|full\|codeql]`** | **Security** | Deterministic security scanner: checks tool health, diffs, full repo, or CodeQL. |
 | **`/release-check`** | **Release** | Computes cryptographic provenance and derives deployment readiness. |
 | **`/debug`** | **Superpowers** | Executes the systematic 5-Step root-cause isolation protocol. |
 
@@ -302,13 +371,14 @@ Foundry incorporates a native, multi-layered frontend and design engineering sta
 | :--- | :--- | :--- |
 | **Human Authority** | `CEO Supreme Gate` | Natural language unblock, intent parsing, instant phase overrides |
 | **Triad Consensus** | [`src/plan.ts`](file:///home/oaichu/OMP-foundry/src/plan.ts) | 3-stage consensus (Draft, Redteam, Synth) locking `MASTER_PLAN.md` |
-| **Foundry Kernel** | [`src/index.ts`](file:///home/oaichu/OMP-foundry/src/index.ts) | 15 Governed CLI commands, state machine guards & model router |
+| **Foundry Kernel** | [`src/index.ts`](file:///home/oaichu/OMP-foundry/src/index.ts) | 16 Governed CLI commands, state machine guards & model router |
 | **AATP Engine** | [`src/aatp.ts`](file:///home/oaichu/OMP-foundry/src/aatp.ts) | Atomic Architecture Task Protocol, dependency DAG & ≤3 file limit |
 | **Patch Gate** | [`src/patch-gate.ts`](file:///home/oaichu/OMP-foundry/src/patch-gate.ts) | Unified diff parser, hard ≤80 line cap & zero scope-drift gate |
 | **Permission Firewall**| [`src/permissions.ts`](file:///home/oaichu/OMP-foundry/src/permissions.ts) | Path canonicalization, out-of-bounds mutation blocker |
 | **Verify Runner** | [`src/verify-runner.ts`](file:///home/oaichu/OMP-foundry/src/verify-runner.ts) | Disposable QA test sandbox & linter execution |
 | **Git Runtime** | [`src/git-runtime.ts`](file:///home/oaichu/OMP-foundry/src/git-runtime.ts) | Hardened git sandbox, provenance ledger & atomic commits |
 | **JIT Skills** | [`src/skills/`](file:///home/oaichu/OMP-foundry/src/skills) | On-demand stack detector (Node/Rust/Python) & skill packs |
+| **Security Runner** | [`src/security-runner.ts`](file:///home/oaichu/OMP-foundry/src/security-runner.ts) | Governed security runner, tool planner, SARIF aggregator & policy gate |
 
 ---
 
@@ -324,7 +394,7 @@ OMP Foundry is backed by an exhaustive, green-field integration test suite ensur
 # Install dependencies
 bun install
 
-# Run the complete test suite (128 passing tests across 18 suites)
+# Run the complete test suite (275 passing tests across 27 suites)
 bun test
 
 # Run strict TypeScript typechecking

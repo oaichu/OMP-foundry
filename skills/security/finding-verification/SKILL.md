@@ -1,6 +1,6 @@
 ---
 id: security-finding-verification
-version: 1
+version: 2
 layer: L2
 domain: security, triage
 phases: review, qa

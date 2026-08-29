@@ -1,6 +1,6 @@
 ---
 id: security-scanners
-version: 1
+version: 2
 layer: L2
 domain: security, tooling
 phases: review, qa

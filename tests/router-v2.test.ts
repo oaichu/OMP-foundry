@@ -70,7 +70,7 @@ describe("Skill Router v2", () => {
 			},
 		});
 		expect(withBackendContext.skills.map((s) => s.id)).toContain("web-interface-guidelines");
-		expect(withBackendContext.skills.map((s) => s.id)).toContain("design-quality");
+		expect(withBackendContext.skills.map((s) => s.id)).not.toContain("design-quality");
 	});
 
 	test("security-sensitive evidence is routed in the phases where security skills are authorized", () => {

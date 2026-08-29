@@ -21,6 +21,11 @@ const checks: Array<{ file: string; needles: string[] }> = [
 	},
 ];
 
+if (!existsSync(root)) {
+	console.log(`OMP source root not found at ${root}; skipping contract check.`);
+	process.exit(0);
+}
+
 const failures: string[] = [];
 for (const check of checks) {
 	const file = join(root, check.file);

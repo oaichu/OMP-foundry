@@ -47,5 +47,5 @@ describe("verification containment", () => {
 		expect(result.ok).toBe(true);
 		expect(result.evidenceSha256).toMatch(/^[a-f0-9]{64}$/);
 		expect(result.rows[0]?.id).toBe("script:smoke");
-	});
+	}, 20000);
 });

@@ -1,6 +1,6 @@
 ---
 id: web-interface-guidelines
-version: 1
+version: 2
 layer: L1
 domain: web, accessibility, ux
 phases: review, qa

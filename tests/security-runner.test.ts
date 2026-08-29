@@ -1,15 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
 	type SecurityConfig,
-	type SecurityMode,
-	type SecurityPolicy,
 	type SecurityResultStatus,
 	type SecurityRunManifest,
-	type SecurityToolId,
-	type SecurityToolResult,
 	OSI_APPROVED_SPDX_LICENSES,
 	detectProjectLicense,
 	parseSecurityConfig,
@@ -23,7 +19,6 @@ import {
 	runSecurityScan,
 	securityStatus,
 } from "../src/security-runner";
-import { executeVerifyStep } from "../src/verify-runner";
 
 describe("Security Runner - Task 2 Review Hardening", () => {
 	describe("1. Config Fail-Open & Strict Loading (Finding 1)", () => {

@@ -1,6 +1,6 @@
 ---
 id: security-supply-chain
-version: 1
+version: 2
 layer: L2
 domain: security, supply-chain
 phases: planning, review, qa

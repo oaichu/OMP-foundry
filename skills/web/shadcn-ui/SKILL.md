@@ -1,6 +1,6 @@
 ---
 id: shadcn-ui
-version: 1
+version: 2
 layer: L3
 domain: web, design-system
 phases: implementation, review
