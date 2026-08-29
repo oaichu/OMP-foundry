@@ -23,6 +23,18 @@ function nextApp(options: { componentsJson?: boolean } = {}): string {
 	return dir;
 }
 
+function nonWebApp(): string {
+	const dir = mkdtempSync(join(tmpdir(), "foundry-nonweb-"));
+	writeFileSync(
+		join(dir, "pyproject.toml"),
+		`[project]
+name = "service"
+dependencies = ["fastapi>=0.100.0"]
+`,
+	);
+	return dir;
+}
+
 describe("skill resolver", () => {
 	test("planning gets architecture not nextjs adapter", () => {
 		const ids = resolveSkills(nextApp(), defaultState(), { skillsRoot, role: "planner" });
@@ -39,6 +51,16 @@ describe("skill resolver", () => {
 		expect(ids.length).toBeLessThanOrEqual(12);
 	});
 
+	test("implementation resolves shadcn-ui conditionally when components.json is present", () => {
+		const state = { ...defaultState(), phase: "implementation" as const };
+		const withoutShadcn = resolveSkills(nextApp(), state, { skillsRoot, role: "implementer" });
+		expect(withoutShadcn).not.toContain("shadcn-ui");
+
+		const withShadcn = resolveSkills(nextApp({ componentsJson: true }), state, { skillsRoot, role: "implementer" });
+		expect(withShadcn).toContain("shadcn-ui");
+		expect(withShadcn).toContain("react-engineering");
+	});
+
 	test("design phase resolves the native design intelligence contract and quality pack", () => {
 		const state = { ...defaultState(), phase: "design" as const };
 		const ids = resolveSkills(nextApp(), state, { skillsRoot, role: "designer" });
@@ -52,14 +74,26 @@ describe("skill resolver", () => {
 		expect(ids.length).toBeLessThanOrEqual(12);
 	});
 
-	test("review reuses design quality without reopening design authoring skills", () => {
+	test("review on web app includes web-interface-guidelines and design-quality while suppressing design authoring", () => {
 		const state = { ...defaultState(), phase: "review" as const };
 		const ids = resolveSkills(nextApp(), state, { skillsRoot, role: "reviewer" });
+		expect(ids).toContain("web-interface-guidelines");
 		expect(ids).toContain("design-quality");
 		expect(ids).not.toContain("design-intelligence");
 		expect(ids).not.toContain("design-system-contract");
 		expect(ids).not.toContain("design-foundation");
 		expect(ids.length).toBeLessThanOrEqual(12);
+	});
+
+	test("non-web project excludes shadcn-ui and web-interface-guidelines across roles", () => {
+		const app = nonWebApp();
+		const implIds = resolveSkills(app, { ...defaultState(), phase: "implementation" as const }, { skillsRoot, role: "implementer" });
+		expect(implIds).not.toContain("shadcn-ui");
+		expect(implIds).not.toContain("web-interface-guidelines");
+
+		const reviewIds = resolveSkills(app, { ...defaultState(), phase: "review" as const }, { skillsRoot, role: "reviewer" });
+		expect(reviewIds).not.toContain("shadcn-ui");
+		expect(reviewIds).not.toContain("web-interface-guidelines");
 	});
 
 	test("skillPackPrompt includes precedence contract and ordering labels", () => {

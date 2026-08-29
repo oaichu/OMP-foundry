@@ -7,11 +7,14 @@ import { defaultState } from "../src/types";
 
 const skillsRoot = join(import.meta.dir, "..", "skills");
 
-function fullStackApp(): string {
+function fullStackApp(options: { componentsJson?: boolean } = {}): string {
 	const dir = mkdtempSync(join(tmpdir(), "foundry-router-"));
 	writeFileSync(join(dir, "package.json"), JSON.stringify({ dependencies: { next: "15.0.0", react: "19.0.0", typescript: "5.0.0", "@supabase/supabase-js": "2.0.0" } }));
 	writeFileSync(join(dir, "tsconfig.json"), "{}");
 	writeFileSync(join(dir, "next.config.ts"), "export default {}");
+	if (options.componentsJson) {
+		writeFileSync(join(dir, "components.json"), "{}");
+	}
 	return dir;
 }
 
@@ -25,7 +28,7 @@ describe("Skill Router v2", () => {
 
 	test("strong AATP context suppresses unrelated repo-only frontend adapters", () => {
 		const state = { ...defaultState(), phase: "implementation" as const };
-		const result = resolveSkillRouting(fullStackApp(), state, {
+		const result = resolveSkillRouting(fullStackApp({ componentsJson: true }), state, {
 			skillsRoot,
 			role: "implementer",
 			context: {
@@ -41,6 +44,8 @@ describe("Skill Router v2", () => {
 		expect(ids).not.toContain("nextjs-engineering");
 		expect(ids).not.toContain("react-engineering");
 		expect(ids).not.toContain("web-engineering");
+		expect(ids).not.toContain("shadcn-ui");
+		expect(ids).not.toContain("web-interface-guidelines");
 		const postgres = result.scores.find((row) => row.id === "postgres-engineering");
 		expect(postgres?.selected).toBe(true);
 		expect(postgres?.contextEvidence).toBeGreaterThanOrEqual(14);
@@ -58,8 +63,9 @@ describe("Skill Router v2", () => {
 	test("routing is deterministic and stably ordered", () => {
 		const state = { ...defaultState(), phase: "implementation" as const };
 		const options = { skillsRoot, role: "implementer" as const, context: { objective: "Fix Supabase Postgres RLS", concerns: ["SEC-RLS"], securitySensitive: true } };
-		const first = resolveSkillRouting(fullStackApp(), state, options);
-		const second = resolveSkillRouting(fullStackApp(), state, options);
+		const appDir = fullStackApp({ componentsJson: true });
+		const first = resolveSkillRouting(appDir, state, options);
+		const second = resolveSkillRouting(appDir, state, options);
 		expect(first.skills.map((item) => item.id)).toEqual(second.skills.map((item) => item.id));
 		expect(first.scores.map(({ id, score, selected }) => ({ id, score, selected }))).toEqual(second.scores.map(({ id, score, selected }) => ({ id, score, selected })));
 	});

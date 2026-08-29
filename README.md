@@ -255,6 +255,18 @@ Foundry packages **36+ enterprise engineering skills** without bloating your mod
 - **Tier 3: Thin Catalog Index** — Compact ~150-token catalog header dynamically exposed to the model.
 - **Tier 4: On-Demand Deep Load** — Subagents fetch detailed skill guides on-demand via `foundry_skill_read`.
 
+#### 🎨 Governed Frontend & Design Skill Stack
+
+Foundry incorporates a native, multi-layered frontend and design engineering stack governed by strict lifecycle and task boundaries:
+
+- **Native Design Intelligence & Quality Stack**: The `design-foundation` meta-skill orchestrates `design-intelligence` (style families, deliberate art direction, signature elements), `design-system-contract` (token hierarchies, spacing, typography, motion, accessibility), and `design-quality` (anti-generic heuristic critique, interaction rigor, and visual QA). During design, these authoring skills define `docs/DESIGN.md`; during review and QA, `design-quality` remains active without reopening design authoring contracts.
+- **Conditional `shadcn-ui` Adapter**: The `shadcn-ui` skill (Layer L3) activates strictly when `components.json` is detected in the project and requires `react-engineering`. It enforces project-configured paths, resolved aliases, primitive slot composition, semantic tokens, and keyboard accessibility. In projects without `components.json`, it is suppressed to prevent unnecessary token consumption.
+- **Web-Only Interface Review (`web-interface-guidelines`)**: Dedicated review/QA skill (Layer L1) active exclusively on web stacks (`stacks: web`). It provides terse, high-signal reviews with exact `file:line` anchors focusing on semantic HTML, keyboard focus, responsive layout, and web performance.
+- **Source Attribution & No-Vendoring Policy**: All skills are original, self-contained Foundry control-plane distillations inspired by upstream research (`anthropics/skills`, `shadcn-ui/ui`, `vercel-labs/agent-skills`, `nextlevelbuilder/ui-ux-pro-max-skill`, `pbakaus/impeccable`, `ibelick/ui-skills`). Upstream repositories and remote prompt corpora are **never vendored, auto-synced, or treated as runtime dependencies**. Fresh official documentation is fetched on-demand during live execution when currency matters.
+- **Governance Precedence**: Aesthetic and design suggestions are strictly subordinate to functional correctness and system boundaries. The resolution contract enforces:
+  $$\text{Foundry governance / scope} > \text{functional correctness / security} > \text{accessibility / semantic interaction} > \text{framework / component contracts} > \text{web interface quality} > \text{visual art direction}$$
+  A skill cannot override locked artifacts (`MASTER_PLAN.md`, `DESIGN.md`), AATP task scope boundaries, security policies, or component contracts.
+
 ---
 
 ## ⌨️ Complete Command Reference
