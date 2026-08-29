@@ -13,18 +13,27 @@ description: "Plan fixed-argv security scans and preserve explicit tool, coverag
 
 # security-scanners
 
-Plan and execute security tool scans using deterministic fixed-argv invocations. Redact sensitive output, preserve structured SARIF reports, and explicitly account for scanner limitations.
+Plan scanner evaluation and adjudicate security tool evidence. Governed workers (reviewer, QA) operate shell-free and read-only; scanner execution and artifact persistence remain parent-extension-owned through the `/security` runner.
 
-## Scanner Execution Standards
+## Reviewer & QA Role Boundaries
 
-1. **Fixed Argv Invocations**: Use discrete argument arrays directly when launching security scanners (Semgrep, Gitleaks, Trivy, CodeQL). Never interpolate arguments into shell strings or execute via `sh -c` / `cmd.exe` intermediaries.
-2. **Output Redaction**: Sanitize scanner outputs, stdout/stderr streams, and execution logs to redact sensitive secrets, API keys, tokens, and credentials before persisting or sharing artifacts.
-3. **SARIF & Evidence Preservation**: Generate and preserve SARIF (Static Analysis Results Interchange Format) outputs whenever supported. Retain tool metadata, rule IDs, physical locations, error levels, and coverage metrics.
-4. **Exit-State Interpretation**: Distinguish tool failures (configuration syntax errors, missing dependencies, crash exit codes) from security finding alerts. Interpret scanner exit codes according to each tool's documented semantics.
+- **Evidence Adjudication Only**: Reviewers and QA never launch scanners, spawn shell commands, write SARIF files, persist execution artifacts, or bypass AATP work orders.
+- **Parent Runner Interaction**: Request and interpret evidence produced by the parent-owned `/security` runner. Ensure all analyzed outputs are properly redacted.
+- **Explicit Non-Pass States**:
+  - `UNASSESSED`: Missing parent execution or absent runner artifacts must be flagged as explicit non-pass/unassessed states rather than assumed secure.
+  - `PARTIAL_COVERAGE`: Incomplete scanner runs or unanalyzed changed files must be documented as explicit coverage gaps.
+  - `TOOL_ERROR`: Tool crashes, configuration failures, or missing scanner rules are tool errors (non-pass), not security findings or clean bills of health.
+
+## Evidence Adjudication Standards
+
+1. **Fixed-Argv Verification**: Verify that scanner runs configured by the parent runner used deterministic fixed-argv parameter arrays without shell intermediaries (`sh -c` / `cmd.exe`).
+2. **Redacted Artifacts**: Confirm scanner outputs, logs, and findings have sensitive tokens, credentials, and PII redacted before evidence persistence.
+3. **SARIF Evaluation**: Adjudicate structured SARIF evidence, verifying rule IDs, severities, physical source locations, and tool coverage metadata.
+4. **Exit-State Evaluation**: Distinguish execution-level errors from security findings according to each tool's documented exit codes.
 
 ## Tool Boundaries & Limitations
 
-- **Semgrep**: Excels at AST-based pattern matching and intra-file rules; does not perform whole-program inter-procedural data-flow or pointer analysis across complex boundaries.
-- **CodeQL**: Deep inter-procedural query analysis requires successful code compilation and extractors; cannot analyze uncompiled source states or dynamically generated runtime structures.
-- **Gitleaks**: High-accuracy regex and entropy secret detection; may produce false positives on test fixtures or fail to detect complex split-token assembly.
-- **Trivy**: Comprehensive vulnerability and misconfiguration scanning; requires up-to-date vulnerability databases and depends on lockfile completeness.
+- **Semgrep**: Excels at AST pattern matching and intra-file rules; does not perform whole-program inter-procedural data-flow or pointer analysis across complex component boundaries.
+- **CodeQL**: Deep inter-procedural query analysis requires a compatible, successfully extracted database and configured query suite. Coverage depends on the language, extractor, and build mode (supported no-build analysis exists for some languages, while compiled languages require extraction during build). Cannot analyze dynamic runtime behavior or generated code not captured in the extracted database.
+- **Gitleaks**: High-accuracy regex and entropy secret detection; may flag test fixtures as false positives or miss split-token / dynamic credential assembly.
+- **Trivy**: Vulnerability and misconfiguration scanning depends on vulnerability database freshness and complete lockfile synchronization.

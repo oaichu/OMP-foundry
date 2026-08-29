@@ -91,4 +91,31 @@ describe("native security control-plane skills", () => {
 		expect(sources).toContain("Trivy");
 		expect(sources).toContain("CodeQL");
 	});
+
+	test("finding verification enforces proof thresholds and strict disposition mappings", () => {
+		const findingVerif = byId.get("security-finding-verification");
+		expect(findingVerif).toBeDefined();
+		const body = findingVerif?.body ?? "";
+		expect(body).toContain("TRUE_POSITIVE");
+		expect(body).toContain("FALSE_POSITIVE");
+		expect(body).toContain("NEEDS-MORE-INFO");
+		expect(body).toContain("ACCEPT");
+		expect(body).toContain("DISMISS");
+		expect(body).toContain("proof threshold");
+		expect(body).toContain("False positives must never be accepted");
+		expect(body).toContain("never be silently dismissed");
+	});
+
+	test("scanners skill enforces evidence adjudication, non-pass states, and accurate tool boundaries", () => {
+		const scanners = byId.get("security-scanners");
+		expect(scanners).toBeDefined();
+		const body = scanners?.body ?? "";
+		expect(body).toContain("adjudicate");
+		expect(body).toContain("/security");
+		expect(body).toContain("UNASSESSED");
+		expect(body).toContain("PARTIAL_COVERAGE");
+		expect(body).toContain("TOOL_ERROR");
+		expect(body).toContain("extracted database");
+		expect(body).toContain("no-build");
+	});
 });
