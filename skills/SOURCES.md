@@ -15,4 +15,4 @@ Policy:
 
 - `anthropics/skills` (Apache-2.0): Frontend Design art direction, subject-grounded intent, typography/layout/signature choices, and two-pass critique.
 - `shadcn-ui/ui` (MIT): component composition, registry patterns, and semantic token conventions.
-- `vercel-labs/agent-skills` (Apache-2.0): Web Interface Guidelines review formatting, interaction contracts, and live rule retrieval pattern.
+- `vercel-labs/agent-skills`: Web Interface Guidelines review formatting, interaction contracts, and live rule retrieval pattern.
