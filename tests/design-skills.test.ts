@@ -35,6 +35,20 @@ describe("native design intelligence pack", () => {
 		]) expect(body).toContain(style);
 	});
 
+	test("art direction contract requires concrete subject, palette, and critique", () => {
+		const body = byId.get("design-intelligence")?.body ?? "";
+		for (const term of [
+			"subject",
+			"audience",
+			"single job",
+			"4–6",
+			"signature",
+			"generic",
+			"reduced-motion",
+			"keyboard focus",
+		]) expect(body).toContain(term);
+	});
+
 	test("design contract template carries implementation-grade design evidence", () => {
 		const template = readFileSync(join(root, "templates", "DESIGN.md"), "utf8");
 		for (const section of [
@@ -48,7 +62,29 @@ describe("native design intelligence pack", () => {
 			"## Motion",
 			"## Design QA",
 			"## Preview verification",
+			"Hero thesis",
+			"Signature element",
+			"Genericity critique",
 		]) expect(template).toContain(section);
+	});
+
+	test("provenance records external frontend design research without vendoring", () => {
+		const designSources = readFileSync(
+			join(root, "skills", "design", "SOURCES.md"),
+			"utf8",
+		);
+		const rootSources = readFileSync(
+			join(root, "skills", "SOURCES.md"),
+			"utf8",
+		);
+		for (const source of [
+			"anthropics/skills",
+			"shadcn-ui/ui",
+			"vercel-labs/agent-skills",
+		]) {
+			expect(designSources).toContain(source);
+			expect(rootSources).toContain(source);
+		}
 	});
 
 	test("quality skill is available to design review and qa roles", () => {

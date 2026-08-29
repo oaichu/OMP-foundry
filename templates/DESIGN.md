@@ -8,7 +8,10 @@ status: DRAFT
 ## Design intent
 
 - Product promise:
+- Concrete subject:
 - Primary users:
+- Single job:
+- Hero thesis:
 - Platforms:
 - Constraints inherited from `docs/MASTER_PLAN.md`:
 - Success criteria:
@@ -18,11 +21,15 @@ status: DRAFT
 - Primary style:
 - Supporting layout grammar (optional):
 - Why this fits the product/users/platform:
+- Layout concept:
+- Signature element:
+- Compact palette (4–6 core colors):
+- Typography roles (display / body / utility):
 - Density and hierarchy:
 - Material/depth model:
 - Motion character:
+- Genericity critique:
 - Forbidden treatments / anti-patterns:
-
 > Use one primary visual language by default. Bento Grid may be a supporting layout grammar. Do not treat Liquid Glass as a synonym for Glassmorphism, or Spatial UI as blur-only styling.
 
 ## Information architecture
