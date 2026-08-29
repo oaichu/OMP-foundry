@@ -16,3 +16,18 @@ Policy:
 - `anthropics/skills` (Apache-2.0): Frontend Design art direction, subject-grounded intent, typography/layout/signature choices, and two-pass critique.
 - `shadcn-ui/ui` (MIT): component composition, registry patterns, and semantic token conventions.
 - `vercel-labs/agent-skills`: Web Interface Guidelines review formatting, interaction contracts, and live rule retrieval pattern.
+
+## Reviewed security research inputs
+
+- `trailofbits/skills` (https://github.com/trailofbits/skills, CC-BY-SA-4.0): Security testing methodologies, finding verification patterns, differential review concepts, and triage protocols. Research and sidecar input only; no text or rules vendored.
+- `JeremyMorgan/code-review-skills` (https://github.com/JeremyMorgan/code-review-skills, CC0-1.0): Static review checklists, risk-first change review patterns, and reviewer prompt guidance.
+- `sabakan0123/claude-security-skills` (https://github.com/sabakan0123/claude-security-skills, unresolved license): Public repository reviewed for security analysis catalog ideas; due to unresolved license status, no code, text, or rules are copied or vendored. Used solely as an external research reference.
+
+## Official security tooling sources
+
+- Semgrep (`https://github.com/semgrep/semgrep`, LGPL-2.1 / proprietary): AST-based static analysis patterns and SARIF integration standards.
+- Gitleaks (`https://github.com/gitleaks/gitleaks`, MIT): Secret detection patterns, entropy scanning, and redaction protocols.
+- Trivy (`https://github.com/aquasecurity/trivy`, Apache-2.0): Vulnerability database matching, lockfile SBOM inspection, and misconfiguration scanning.
+- CodeQL (`https://github.com/github/codeql`, MIT / proprietary engine): Inter-procedural data flow modeling and SARIF report structure.
+
+All security tooling links and research inputs represent design references and sidecar tools, not runtime dependencies or vendored corpora. Foundry enforces a strict no-vendoring policy for all control-plane skills.
