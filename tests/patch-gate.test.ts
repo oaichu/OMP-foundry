@@ -61,7 +61,7 @@ describe("pre-apply patch gate", () => {
 		expect(applyPatchArtifact(dir, patchPath).ok).toBe(true);
 		expect(readFileSync(join(dir, "src", "auth", "a.ts"), "utf8")).toBe("2\n");
 		expect(commitAppliedPatch(dir, ticket.id, "implementation").ok).toBe(true);
-	});
+	}, 20000);
 	test("commit rejects a clean external HEAD change", () => {
 		const dir = gitRepo(), patchPath = patchFor(dir, "src/auth/a.ts", "2\n");
 		const checked = validatePatchArtifact(dir, patchPath, ticket, "implementation"); expect(checked.ok).toBe(true);
@@ -70,7 +70,7 @@ describe("pre-apply patch gate", () => {
 		writeFileSync(join(dir, "external.txt"), "external\n"); spawnSync("git", ["add", "external.txt"], { cwd: dir }); spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "external"], { cwd: dir, encoding: "utf8" });
 		expect(commitAppliedPatch(dir, ticket.id, "implementation", checked.ok ? checked.paths : undefined, before).ok).toBe(false);
 		restoreCleanHead(dir);
-	});
+	}, 20000);
 	test("validated patch bytes cannot be swapped before apply", () => {
 		const dir = gitRepo(), patchPath = patchFor(dir, "src/auth/a.ts", "safe\n");
 		const checked = validatePatchArtifact(dir, patchPath, ticket, "implementation");

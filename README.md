@@ -43,13 +43,14 @@ Version `0.8.23` ships the production **P0 Governance & Distribution Layer**:
 
 - 🔄 **Full 8-Phase Lifecycle**: Product → Plan → Design → AATP → Build → Review → Verify → Release.
 - 🏛️ **3-Stage Adversarial Planning**: Draft (`plan-drafter`) → Redteam (`plan-redteam`) → Synth (`plan-synth`) with human plan locking.
-- 🔐 **Cryptographic Evidence**: SHA-256 hashes generated and verified across Product, Plan, Design, AATP, Review, and QA artifacts.
+- 🎨 **Governed Frontend UI/UX Stack**: Art Direction (`design-intelligence`), Component & Token governance (`shadcn-ui`), Web Interface Audit (`web-interface-guidelines`), and 6-tier prompt precedence.
+- 🔒 **Governed Security Engine**: 4 native security control-plane skills (`security-review`, `security-finding-verification`, `security-supply-chain`, `security-scanners`), `/security` CLI suite, deterministic SARIF 2.1.0 merging, and commit-bound release gating.
+- 🔐 **Cryptographic Evidence**: SHA-256 hashes generated and verified across Product, Plan, Design, AATP, Review, QA, and Security artifacts.
 - 📋 **Strict AATP Task Boundaries**: Enforced dependency DAG, overlap checks, path canonicalization, max 5 allowed files, and max 200 declared lines.
 - 🛡️ **Parent-Owned Patch Gate**: Workers output patches; the parent extension strictly validates, applies, runs tests, and commits atomically.
 - 🚫 **Fail-Closed Governance**: Prevents mutation of governance artifacts, blocks unsafe bash/LSP operations, and sanitizes Git operations.
 - 🧠 **Dynamic Risk Routing**: Low-risk work executes on `smol-implementer`; retries and critical tasks auto-escalate to `hard-implementer`.
 - 📦 **NPM Registry Distribution**: Official npm packaging with GitHub Actions automated releases and verifiable npm provenance.
-
 > [!NOTE]
 > *Future Scope:* The Fast/Lite/Full router, real-time cost ledger, and `/foundry-stats` command are defined in the architecture specification and will be delivered in upcoming release cycles.
 
@@ -303,7 +304,7 @@ Foundry concentrates expensive reasoning models at architectural boundaries and 
 
 ### 🧠 4-Tier Just-In-Time (JIT) Skill Catalog
 
-Foundry packages **36+ enterprise engineering skills** without bloating your model's context window:
+Foundry packages **41+ enterprise engineering skills** without bloating your model's context window:
 
 <p align="center">
   <img src="docs/assets/jit-catalog.svg" width="100%" alt="4-Tier JIT Skill Catalog"/>
@@ -428,10 +429,13 @@ The workflow builds, tests, and publishes the package to public npm with verifia
 
 ## 📚 Architecture Documents
 
-- 📐 **Design Specification**: [`docs/superpowers/specs/2026-08-26-foundry-3-mode-design.md`](docs/superpowers/specs/2026-08-26-foundry-3-mode-design.md)
-- 🎯 **Current P0 Implementation Plan**: [`docs/superpowers/plans/2026-08-26-foundry-p0-hotfixes-npm.md`](docs/superpowers/plans/2026-08-26-foundry-p0-hotfixes-npm.md)
+- 📐 **3-Mode Architecture Specification**: [`docs/superpowers/specs/2026-08-26-foundry-3-mode-design.md`](docs/superpowers/specs/2026-08-26-foundry-3-mode-design.md)
+- 🎨 **Frontend UI Skill Stack Specification**: [`docs/superpowers/specs/2026-08-29-frontend-skill-stack-design.md`](docs/superpowers/specs/2026-08-29-frontend-skill-stack-design.md)
+- 🔒 **Governed Security Tooling Specification**: [`docs/superpowers/specs/2026-08-29-security-tooling-design.md`](docs/superpowers/specs/2026-08-29-security-tooling-design.md)
+- 🎯 **P0 Hotfixes & NPM Distribution Plan**: [`docs/superpowers/plans/2026-08-26-foundry-p0-hotfixes-npm.md`](docs/superpowers/plans/2026-08-26-foundry-p0-hotfixes-npm.md)
+- 🎯 **Frontend UI Skill Stack Implementation Plan**: [`docs/superpowers/plans/2026-08-29-frontend-skill-stack-integration.md`](docs/superpowers/plans/2026-08-29-frontend-skill-stack-integration.md)
+- 🎯 **Governed Security Tooling Implementation Plan**: [`docs/superpowers/plans/2026-08-29-security-tooling-integration.md`](docs/superpowers/plans/2026-08-29-security-tooling-integration.md)
 - 📜 **Full Version History**: [`CHANGELOG.md`](CHANGELOG.md)
-
 ---
 
 ## 💖 Back the Project
