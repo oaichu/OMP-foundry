@@ -84,7 +84,7 @@ function looksWindowsUi(cwd: string, csproj: string[]): boolean {
 export function detectRepo(cwd: string): RepoFacts {
 	const dependencies = pkgDeps(cwd);
 	const has = (id: string) => dependencies.includes(id) || dependencies.some((d) => d.endsWith(`/${id}`));
-	const files = present(cwd, ["package.json", "tsconfig.json", "next.config.js", "next.config.mjs", "next.config.ts", "vite.config.ts", "nuxt.config.ts", "svelte.config.js", "wrangler.toml", "wrangler.jsonc", "pyproject.toml", "requirements.txt", "go.mod", "go.work", "Cargo.toml", "settings.gradle", "settings.gradle.kts", "pubspec.yaml", "Podfile"]);
+	const files = present(cwd, ["package.json", "tsconfig.json", "components.json", "next.config.js", "next.config.mjs", "next.config.ts", "vite.config.ts", "nuxt.config.ts", "svelte.config.js", "wrangler.toml", "wrangler.jsonc", "pyproject.toml", "requirements.txt", "go.mod", "go.work", "Cargo.toml", "settings.gradle", "settings.gradle.kts", "pubspec.yaml", "Podfile"]);
 	const csproj = projectFiles(cwd, ".csproj"), sln = rootEntries(cwd).filter((e) => e.toLowerCase().endsWith(".sln"));
 	if (csproj.length) files.push("*.csproj");
 	if (sln.length) files.push("*.sln");

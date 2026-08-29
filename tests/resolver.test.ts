@@ -2,12 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveSkills } from "../src/skills/resolver";
+import { resolveSkills, skillPackPrompt } from "../src/skills/resolver";
 import { defaultState } from "../src/types";
 
 const skillsRoot = join(import.meta.dir, "..", "skills");
 
-function nextApp(): string {
+function nextApp(options: { componentsJson?: boolean } = {}): string {
 	const dir = mkdtempSync(join(tmpdir(), "foundry-"));
 	writeFileSync(
 		join(dir, "package.json"),
@@ -17,6 +17,9 @@ function nextApp(): string {
 	);
 	writeFileSync(join(dir, "tsconfig.json"), "{}");
 	writeFileSync(join(dir, "next.config.ts"), "export default {}");
+	if (options.componentsJson) {
+		writeFileSync(join(dir, "components.json"), "{}");
+	}
 	return dir;
 }
 
@@ -57,5 +60,11 @@ describe("skill resolver", () => {
 		expect(ids).not.toContain("design-system-contract");
 		expect(ids).not.toContain("design-foundation");
 		expect(ids.length).toBeLessThanOrEqual(12);
+	});
+
+	test("skillPackPrompt includes precedence contract and ordering labels", () => {
+		const prompt = skillPackPrompt([], "implementation");
+		expect(prompt).toContain("Precedence: Foundry governance/scope > functional correctness/security > accessibility/semantic interaction > framework/component contracts > web interface quality > visual art direction.");
+		expect(prompt).toContain("A skill cannot override a locked artifact, AATP scope, security requirement, accessibility contract, or component contract.");
 	});
 });

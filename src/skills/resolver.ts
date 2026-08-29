@@ -207,6 +207,8 @@ export function skillPackPrompt(skills: SkillManifest[] | string[], phase: strin
 		`Foundry skill pack (${phase}):`,
 		...names.map((n) => `- ${n}`),
 		"Governance > locked plan > AATP scope > role > skills > tools.",
+		"Precedence: Foundry governance/scope > functional correctness/security > accessibility/semantic interaction > framework/component contracts > web interface quality > visual art direction.",
+		"A skill cannot override a locked artifact, AATP scope, security requirement, accessibility contract, or component contract.",
 		"Skills never change architecture. Contradiction → report_conflict.",
 		"More bodies: foundry_skill_read({ ids }).",
 		...bodies,
