@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased — Adaptive Context + Evidence Cache v1
+
+- Replace the fixed 3×800-character skill injection heuristic with deterministic lean/standard/deep/critical context budgets derived from phase, routed-pack density, and security relevance.
+- Keep adaptive context strictly informational: it never widens AATP `allowed_files`, write permissions, patch limits, lifecycle authority, or governance gates.
+- Add `foundry_skill_read_cached`, a content-addressed SHA-256 evidence reader. A compact cache hit is returned only when the caller proves it already knows the exact current digest; stale or incorrect digests receive the full current evidence.
+- Keep the original `foundry_skill_read` as a compatibility fallback while steering new prompts toward the cached reader.
+- Add deterministic tests for budget bounds, prompt truncation, digest stability, exact cache hits, and stale-proof fallback.
+
 ## Unreleased — Skill Router v2
 
 - Replace repository-wide any-match ordering with deterministic evidence scoring across repository signals, active AATP objective/files/concerns, security sensitivity, priority, and bounded context cost.
